@@ -28,6 +28,24 @@
       },
       // 後ろを素早く2回：バックステップ
       backDash: { frames: 14, speed: 4.5, recovery: 6 }, // 約63ピクセル下がる
+      health: 1000, // 体力
+      // 技の表。時間はフレーム（1F＝1/60秒）。
+      //   startup: 発生（ボタンを押したフレームを1として、何F目に当たり始めるか）
+      //   active: 当たる時間の長さ（F）
+      //   recovery: 硬直（当たる時間が終わってから動けるまで）。空中攻撃は null＝着地まで
+      //   hitAdv / blockAdv: 硬直差（当たった／ガードされたあと、攻めた側が何F先に動けるか）。"down" はダウンさせる
+      //   damage: ダメージ
+      //   guard: "mid"＝立ち・しゃがみどちらでも防げる、"low"＝しゃがみガードだけ、"air"＝立ちガードだけ
+      //   hitbox: 当たる範囲（ピクセル）。x は体の中心から前へ、y は足元から上へ（マイナスは足元より下）
+      //   push: 当たった・ガードされたときに相手を押し返す距離（ピクセル）
+      moves: {
+        standLight: { name: "柄打ち", startup: 6, active: 2, recovery: 10, hitAdv: 3, blockAdv: 1, damage: 40, guard: "mid", hitbox: { x1: 15, x2: 78, y1: 75, y2: 135 }, push: 18 },
+        standHeavy: { name: "大振り斬り", startup: 12, active: 3, recovery: 20, hitAdv: 2, blockAdv: -4, damage: 100, guard: "mid", hitbox: { x1: 25, x2: 150, y1: 55, y2: 150 }, push: 28 },
+        crouchLight: { name: "足元突き", startup: 7, active: 2, recovery: 11, hitAdv: 2, blockAdv: 0, damage: 35, guard: "low", hitbox: { x1: 20, x2: 112, y1: 0, y2: 40 }, push: 18 },
+        crouchHeavy: { name: "足払い斬り", startup: 14, active: 3, recovery: 24, hitAdv: "down", blockAdv: -10, damage: 90, guard: "low", hitbox: { x1: 20, x2: 132, y1: 0, y2: 35 }, push: 24 },
+        airLight: { name: "空中攻撃（弱）", startup: 7, active: 6, recovery: null, hitAdv: 8, blockAdv: 3, damage: 35, guard: "air", hitbox: { x1: 0, x2: 72, y1: -35, y2: 55 }, push: 10 },
+        airHeavy: { name: "空中攻撃（強）", startup: 11, active: 6, recovery: null, hitAdv: 10, blockAdv: 4, damage: 85, guard: "air", hitbox: { x1: -5, x2: 95, y1: -50, y2: 50 }, push: 14 },
+      },
     },
     rin: {
       name: "リン",
@@ -49,13 +67,36 @@
         recovery: 6, // 離してから止まるまでのブレーキ（フレーム）
       },
       backDash: { frames: 12, speed: 5, recovery: 4 }, // 約60ピクセル下がる
+      health: 900,
+      moves: {
+        standLight: { name: "ジャブ", startup: 4, active: 2, recovery: 8, hitAdv: 4, blockAdv: 2, damage: 30, guard: "mid", hitbox: { x1: 15, x2: 68, y1: 70, y2: 112 }, push: 16 },
+        standHeavy: { name: "回し蹴り", startup: 9, active: 3, recovery: 16, hitAdv: 3, blockAdv: -2, damage: 80, guard: "mid", hitbox: { x1: 15, x2: 98, y1: 60, y2: 125 }, push: 26 },
+        crouchLight: { name: "小足", startup: 4, active: 2, recovery: 9, hitAdv: 3, blockAdv: 1, damage: 25, guard: "low", hitbox: { x1: 15, x2: 78, y1: 0, y2: 30 }, push: 16 },
+        crouchHeavy: { name: "足払い", startup: 10, active: 3, recovery: 20, hitAdv: "down", blockAdv: -8, damage: 70, guard: "low", hitbox: { x1: 15, x2: 98, y1: 0, y2: 30 }, push: 22 },
+        airLight: { name: "空中攻撃（弱）", startup: 5, active: 6, recovery: null, hitAdv: 7, blockAdv: 2, damage: 25, guard: "air", hitbox: { x1: 0, x2: 58, y1: -30, y2: 50 }, push: 10 },
+        airHeavy: { name: "空中攻撃（強）", startup: 9, active: 6, recovery: null, hitAdv: 9, blockAdv: 3, damage: 70, guard: "air", hitbox: { x1: -5, x2: 78, y1: -40, y2: 45 }, push: 14 },
+      },
     },
   };
 
   // 方向キーを2回押したとみなす間隔（1回目を押してから何フレーム以内に2回目を押すか）
   const DOUBLE_TAP_WINDOW = 12;
 
+  // 攻撃ボタンを少し早く押しても出るよう、押したことを覚えておく時間（フレーム）
+  const ATTACK_BUFFER = 5;
+
+  // 共通の戦闘ルールの数値
+  const BATTLE = {
+    roundSeconds: 60, // 1ラウンドの時間（秒）
+    winsToMatch: 2, // 何ラウンド先取で勝ちか
+    hitstopHit: 8, // 当たった瞬間に止まる時間（F）
+    hitstopBlock: 5, // ガードした瞬間に止まる時間（F）
+    downFrames: 50, // ダウンしてから起き上がるまで（F、この間は攻撃が当たらない）
+    introFrames: 100, // ラウンド開始の表示の時間（F）
+    roundEndFrames: 150, // KO・時間切れの表示の時間（F）
+  };
+
   const IDS = Object.keys(CHARACTERS);
 
-  SF.characters = { CHARACTERS, IDS, DOUBLE_TAP_WINDOW };
+  SF.characters = { CHARACTERS, IDS, DOUBLE_TAP_WINDOW, ATTACK_BUFFER, BATTLE };
 })(globalThis);

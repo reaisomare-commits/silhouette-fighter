@@ -7,17 +7,29 @@
   const MAX_STEPS_PER_DRAW = 5; // 重くなっても一度に進めすぎない
 
   const seed = (Date.now() & 0x7fffffff) >>> 0;
-  const state = SF.game.createGame(seed);
+  let chars = ["kagetsu", "rin"];
+  let state = SF.game.createGame(seed, chars);
   const keyboard = SF.keyboard.createKeyboard(root);
   const renderer = SF.renderer.createRenderer(document.getElementById("screen"));
+  // 右の相手は仮の練習相手が動かす（CPUは制作順5で作る）
+  const dummy = SF.dummy.createDummy();
+  let showBoxes = false;
 
-  // キャラ選択画面ができるまでの仮の切り替え：1キーでカゲツ、2キーでリン。
-  // 右の相手は、選ばなかった方のキャラになる
+  function newMatch() {
+    state = SF.game.createGame(seed, chars);
+  }
+
   root.addEventListener("keydown", (e) => {
+    // キャラ選択画面ができるまでの仮の切り替え：1キーでカゲツ、2キーでリン。
+    // 右の相手は、選ばなかった方のキャラになる。切り替えると試合を最初から始める
     const pick = { Digit1: "kagetsu", Digit2: "rin", Numpad1: "kagetsu", Numpad2: "rin" }[e.code];
-    if (!pick) return;
-    SF.game.setCharacter(state, 0, pick);
-    SF.game.setCharacter(state, 1, pick === "kagetsu" ? "rin" : "kagetsu");
+    if (pick) {
+      chars = [pick, pick === "kagetsu" ? "rin" : "kagetsu"];
+      newMatch();
+    }
+    if (e.code === "Digit3" || e.code === "Numpad3") SF.dummy.nextMode(dummy);
+    if (e.code === "KeyH") showBoxes = !showBoxes;
+    if (e.code === "Enter" && state.round.phase === SF.game.PHASE.MATCH_END) newMatch();
   });
 
   let lastTime = performance.now();
@@ -28,7 +40,7 @@
   let updates = 0;
   let draws = 0;
   let counterStart = lastTime;
-  const info = { updatesPerSec: 0, drawsPerSec: 0, input: 0, seed };
+  const info = { updatesPerSec: 0, drawsPerSec: 0, input: 0, seed, dummyLabel: "", showBoxes };
 
   function frame(now) {
     accumulator += now - lastTime;
@@ -37,8 +49,7 @@
     let steps = 0;
     while (accumulator >= STEP_MS && steps < MAX_STEPS_PER_DRAW) {
       input = keyboard.read();
-      // 右のプレイヤーはまだ動かない（CPUは制作順5で作る）
-      SF.game.step(state, [input, SF.input.NONE]);
+      SF.game.step(state, [input, SF.dummy.input(dummy, state, 1)]);
       accumulator -= STEP_MS;
       steps++;
       updates++;
@@ -56,6 +67,8 @@
     }
 
     info.input = input;
+    info.dummyLabel = SF.dummy.MODES[dummy.mode].label;
+    info.showBoxes = showBoxes;
     renderer.draw(state, info);
     requestAnimationFrame(frame);
   }
