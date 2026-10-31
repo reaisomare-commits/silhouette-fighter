@@ -568,6 +568,299 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 22) {
   console.log(`OK 練習相手: ガードする・攻撃してくる（15秒で${CH.rin.health - at.fighters[0].health}ダメージ）`);
 }
 
+// 5. 必殺技・キャンセル・連続技・コンボ補正・投げ
+const O = BUTTON.SPECIAL;
+const BT = SF.characters.BATTLE;
+
+// 必殺技を当てて（ガードさせて）硬直差・ダメージ・削りを測る。gap は2人の間の距離
+function measureSpecial(att, def, name, blocking, gap = 70) {
+  const m = CH[att].moves[name];
+  const st = closeGame(att, def, gap);
+  const [a, b] = st.fighters;
+  const guard = blocking ? BUTTON.RIGHT : 0;
+  const hp0 = b.health;
+  let hitAt = -1;
+  let result = null;
+  let damage = 0;
+  let sa = -1;
+  let sb = -1;
+  for (let i = 0; i < 200; i++) {
+    const after = hitAt >= 0;
+    if (after) {
+      a.prevInput &= ~BUTTON.JUMP;
+      b.prevInput &= ~BUTTON.JUMP;
+    }
+    const inA = after ? BUTTON.JUMP : (i === 0 ? O : 0) | (name === "crouchSpecial" ? D : 0);
+    // ガードは当たる直前から（早くから後ろを押すと歩いて下がり、距離が変わってしまうため）
+    const nearHit = i >= m.startup - 2 && (a.move || st.projectiles.length);
+    const inB = (after ? BUTTON.JUMP : 0) | (!after && nearHit ? guard : 0) | (after && b.pose === POSE.BLOCK ? guard : 0);
+    SF.game.step(st, [inA, inB]);
+    if (!after && (b.pose === POSE.HIT || b.pose === POSE.BLOCK || b.pose === POSE.DOWN)) {
+      hitAt = i;
+      result = b.pose;
+      damage = hp0 - b.health;
+      a.buffer = null;
+      b.buffer = null;
+    } else if (after) {
+      if (sa < 0 && !a.onGround) sa = i;
+      if (sb < 0 && !b.onGround) sb = i;
+    }
+  }
+  assert.ok(hitAt >= 0, `${CH[att].name}の${m.name}が当たらない`);
+  return { hitAt, result, damage, adv: sb - sa };
+}
+
+for (const att of ["kagetsu", "rin"]) {
+  const def = att === "kagetsu" ? "rin" : "kagetsu";
+  const lines = [];
+  for (const name of ["special", "crouchSpecial"]) {
+    const m = CH[att].moves[name];
+    const hit = measureSpecial(att, def, name, false);
+    const block = measureSpecial(att, def, name, true);
+    assert.strictEqual(hit.hitAt + 1, m.startup, `${m.name}の発生が違う`);
+    assert.strictEqual(hit.damage, m.damage, `${m.name}のダメージが違う`);
+    if (m.hitAdv === "down") assert.strictEqual(hit.result, POSE.DOWN, `${m.name}はダウンするはず`);
+    else assert.strictEqual(hit.adv, m.hitAdv, `${m.name}のヒット時の硬直差が違う`);
+    assert.strictEqual(block.result, POSE.BLOCK, `${m.name}をガードできるはず`);
+    assert.strictEqual(block.adv, m.blockAdv, `${m.name}のガード時の硬直差が違う`);
+    assert.strictEqual(block.damage, Math.floor(m.damage / 10), `${m.name}の削りダメージが違う`);
+    lines.push(`${m.name} 発生${m.startup}F ${m.hitAdv === "down" ? "ダウン" : "+" + hit.adv}/${block.adv} 削り${block.damage}`);
+  }
+  console.log(`OK 必殺技 ${CH[att].name}: ${lines.join("、")}`);
+}
+
+// 飛刃：離れて当てるほど有利。画面に1つまで
+{
+  const near = measureSpecial("kagetsu", "rin", "special", true);
+  const far = measureSpecial("kagetsu", "rin", "special", true, 350);
+  assert.ok(far.adv > near.adv, "飛刃は離れて当てるほど有利なはず");
+  const st = newGame(1, ["kagetsu", "rin"]);
+  st.fighters[0].x = 100 * S;
+  st.fighters[1].x = 900 * S;
+  const tot = CH.kagetsu.moves.special.startup - 1 + CH.kagetsu.moves.special.active + CH.kagetsu.moves.special.recovery;
+  let second = false;
+  for (let i = 0; i < tot + 10; i++) {
+    SF.game.step(st, [i === 0 || i === tot + 2 ? O : 0, 0]);
+    if (i > tot && st.fighters[0].move === "special") second = true;
+  }
+  assert.strictEqual(st.projectiles.length, 1, "飛刃は画面に1つまで");
+  assert.ok(!second, "飛刃が画面にあるときは2発目が出ないはず");
+  console.log(`OK 飛刃: 目の前でガードさせて${near.adv}、離れてガードさせて${far.adv}。画面に1つまで`);
+}
+
+// 連続技を入れて、合計ダメージと「途中で相手が動けなかったか」を調べる。
+// steps は [技の名前, 次に押すボタン] の並び。前の技が当たったら次のボタンを押す
+function combo(att, def, first, steps, gap = 60, guard = 0) {
+  const st = closeGame(att, def, gap);
+  const [a, b] = st.fighters;
+  const hp0 = b.health;
+  let k = 0;
+  let started = false;
+  let maxHits = 0;
+  const used = [];
+  let held = first & D; // しゃがみ（S）は押したままにする
+  let ready = false;
+  for (let i = 0; i < 150; i++) {
+    let inA = (i === 0 ? first : 0) | held;
+    // 前のボタンで出た技が当たってから、次のボタンを押す
+    if (ready && k < steps.length && a.move === steps[k][0] && a.moveHit) {
+      inA = steps[k][1];
+      held = steps[k][1] & D;
+      a.prevInput &= D;
+      k++;
+      ready = false;
+    }
+    SF.game.step(st, [inA, guard]);
+    if (a.move && a.moveFrame === 1) {
+      used.push(a.move);
+      ready = true;
+    }
+    if (b.health < hp0) started = true;
+    if (st.comboInfo[0]) maxHits = Math.max(maxHits, st.comboInfo[0].hits);
+  }
+  return { damage: hp0 - b.health, hits: maxHits, used, b, st };
+}
+{
+  const r1 = combo("kagetsu", "rin", I, [["standHeavy", D | O]], 80);
+  assert.deepStrictEqual(r1.used, ["standHeavy", "crouchSpecial"]);
+  assert.strictEqual(r1.hits, 2, "大振り斬り → 昇り斬り がつながるはず");
+  assert.strictEqual(r1.damage, 190, "大振り斬り → 昇り斬り は190のはず");
+  const r2 = combo("kagetsu", "rin", U, [["standLight", I], ["standHeavy", O]]);
+  assert.deepStrictEqual(r2.used, ["standLight", "standHeavy", "special"]);
+  assert.strictEqual(r2.hits, 3, "柄打ち → 大振り斬り → 飛刃 がつながるはず");
+  assert.strictEqual(r2.damage, 40 + 90 + 64);
+  const r3 = combo("rin", "kagetsu", U, [["standLight", U], ["standLight", I], ["standHeavy", O]], 55);
+  assert.deepStrictEqual(r3.used, ["standLight", "standLight", "standHeavy", "special"]);
+  assert.strictEqual(r3.hits, 4, "ジャブ → ジャブ → 回し蹴り → 突進拳 がつながるはず");
+  assert.strictEqual(r3.damage, 177, "ジャブ → ジャブ → 回し蹴り → 突進拳 は177のはず");
+  // しゃがみの U からも
+  const r4 = combo("rin", "kagetsu", D | U, [["crouchLight", D | U], ["crouchLight", D | I]], 55);
+  assert.deepStrictEqual(r4.used, ["crouchLight", "crouchLight", "crouchHeavy"]);
+  assert.strictEqual(r4.hits, 3, "小足 → 小足 → 足払い がつながるはず");
+  console.log(`OK 連続技とコンボ補正: カゲツ 大振り斬り→昇り斬り ${r1.damage}、柄打ち→大振り斬り→飛刃 ${r2.damage}、リン ジャブ→ジャブ→回し蹴り→突進拳 ${r3.damage}、小足→小足→足払い ${r4.damage}`);
+
+  // ガードされてもキャンセルできる。ガードさせた必殺技は不利
+  const g = combo("kagetsu", "rin", U, [["standLight", O]], 60, BUTTON.RIGHT);
+  assert.deepStrictEqual(g.used, ["standLight", "special"], "ガードされた柄打ちから飛刃が出るはず");
+  console.log("OK キャンセル: ガードされた通常技からも必殺技が出る");
+}
+// つなげられない組み合わせ：カゲツの U → U、I → I、リンの U → U → U、空振りからのキャンセル
+{
+  // 1つ目の技の途中で2つ目の技が出たか（＝キャンセル・連続技になったか）
+  function cancels(att, firstBtn, secondBtn, from, gap = 60) {
+    const st = closeGame(att, att === "rin" ? "kagetsu" : "rin", gap);
+    const a = st.fighters[0];
+    const tot = (m) => m.startup - 1 + m.active + m.recovery;
+    let pressed = false;
+    let prevFrame = 0;
+    let count = 0;
+    let result = null;
+    for (let i = 0; i < 80 && result === null; i++) {
+      let inA = i === 0 ? firstBtn : 0;
+      if (!pressed && a.move === from && (a.moveHit || gap > 200) && a.moveFrame >= 7) {
+        inA = secondBtn;
+        a.prevInput = 0;
+        pressed = true;
+      }
+      prevFrame = a.move === from ? a.moveFrame : prevFrame;
+      SF.game.step(st, [inA, 0]);
+      if (a.moveFrame === 1 && a.move && ++count === 2) result = prevFrame < tot(CH[att].moves[from]);
+    }
+    assert.ok(result !== null, "2つ目の技が出ない");
+    return result;
+  }
+  assert.ok(!cancels("kagetsu", U, U, "standLight"), "カゲツは U → U をつなげないはず");
+  assert.ok(!cancels("kagetsu", I, I, "standHeavy"), "I → I はつなげないはず");
+  assert.ok(cancels("rin", U, U, "standLight", 55), "リンは U → U をつなげるはず");
+  assert.ok(cancels("kagetsu", U, O, "standLight"), "当たった柄打ちから飛刃が出るはず");
+  assert.ok(!cancels("kagetsu", U, O, "standLight", 400), "空振りした技からはキャンセルできないはず");
+  // リンの U → U → U は3回目が途中から出ない（2回目を最後まで出しきってから出る）
+  {
+    const st = closeGame("rin", "kagetsu", 55);
+    const a = st.fighters[0];
+    const jab = CH.rin.moves.standLight;
+    let lights = 0;
+    let prevFrame = 0;
+    let thirdCanceled = null;
+    for (let i = 0; i < 80 && thirdCanceled === null; i++) {
+      let inA = i === 0 ? U : 0;
+      if (a.move === "standLight" && a.moveHit && a.moveFrame >= 5) {
+        inA = U;
+        a.prevInput = 0;
+      }
+      prevFrame = a.move === "standLight" ? a.moveFrame : prevFrame;
+      SF.game.step(st, [inA, 0]);
+      if (a.move === "standLight" && a.moveFrame === 1 && ++lights === 3) {
+        thirdCanceled = prevFrame < jab.startup - 1 + jab.active + jab.recovery;
+      }
+    }
+    assert.strictEqual(thirdCanceled, false, "リンの U → U → U の3回目はつながらないはず");
+  }
+  console.log("OK キャンセルできない組み合わせ: カゲツ U→U、I→I、リン U→U→U、空振りから必殺技 はつながらない");
+}
+// コンボ補正の割合
+{
+  const rates = [];
+  for (let n = 1; n <= 12; n++) rates.push(SF.game.comboRate(n));
+  assert.deepStrictEqual(rates, [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 10, 10]);
+  console.log(`OK コンボ補正: ${rates.join("%→")}%`);
+}
+
+// 投げ
+{
+  // 2人を並べて投げる。techAt＝投げが決まってから何フレーム目に相手がU＋Iを押すか（null＝押さない）
+  function throwTest(att, def, gap, { techAt = null, defInput = 0, delay = 0 } = {}) {
+    const st = closeGame(att, def, gap);
+    const [a, b] = st.fighters;
+    let grabbedAt = -1;
+    let result = null;
+    for (let i = 0; i < 70; i++) {
+      let inA = i === 0 ? U : 0;
+      if (i === delay) inA |= I;
+      if (i < delay) inA |= U;
+      let inB = defInput;
+      if (grabbedAt >= 0 && techAt !== null && i - grabbedAt === techAt) inB = U | I;
+      SF.game.step(st, [inA, inB]);
+      if (grabbedAt < 0 && b.pose === POSE.THROWN) grabbedAt = i;
+      if (result === null && grabbedAt >= 0 && b.pose !== POSE.THROWN) result = b.pose;
+    }
+    return { grabbedAt, result, damage: CH[def].health - b.health, a, b, st };
+  }
+  for (const [att, def] of [["kagetsu", "rin"], ["rin", "kagetsu"]]) {
+    const m = CH[att].moves.throw;
+    const t = throwTest(att, def, 70, { defInput: BUTTON.RIGHT });
+    assert.strictEqual(t.grabbedAt + 1, m.startup, `${CH[att].name}の投げの発生が違う`);
+    assert.strictEqual(t.result, POSE.DOWN, "投げはガードできずダウンするはず");
+    assert.strictEqual(t.damage, m.damage, "投げのダメージが違う");
+    const in8 = throwTest(att, def, 70, { techAt: BT.throwTechWindow });
+    assert.strictEqual(in8.result, POSE.TECH, "8F目のU＋Iで投げ抜けできるはず");
+    assert.strictEqual(in8.damage, 0, "投げ抜けしたらダメージなし");
+    const in9 = throwTest(att, def, 70, { techAt: BT.throwTechWindow + 1 });
+    assert.strictEqual(in9.result, POSE.DOWN, "9F目では投げ抜けできないはず");
+    // 1Fずれて押しても同時押し
+    const late = throwTest(att, def, 70, { delay: 1 });
+    assert.strictEqual(late.result, POSE.DOWN, "UとIが1Fずれても投げになるはず");
+  }
+  // 投げ抜けしたら五分（同時に動ける）で離れる
+  {
+    const t = throwTest("kagetsu", "rin", 70, { techAt: 3 });
+    const { a, b, st } = t;
+    assert.strictEqual(a.stun, b.stun);
+    assert.ok(Math.abs(a.x - b.x) > 100 * S, "投げ抜けしたら離れるはず");
+  }
+  // 掴める範囲：リンの方が広い。どちらも体が触れていなくても届く
+  function reach(att, def) {
+    let g = 50;
+    while (throwTest(att, def, g).grabbedAt >= 0) g++;
+    return g - 1;
+  }
+  const kr = reach("kagetsu", "rin");
+  const rr = reach("rin", "kagetsu");
+  assert.ok(rr - CH.kagetsu.width / 2 > kr - CH.rin.width / 2, "リンの投げはカゲツより届くはず");
+  // ガード硬直・のけぞり中の相手は投げられない
+  {
+    const st = closeGame("kagetsu", "rin", 70);
+    st.fighters[1].pose = POSE.BLOCK;
+    st.fighters[1].stun = 30;
+    for (let i = 0; i < 10; i++) SF.game.step(st, [i === 0 ? U | I : 0, 0]);
+    assert.notStrictEqual(st.fighters[1].pose, POSE.THROWN, "ガード硬直中は投げられないはず");
+  }
+  // 空振りすると、同じくらいの発生の技より長く動けない
+  const lines = [];
+  for (const [id, similar] of [["kagetsu", "standLight"], ["rin", "standLight"]]) {
+    const st = newGame(1, [id, "rin"]);
+    st.fighters[0].x = 100 * S;
+    st.fighters[1].x = 900 * S;
+    const a = st.fighters[0];
+    let free = -1;
+    for (let i = 0; i < 60 && free < 0; i++) {
+      SF.game.step(st, [i === 0 ? U | I : 0, 0]);
+      if (i > 0 && SF.game.isFree(a)) free = i;
+    }
+    const t = CH[id].moves.throw;
+    const s2 = CH[id].moves[similar];
+    const total = t.startup - 1 + t.active + t.recovery;
+    assert.strictEqual(free, total, "投げの空振りの全体フレームが違う");
+    assert.ok(t.recovery > s2.recovery, "投げの空振り硬直は同じくらいの発生の技より長いはず");
+    lines.push(`${CH[id].name} 硬直${t.recovery}F（${s2.name}は${s2.recovery}F）`);
+  }
+  console.log(`OK 投げ: ガードできずダウン、8F以内のU＋Iで投げ抜け（9Fは不可）、掴める距離 カゲツ${kr}px・リン${rr}px、空振り ${lines.join("・")}`);
+}
+
+// 練習相手：投げ抜けの設定なら投げ抜けする
+{
+  const st = closeGame("kagetsu", "rin", 70);
+  const d = SF.dummy.createDummy();
+  d.mode = SF.dummy.MODES.findIndex((m) => m.id === "guardTech");
+  let teched = false;
+  for (let i = 0; i < 40; i++) {
+    SF.game.step(st, [i === 0 ? U | I : 0, SF.dummy.input(d, st, 1)]);
+    if (st.fighters[1].pose === POSE.TECH) teched = true;
+  }
+  assert.ok(teched, "投げ抜けの練習相手が投げ抜けしない");
+  console.log("OK 練習相手: 投げ抜けする設定");
+}
+
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める
 const t0 = process.hrtime.bigint();
 for (let i = 0; i < 100; i++) runMatch(i + 1, 3600);

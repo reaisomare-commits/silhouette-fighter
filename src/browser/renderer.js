@@ -27,6 +27,9 @@
     [POSE.BLOCK]: "ガードで受け止めた",
     [POSE.LAUNCH]: "空中でやられた",
     [POSE.DOWN]: "ダウン",
+    [POSE.THROW]: "投げ",
+    [POSE.THROWN]: "投げられている（U＋Iで投げ抜け）",
+    [POSE.TECH]: "投げ抜け",
   };
 
   const BUTTON_LABELS = [
@@ -135,7 +138,9 @@
       let crouching = f.crouching;
       const guarding =
         p === POSE.GUARD_STAND || p === POSE.GUARD_CROUCH || p === POSE.BLOCK;
-      let hurt = p === POSE.HIT || p === POSE.LAUNCH;
+      let hurt = p === POSE.HIT || p === POSE.LAUNCH || p === POSE.THROWN || p === POSE.TECH;
+      // 投げきったあとの、腕を振り抜いた姿
+      const throwFollow = p === POSE.THROW && !f.move;
       const airborne = !f.onGround;
       const isKagetsu = f.charId === "kagetsu";
       const atk = attackProgress(f);
@@ -187,6 +192,9 @@
       const headR = isKagetsu ? 13 : 12;
       // しゃがみ足払いは少し低く構える
       const sweepDrop = move === "crouchHeavy" ? 10 * (atk.ext || atk.wind * 0.5) : 0;
+      // 対空技は伸び上がる（見た目だけ）
+      const rise = move === "crouchSpecial" ? 14 * atk.ext : 0;
+      ctx.translate(0, -rise);
       const headY = -h + headR + sweepDrop;
       const shoulderY = headY + headR + 6;
       const hipY = airborne ? -h * 0.45 : crouching ? -h * 0.42 : -h * 0.47;
@@ -201,11 +209,14 @@
         [POSE.BACKSTEP]: -10,
         [POSE.HIT]: -14,
         [POSE.LAUNCH]: -10,
+        [POSE.THROWN]: -12,
+        [POSE.TECH]: -12,
+        [POSE.THROW]: 8,
       };
       let lean = LEAN[p] || 0;
       if (atk) {
         // 攻撃は振りかぶりで少し後ろ、当たる瞬間に前へ
-        const forwardLean = { standHeavy: 10, standLight: 6, crouchLight: 6, crouchHeavy: 8 }[move] || 4;
+        const forwardLean = { standHeavy: 10, standLight: 6, crouchLight: 6, crouchHeavy: 8, special: isKagetsu ? 8 : 16, crouchSpecial: -2, throw: 8 }[move] || 4;
         const kickBack = !isKagetsu && (move === "standHeavy") ? -10 : 0;
         lean = lerp(-3 * atk.wind, forwardLean, atk.ext) + kickBack * atk.ext;
       }
@@ -219,6 +230,8 @@
         if (move === "crouchLight") kickFoot = { x: lerp(20, 72, e), y: -6 };
         if (move === "crouchHeavy") kickFoot = { x: lerp(20, 92, e), y: -4 };
         if (move === "airHeavy") kickFoot = { x: lerp(16, 72, e), y: lerp(hipY + 38, hipY + 70, e) };
+        // 跳び蹴り上げ：前の足を真上へ蹴り上げる
+        if (move === "crouchSpecial") kickFoot = { x: lerp(20, 36, e), y: lerp(-10, -h - 40, e) };
       }
 
       // 足
@@ -252,7 +265,7 @@
         const r = Math.sin(state.frame * 0.5) * 18;
         limb(-5, hipY, -10 - r, 0, legW);
         limb(5, hipY, 10 + r, 0, legW);
-      } else if (p === POSE.STEP || p === POSE.BACKSTEP || (atk && move === "standHeavy")) {
+      } else if (p === POSE.STEP || p === POSE.BACKSTEP || (atk && (move === "standHeavy" || move === "special"))) {
         // 足を前後に開く
         limb(-5, hipY, -24, 0, legW);
         limb(5, hipY, 22, 0, legW);
@@ -285,6 +298,13 @@
         } else if (hurt) {
           hand = { x: lean + 6, y: handY + 18 };
           angle = 0.9;
+        } else if (throwFollow || (atk && move === "throw")) {
+          // 投げ：刀を後ろに下げ、空いた手で掴む
+          const e = throwFollow ? 1 : Math.max(atk.ext, atk.wind * 0.5);
+          limb(lean, shoulderY + 8, lean + lerp(14, 44, e), handY + lerp(12, 4, e), 10);
+          circle(lean + lerp(14, 46, e), handY + lerp(12, 4, e), 6);
+          hand = { x: lean - 4, y: handY + 16 };
+          angle = 2.4;
         } else if (atk) {
           const { wind, ext, rec } = atk;
           if (move === "standLight") {
@@ -315,6 +335,16 @@
             hand = { x: lean + 18 + 8 * ext, y: handY + 10 };
             angle = ext > 0 ? lerp(-0.4, 0.95, ext) : lerp(-0.5, -2.2, wind);
             len = 94;
+          } else if (move === "special") {
+            // 飛刃：腰から前へ水平に振り抜いて、斬撃を飛ばす
+            hand = { x: lean + lerp(10, 34, Math.max(ext, rec ? 0.8 : 0)), y: handY + 12 };
+            angle = rec ? 0.05 : wind < 1 ? lerp(-0.55, 2.4, wind) : 0.05;
+            len = 100;
+          } else if (move === "crouchSpecial") {
+            // 昇り斬り：下から真上へ斬り上げる
+            hand = { x: lean + lerp(22, 14, ext), y: handY + lerp(20, -26, ext) };
+            angle = rec ? lerp(-0.55, -1.55, ext) : lerp(0.6, -1.55, Math.max(ext, wind * 0.3));
+            len = 104;
           }
         } else if (airborne) {
           angle = -0.4;
@@ -336,6 +366,14 @@
         } else {
           let front = { x: lean + 24, y: handY };
           if (atk && move === "standLight") front = { x: lean + lerp(24, 54, atk.ext), y: handY - 6 * atk.ext };
+          if (atk && move === "special") front = { x: lean + lerp(24, 62, atk.ext), y: handY - 4 * atk.ext };
+          if ((atk && move === "throw") || throwFollow) {
+            // 投げ：両手を前に出して掴む
+            const e = throwFollow ? 1 : Math.max(atk.ext, atk.wind * 0.5);
+            front = { x: lean + lerp(24, 44, e), y: handY - 4 };
+            limb(lean, shoulderY + 10, lean + lerp(14, 40, e), handY + 8, 9);
+            circle(lean + lerp(14, 40, e), handY + 8, 6);
+          }
           if (atk && move === "airLight") front = { x: lean + lerp(24, 44, atk.ext), y: handY + 26 * atk.ext };
           limb(lean, shoulderY + 4, front.x - 2, front.y, 9);
           circle(front.x, front.y, 6);
@@ -365,9 +403,47 @@
       ctx.restore();
     }
 
-    // 当たった火花（白とオレンジ）、ガードの火花（青白）
+    // 飛び道具（飛刃）：差し色の三日月
+    function drawProjectiles(state) {
+      for (const p of state.projectiles) {
+        const owner = state.fighters[p.owner];
+        const other = state.fighters[1 - p.owner];
+        const accent = p.owner === 1 && other.charId === owner.charId ? ACCENT_MIRROR[owner.charId] : ACCENT[owner.charId];
+        const x = p.x / C.SCALE;
+        const y = p.y / C.SCALE;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(p.facing, 1);
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, p.w / 2, p.h / 2 + 6, 0, -Math.PI / 2, Math.PI / 2);
+        ctx.ellipse(-8, 0, p.w / 2 - 6, p.h / 2, 0, Math.PI / 2, -Math.PI / 2, true);
+        ctx.fill();
+        // 尾
+        ctx.globalAlpha = 0.35;
+        ctx.fillRect(-p.w / 2 - 26, -3, 30, 6);
+        ctx.restore();
+      }
+    }
+
+    // 当たった火花（白とオレンジ）、ガードの火花（青白）、文字（投げ抜け）
     function drawEffects(state) {
       for (const e of state.effects) {
+        if (e.kind === "text") {
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, e.life / 15);
+          ctx.font = "bold 28px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.lineWidth = 6;
+          ctx.strokeStyle = "rgba(0,0,0,0.8)";
+          ctx.strokeText(e.text, e.x, e.y - (45 - e.life) * 0.5);
+          ctx.fillStyle = "#bfe6ff";
+          ctx.fillText(e.text, e.x, e.y - (45 - e.life) * 0.5);
+          ctx.restore();
+          continue;
+        }
         const t = e.life / 14;
         const r = (e.kind === "hit" ? 26 : 20) * (1.3 - t * 0.5);
         ctx.save();
@@ -389,7 +465,7 @@
       }
     }
 
-    // 当たり判定を見えるようにする（Hキー）。青＝やられる範囲、赤＝当たる範囲、黄色の点線＝影縫い範囲
+    // 当たり判定を見えるようにする（Hキー）。青＝やられる範囲、赤＝当たる範囲、緑＝投げの掴める範囲、黄色の点線＝影縫い範囲
     function drawBoxes(state) {
       for (const f of state.fighters) {
         const body = SF.game.hurtbox(f);
@@ -415,7 +491,45 @@
           ctx.fillRect(box.left, box.top, box.right - box.left, box.bottom - box.top);
           ctx.strokeRect(box.left, box.top, box.right - box.left, box.bottom - box.top);
         }
+        const grab = SF.game.grabBox(f);
+        if (grab) {
+          // 投げの掴める範囲（緑）
+          ctx.fillStyle = "rgba(60, 230, 120, 0.3)";
+          ctx.strokeStyle = "rgba(60, 230, 120, 1)";
+          ctx.fillRect(grab.left, grab.top, grab.right - grab.left, grab.bottom - grab.top);
+          ctx.strokeRect(grab.left, grab.top, grab.right - grab.left, grab.bottom - grab.top);
+        }
       }
+      for (const p of state.projectiles) {
+        const box = SF.game.projectileBox(p);
+        ctx.fillStyle = "rgba(255, 40, 40, 0.35)";
+        ctx.strokeStyle = "rgba(255, 40, 40, 1)";
+        ctx.fillRect(box.left, box.top, box.right - box.left, box.bottom - box.top);
+        ctx.strokeRect(box.left, box.top, box.right - box.left, box.bottom - box.top);
+      }
+    }
+
+    // 連続技の表示：何発つながったかと合計ダメージ（2発以上のとき）
+    function drawCombo(state) {
+      state.comboInfo.forEach((info, i) => {
+        if (!info || info.hits < 2) return;
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, info.timer / 20);
+        ctx.textAlign = i === 0 ? "left" : "right";
+        ctx.textBaseline = "top";
+        const x = i === 0 ? 40 : C.STAGE_WIDTH - 40;
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = "rgba(0,0,0,0.8)";
+        ctx.font = "bold 34px sans-serif";
+        ctx.strokeText(`${info.hits} ヒット`, x, 110);
+        ctx.fillStyle = "#ffd24d";
+        ctx.fillText(`${info.hits} ヒット`, x, 110);
+        ctx.font = "bold 18px sans-serif";
+        ctx.strokeText(`${info.damage} ダメージ`, x, 150);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(`${info.damage} ダメージ`, x, 150);
+        ctx.restore();
+      });
     }
 
     // 画面上部：体力バー、名前、残り時間、取ったラウンド数
@@ -529,9 +643,11 @@
       draw(state, info) {
         drawBackground();
         state.fighters.forEach((f, i) => drawFighter(f, i, state));
+        drawProjectiles(state);
         if (info.showBoxes) drawBoxes(state);
         drawEffects(state);
         drawHud(state);
+        drawCombo(state);
         drawMessages(state);
         drawDebug(state, info);
       },
