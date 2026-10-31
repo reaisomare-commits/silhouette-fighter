@@ -5,7 +5,7 @@
   const SF = (root.SF = root.SF || {});
   const C = SF.constants;
   const { BUTTON, isDown, justPressed } = SF.input;
-  const { CHARACTERS, DOUBLE_TAP_WINDOW, ATTACK_BUFFER, BATTLE } = SF.characters;
+  const { CHARACTERS, DOUBLE_TAP_WINDOW, BATTLE } = SF.characters;
 
   const S = C.SCALE;
 
@@ -79,8 +79,8 @@
       airAttackUsed: false, // このジャンプで空中攻撃を出したか
       stun: 0, // のけぞり・ガード硬直の残りフレーム
       downTimer: 0, // ダウンの残りフレーム
-      attackBuffer: null, // 少し早めに押された攻撃ボタン（"light" か "heavy"）
-      attackBufferTimer: 0,
+      downFrame: 0, // 倒れてから何フレームたったか（倒れる・バウンド・起き上がりの動きを描くため）
+      buffer: null, // 先行入力：動けない間に最後に押したボタン（"light"・"heavy"・"jump"）。動けるようになった最初のフレームで出る
       tapForward: 0, // 前を1回押してからの受付の残りフレーム（2回押し判定用）
       tapBack: 0, // 後ろを1回押してからの受付の残りフレーム
       holdBack: false, // このフレームで後ろを押しているか（ガードの判定に使う）
@@ -157,9 +157,16 @@
     f.moveFrame = 1;
     f.moveHit = false;
     f.pose = POSE.ATTACK;
-    f.attackBuffer = null;
-    f.attackBufferTimer = 0;
+    f.buffer = null;
     if (name === "airLight" || name === "airHeavy") f.airAttackUsed = true;
+  }
+
+  // 押した瞬間のボタンを先行入力として覚える。前に覚えていたものは上書き（最後の入力を優先）。
+  // 同じフレームに2つ押したときは 強攻撃 ＞ 弱攻撃 ＞ ジャンプ の順
+  function registerPresses(f, input) {
+    if (justPressed(input, f.prevInput, BUTTON.HEAVY)) f.buffer = "heavy";
+    else if (justPressed(input, f.prevInput, BUTTON.LIGHT)) f.buffer = "light";
+    else if (justPressed(input, f.prevInput, BUTTON.JUMP)) f.buffer = "jump";
   }
 
   function updateFighter(f, input) {
@@ -194,23 +201,17 @@
       f.tapForward = 0;
     }
 
-    // 攻撃ボタン。少し早く押しても、動けるようになった瞬間に出る（同時押しは強を優先）
-    if (f.attackBufferTimer > 0) f.attackBufferTimer -= 1;
-    if (f.attackBufferTimer === 0) f.attackBuffer = null;
-    if (justPressed(input, f.prevInput, BUTTON.HEAVY)) {
-      f.attackBuffer = "heavy";
-      f.attackBufferTimer = ATTACK_BUFFER;
-    } else if (justPressed(input, f.prevInput, BUTTON.LIGHT)) {
-      f.attackBuffer = "light";
-      f.attackBufferTimer = ATTACK_BUFFER;
-    }
-    const wantAttack = f.attackBuffer;
+    // 攻撃・ジャンプのボタンは先行入力として覚える（動けるならこのフレームですぐ出る）
+    registerPresses(f, input);
+    const wantAttack = f.buffer === "light" || f.buffer === "heavy" ? f.buffer : null;
+    const wantJump = f.buffer === "jump";
 
     if (f.pose === POSE.LAUNCH) {
       // 空中で攻撃を受けて落ちている。着地したらダウン（下の着地の処理で）
     } else if (f.pose === POSE.DOWN) {
       f.vx = 0;
       f.crouching = false;
+      f.downFrame += 1;
       // 体力0なら起き上がらない
       if (f.health > 0) f.downTimer -= 1;
       if (f.downTimer <= 0) {
@@ -237,7 +238,7 @@
       }
     } else if (f.onGround && f.action) {
       // ステップ・ダッシュ・バックステップの最中
-      updateAction(f, st, { forward, down, jump: justPressed(input, f.prevInput, BUTTON.JUMP) });
+      updateAction(f, st, { forward, down, jump: wantJump });
     } else if (f.onGround) {
       groundControl();
     } else if (f.move) {
@@ -255,9 +256,10 @@
         f.landingTimer -= 1;
         f.vx = 0;
         f.pose = POSE.LANDING;
-      } else if (justPressed(input, f.prevInput, BUTTON.JUMP)) {
+      } else if (wantJump) {
         // ジャンプは押した瞬間だけ（押しっぱなしで連続ジャンプしない）
         // 方向キーを押していれば斜めに跳ぶ
+        f.buffer = null;
         f.onGround = false;
         f.crouching = false;
         f.vy = -st.jumpVelocity;
@@ -314,8 +316,7 @@
       f.onGround = true;
       f.airAttackUsed = false;
       if (f.pose === POSE.LAUNCH) {
-        f.pose = POSE.DOWN;
-        f.downTimer = BATTLE.downFrames;
+        knockDown(f);
       } else {
         // 空中攻撃も着地で終わる
         f.move = null;
@@ -366,6 +367,7 @@
       const canStop = f.actionTimer >= st.forwardDash.minFrames;
       if (jump) {
         // 走りながら前ジャンプ
+        f.buffer = null;
         f.action = null;
         f.onGround = false;
         f.vy = -st.jumpVelocity;
@@ -448,14 +450,28 @@
     return moveTotal(m) - att.moveFrame;
   }
 
+  // 空中にいるキャラが、あと何フレームで着地するか
+  function framesUntilLanding(f) {
+    const g = toStats(f.charId).gravity;
+    let y = f.y;
+    let vy = f.vy;
+    let n = 0;
+    while (y < C.GROUND_Y * S) {
+      vy += g;
+      y += vy;
+      n += 1;
+    }
+    return n;
+  }
+
   // 当たった・ガードされたときの処理
   function applyHit(state, att, def, m, box, body) {
     const air = m.recovery === null;
     const blocked = canBlock(def, m);
     att.moveHit = true;
     // のけぞり・ガード硬直の長さは、硬直差がそのとおりになるように決める。
-    // 空中攻撃は「着地直前に当てたとき」の値（着地硬直のあと動けるまで）で決める
-    const base = air ? toStats(att.charId).landingLag : attackerRemaining(att, m);
+    // 空中攻撃は「着地して着地硬直が終わるまで」を数えるので、どの高さで当てても硬直差は同じ
+    const base = air ? framesUntilLanding(att) + toStats(att.charId).landingLag : attackerRemaining(att, m);
     const dir = att.facing;
     // 火花は当たる範囲と体が重なった所の真ん中に出す
     const fx = (Math.max(box.left, body.left) + Math.min(box.right, body.right)) / 2;
@@ -473,7 +489,7 @@
       def.move = null;
       def.action = null;
       def.landingTimer = 0;
-      def.attackBuffer = null;
+      def.buffer = null; // 当たる前の入力は捨てる（のけぞり中に押したものは出る）
       state.hitstop = Math.max(state.hitstop, BATTLE.hitstopHit);
       state.effects.push({ kind: "hit", x: fx, y: fy, life: 14 });
       if (!def.onGround) {
@@ -492,8 +508,11 @@
       }
     }
 
-    // 押し返し。相手が画面端なら、押せなかった分だけ自分が下がる
-    if (def.onGround) {
+    // 押し返し。ガードされたときは守った側はその場に踏みとどまり、攻めた側が下がる（影縫い）
+    if (blocked) {
+      att.pushVx = (-dir * m.push * S) / 5;
+    } else if (def.onGround) {
+      // 当たったときは相手を押す。相手が画面端なら、押せなかった分だけ自分が下がる
       const push = m.push * S;
       const limits = stageLimits(def);
       const room = dir === 1 ? limits.max - def.x : def.x - limits.min;
@@ -509,6 +528,7 @@
     f.crouching = false;
     f.vx = 0;
     f.downTimer = BATTLE.downFrames;
+    f.downFrame = 0;
   }
 
   // 両方の技の当たりを調べる。同時に当たったら両方当たる（相打ち）
@@ -631,6 +651,14 @@
     // 当たった瞬間は両者とも一瞬止まる（硬直差は変わらない）
     if (state.hitstop > 0) {
       state.hitstop -= 1;
+      // 止まっている間に押したボタンも先行入力として覚える
+      if (r.phase === PHASE.FIGHT) {
+        state.fighters.forEach((f, i) => {
+          const input = inputs[i] | 0;
+          registerPresses(f, input);
+          f.prevInput = input;
+        });
+      }
       return state;
     }
 

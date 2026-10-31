@@ -285,7 +285,8 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 22) {
   for (let i = 0; i < 70; i++) {
     const inA = (i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0) | (i === pressAt || i === pressAt + 6 ? btn : 0);
     SF.game.step(st, [inA, guardInput]);
-    if (st.fighters[0].move && st.fighters[0].moveFrame === 1) attacks++;
+    const mv = st.fighters[0].move;
+    if (mv && mv.startsWith("air") && st.fighters[0].moveFrame === 1) attacks++;
   }
   return { def: st.fighters[1], attacks };
 }
@@ -298,6 +299,147 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 22) {
   assert.ok(none.def.health < CH.rin.health, "空中攻撃が当たらない");
   assert.strictEqual(none.attacks, 1, "空中攻撃は1回のジャンプで1回だけのはず");
   console.log("OK 空中攻撃: 立ちガードで防げ、しゃがみガードでは当たる。1ジャンプ1回");
+}
+
+// 空中攻撃の硬直差：どの高さで当てても表どおり
+{
+  function airAdv(att, btn, pressAt, blocking) {
+    const st = newGame(1, [att, att === "rin" ? "kagetsu" : "rin"]);
+    const [a, b] = st.fighters;
+    a.x = 330 * S;
+    b.x = 430 * S;
+    let hitAt = -1;
+    let pose = null;
+    let sa = -1;
+    let sb = -1;
+    let landedA = false;
+    for (let i = 0; i < 150; i++) {
+      const after = hitAt >= 0;
+      if (after) {
+        a.prevInput &= ~BUTTON.JUMP;
+        b.prevInput &= ~BUTTON.JUMP;
+      }
+      const inA = after ? BUTTON.JUMP : (i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0) | (i === pressAt ? btn : 0);
+      // ガードは相手が技を出している間だけ（押しっぱなしだと歩いて離れてしまう）
+      const inB = (blocking && (a.move || b.pose === POSE.BLOCK) ? BUTTON.RIGHT : 0) | (after ? BUTTON.JUMP : 0);
+      SF.game.step(st, [inA, inB]);
+      if (!after && a.moveHit) {
+        hitAt = i;
+        pose = b.pose;
+        // 当たった直後の入力では先行入力が入らないよう、ここで消しておく
+        a.buffer = null;
+        b.buffer = null;
+      } else if (after) {
+        // 攻めた側は一度着地してから、次に跳んだフレーム
+        if (a.onGround) landedA = true;
+        if (sa < 0 && landedA && !a.onGround) sa = i;
+        if (sb < 0 && !b.onGround) sb = i;
+      }
+    }
+    return { hitAt, pose, adv: sb - sa };
+  }
+  const out = [];
+  for (const att of ["kagetsu", "rin"]) {
+    for (const [name, btn] of [["airLight", U], ["airHeavy", I]]) {
+      const m = CH[att].moves[name];
+      // 早めに当てた場合と遅めに当てた場合
+      const advs = [];
+      for (const pressAt of [12, 20]) {
+        const h = airAdv(att, btn, pressAt, false);
+        const g = airAdv(att, btn, pressAt, true);
+        if (h.hitAt < 0) continue;
+        assert.strictEqual(h.pose, POSE.HIT);
+        assert.strictEqual(g.pose, POSE.BLOCK);
+        assert.strictEqual(h.adv, m.hitAdv, `${CH[att].name}の${m.name}（${pressAt}F目）のヒット時の硬直差が違う`);
+        assert.strictEqual(g.adv, m.blockAdv, `${CH[att].name}の${m.name}のガード時の硬直差が違う`);
+        advs.push(pressAt);
+      }
+      assert.ok(advs.length >= 1, `${CH[att].name}の${m.name}が当たらない`);
+      out.push(`${CH[att].name}${m.name} +${m.hitAdv}/+${m.blockAdv}`);
+    }
+  }
+  console.log(`OK 空中攻撃の硬直差（高さに関係なく同じ）: ${out.join("、")}`);
+}
+
+// ガードしたら守った側は下がらず、攻めた側が下がる（影縫い）
+{
+  const st = closeGame("kagetsu", "rin");
+  const [a, b] = st.fighters;
+  const ax = a.x;
+  const bx = b.x;
+  for (let i = 0; i < 40; i++) SF.game.step(st, [i === 0 ? I : 0, BUTTON.RIGHT]);
+  assert.strictEqual(b.pose === POSE.BLOCK || b.health === CH.rin.health, true);
+  assert.strictEqual(b.health, CH.rin.health);
+  // ガード中は後ろを押していても下がらない（ガードが終わったあと歩いて下がる分は除く）
+  const st2 = closeGame("kagetsu", "rin");
+  let blockedX = null;
+  for (let i = 0; i < 40; i++) {
+    SF.game.step(st2, [i === 0 ? I : 0, BUTTON.RIGHT]);
+    if (st2.fighters[1].pose === POSE.BLOCK) {
+      if (blockedX === null) blockedX = st2.fighters[1].x;
+      assert.strictEqual(st2.fighters[1].x, blockedX, "ガード中に後ろに下がった");
+    }
+  }
+  assert.ok(blockedX !== null, "ガードが成立しない");
+  assert.ok(st2.fighters[0].x < 400 * S, "ガードされたら攻めた側が下がるはず");
+  console.log(`OK 影縫い: ガードした側はその場に残り、攻めた側が${(400 * S - st2.fighters[0].x) / S}px下がる`);
+}
+
+// 先行入力：硬直中に押したボタンは、動けるようになった最初のフレームで出る。最後に押したものが優先
+{
+  function bufferTest(seq) {
+    const st = newGame(1, ["kagetsu", "rin"]); // 離れているので空振り
+    const a = st.fighters[0];
+    const m = CH.kagetsu.moves.standLight;
+    const total = m.startup - 1 + m.active + m.recovery;
+    let second = null;
+    let at = -1;
+    for (let i = 0; i < 40; i++) {
+      SF.game.step(st, [seq[i] || 0, 0]);
+      if (i > 0 && a.move && a.moveFrame === 1 && at < 0) {
+        at = i;
+        second = a.move;
+      }
+    }
+    return { at, second, total };
+  }
+  const seq1 = [U];
+  seq1[5] = I;
+  seq1[8] = U; // 最後に押したのは U
+  const r1 = bufferTest(seq1);
+  assert.strictEqual(r1.second, "standLight", "最後に押した弱攻撃が出るはず");
+  assert.strictEqual(r1.at, r1.total, "動けるようになった最初のフレームで出るはず");
+  const seq2 = [U];
+  seq2[3] = U;
+  seq2[9] = I; // 最後に押したのは I
+  const r2 = bufferTest(seq2);
+  assert.strictEqual(r2.second, "standHeavy", "最後に押した強攻撃が出るはず");
+  assert.strictEqual(r2.at, r2.total);
+  console.log(`OK 先行入力: 硬直中に押した最後のボタンが最速（${r1.total + 1}F目）で出る`);
+}
+
+// 空中攻撃から地上の弱攻撃がつながる（相手が動けるようになる前に当たる）
+{
+  for (const att of ["kagetsu", "rin"]) {
+    const st = newGame(1, [att, att === "rin" ? "kagetsu" : "rin"]);
+    const [a, b] = st.fighters;
+    a.x = 330 * S;
+    b.x = 430 * S;
+    let hits = 0;
+    let freeBetween = false;
+    for (let i = 0; i < 90; i++) {
+      // ジャンプ強攻撃のあと、着地前に弱攻撃を連打（先行入力）
+      const inA = (i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0) | (i === 18 ? I : 0) | (i > 22 && i % 2 === 0 ? U : 0);
+      const before = b.health;
+      SF.game.step(st, [inA, 0]);
+      if (b.health < before) hits++;
+      if (hits === 1 && SF.game.isFree(b) && b.onGround) freeBetween = true;
+      if (hits >= 2) break;
+    }
+    assert.ok(hits >= 2, `${CH[att].name}: 空中攻撃のあとの弱攻撃が当たらない`);
+    assert.ok(!freeBetween, `${CH[att].name}: 空中攻撃から弱攻撃がつながらない`);
+  }
+  console.log("OK 連続技: ジャンプ強攻撃 → 着地して弱攻撃 がつながる（両キャラ）");
 }
 
 // ダウン中は攻撃が当たらない

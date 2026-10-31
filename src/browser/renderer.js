@@ -129,13 +129,13 @@
       const other = state.fighters[1 - index];
       const accent =
         index === 1 && other.charId === f.charId ? ACCENT_MIRROR[f.charId] : ACCENT[f.charId];
-      const h = SF.game.fighterHeight(f);
+      let h = SF.game.fighterHeight(f);
       const w = c.width;
       const p = f.pose;
-      const crouching = f.crouching;
+      let crouching = f.crouching;
       const guarding =
         p === POSE.GUARD_STAND || p === POSE.GUARD_CROUCH || p === POSE.BLOCK;
-      const hurt = p === POSE.HIT || p === POSE.LAUNCH;
+      let hurt = p === POSE.HIT || p === POSE.LAUNCH;
       const airborne = !f.onGround;
       const isKagetsu = f.charId === "kagetsu";
       const atk = attackProgress(f);
@@ -149,9 +149,33 @@
       ctx.lineCap = "round";
 
       if (p === POSE.DOWN) {
-        drawDown(f, accent);
-        ctx.restore();
-        return;
+        // ダウンの流れ：倒れる → 地面でバウンド → 寝ている → 起き上がる
+        const e = f.downFrame; // 倒れてからのフレーム
+        const FALL = 6;
+        const GETUP = 18;
+        let lie = 0; // 0＝立っている 〜 1＝寝ている
+        if (e < FALL) {
+          lie = (e + 1) / FALL;
+          hurt = true;
+        } else if (f.downTimer > GETUP || f.health === 0) {
+          // 寝ている。最初に大きく1回、小さく1回バウンドする
+          let bounce = 0;
+          if (e < FALL + 12) bounce = Math.sin(((e - FALL) / 12) * Math.PI) * 18;
+          else if (e < FALL + 20) bounce = Math.sin(((e - FALL - 12) / 8) * Math.PI) * 5;
+          ctx.translate(0, -bounce);
+          drawDown(f, accent);
+          ctx.restore();
+          return;
+        } else {
+          // 起き上がり：手をついて体を起こし、しゃがみから立ち上がる
+          const t = 1 - f.downTimer / GETUP;
+          lie = Math.max(0, 1 - t / 0.6);
+          crouching = t < 0.8;
+        }
+        h = crouching ? c.crouchHeight : c.height;
+        // 足元を軸に後ろへ倒す。倒れた体が足元の中心に来るよう少し前にずらす
+        ctx.translate(h * 0.4 * lie, 0);
+        ctx.rotate((-Math.PI / 2) * lie);
       }
       if (p === POSE.LAUNCH) {
         // 空中でやられたら後ろにのけぞって回る
