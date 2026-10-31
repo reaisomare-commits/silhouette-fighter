@@ -442,6 +442,34 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 22) {
   console.log(`OK 先行入力: 硬直中に押した最後のボタンが最速（${r1.total + 1}F目）で出る`);
 }
 
+// 先行入力：硬直中に方向キーを2回押すと、動けるようになった最初のフレームでステップ・ダッシュ・バックステップが出る
+{
+  const R = BUTTON.RIGHT;
+  const L = BUTTON.LEFT;
+  for (const [id, dir, expect] of [
+    ["kagetsu", R, POSE.STEP],
+    ["rin", R, POSE.RUN],
+    ["kagetsu", L, POSE.BACKSTEP],
+  ]) {
+    const st = newGame(1, [id, "rin"]);
+    const a = st.fighters[0];
+    const mt = CH[id].moves.standLight;
+    const tot = mt.startup - 1 + mt.active + mt.recovery;
+    // 弱攻撃の硬直中（終わる少し前）に方向キーを2回押す。ダッシュは押しっぱなしにする
+    const seq = [U];
+    seq[tot - 5] = dir;
+    seq[tot - 3] = dir;
+    for (let i = tot - 2; i < tot + 5; i++) seq[i] = dir;
+    let at = -1;
+    for (let i = 0; i < tot + 5; i++) {
+      SF.game.step(st, [seq[i] || 0, 0]);
+      if (at < 0 && a.pose === expect) at = i;
+    }
+    assert.strictEqual(at, tot, `${CH[id].name}: 硬直明けの最初のフレームで${expect}が出るはず`);
+  }
+  console.log("OK 先行入力（移動）: 硬直中の2回押しで、硬直明けすぐにステップ・ダッシュ・バックステップが出る");
+}
+
 // 空中攻撃から地上の弱攻撃がつながる（相手が動けるようになる前に当たる）
 {
   for (const att of ["kagetsu", "rin"]) {

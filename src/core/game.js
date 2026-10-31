@@ -162,12 +162,30 @@
     if (name === "airLight" || name === "airHeavy") f.airAttackUsed = true;
   }
 
-  // 押した瞬間のボタンを先行入力として覚える。前に覚えていたものは上書き（最後の入力を優先）。
-  // 同じフレームに2つ押したときは 強攻撃 ＞ 弱攻撃 ＞ ジャンプ の順
+  // 押した瞬間のボタンと方向キーの2回押しを先行入力として覚える。前に覚えていたものは上書き（最後の入力を優先）。
+  // 同じフレームに2つ押したときは 強攻撃 ＞ 弱攻撃 ＞ ジャンプ ＞ ステップ・ダッシュ・バックステップ の順
   function registerPresses(f, input) {
+    // 「前」と「後ろ」は押した時点の向きで決める
+    const forwardBtn = f.facing === 1 ? BUTTON.RIGHT : BUTTON.LEFT;
+    const backBtn = f.facing === 1 ? BUTTON.LEFT : BUTTON.RIGHT;
+    // 方向キーの2回押しを見張る。押した瞬間に受付中なら2回押し成立
+    if (f.tapForward > 0) f.tapForward -= 1;
+    if (f.tapBack > 0) f.tapBack -= 1;
+    let dash = null;
+    if (justPressed(input, f.prevInput, forwardBtn)) {
+      if (f.tapForward > 0) dash = "dashForward";
+      f.tapForward = dash ? 0 : DOUBLE_TAP_WINDOW;
+      f.tapBack = 0;
+    }
+    if (justPressed(input, f.prevInput, backBtn)) {
+      if (f.tapBack > 0) dash = "dashBack";
+      f.tapBack = dash === "dashBack" ? 0 : DOUBLE_TAP_WINDOW;
+      f.tapForward = 0;
+    }
     if (justPressed(input, f.prevInput, BUTTON.HEAVY)) f.buffer = "heavy";
     else if (justPressed(input, f.prevInput, BUTTON.LIGHT)) f.buffer = "light";
     else if (justPressed(input, f.prevInput, BUTTON.JUMP)) f.buffer = "jump";
+    else if (dash) f.buffer = dash;
   }
 
   function updateFighter(f, input) {
@@ -184,28 +202,12 @@
     f.holdBack = back;
     f.holdDown = down;
 
-    // 方向キーの2回押しを見張る。押した瞬間に受付中なら2回押し成立
-    const tappedForward = justPressed(input, f.prevInput, forwardBtn);
-    const tappedBack = justPressed(input, f.prevInput, backBtn);
-    let doubleForward = false;
-    let doubleBack = false;
-    if (f.tapForward > 0) f.tapForward -= 1;
-    if (f.tapBack > 0) f.tapBack -= 1;
-    if (tappedForward) {
-      doubleForward = f.tapForward > 0;
-      f.tapForward = doubleForward ? 0 : DOUBLE_TAP_WINDOW;
-      f.tapBack = 0;
-    }
-    if (tappedBack) {
-      doubleBack = f.tapBack > 0;
-      f.tapBack = doubleBack ? 0 : DOUBLE_TAP_WINDOW;
-      f.tapForward = 0;
-    }
-
-    // 攻撃・ジャンプのボタンは先行入力として覚える（動けるならこのフレームですぐ出る）
+    // 攻撃・ジャンプ・2回押しは先行入力として覚える（動けるならこのフレームですぐ出る）
     registerPresses(f, input);
     const wantAttack = f.buffer === "light" || f.buffer === "heavy" ? f.buffer : null;
     const wantJump = f.buffer === "jump";
+    const doubleForward = f.buffer === "dashForward";
+    const doubleBack = f.buffer === "dashBack";
 
     if (f.pose === POSE.LAUNCH) {
       // 空中で攻撃を受けて落ちている。着地したらダウン（下の着地の処理で）
@@ -272,10 +274,18 @@
         f.crouching = down;
         const name = (down ? "crouch" : "stand") + (wantAttack === "heavy" ? "Heavy" : "Light");
         startMove(f, name);
-      } else if (doubleForward && !down) {
+      } else if ((doubleForward || doubleBack) && down) {
+        // しゃがんでいるときはステップ類は出ない（覚えていた入力は捨てる）
+        f.buffer = null;
+        f.vx = 0;
+        f.crouching = true;
+        f.pose = back ? POSE.GUARD_CROUCH : POSE.CROUCH;
+      } else if (doubleForward) {
+        f.buffer = null;
         f.crouching = false;
         startAction(f, st.forwardDash.type === "run" ? POSE.RUN : POSE.STEP, st);
-      } else if (doubleBack && !down) {
+      } else if (doubleBack) {
+        f.buffer = null;
         f.crouching = false;
         startAction(f, POSE.BACKSTEP, st);
       } else if (down) {
