@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>シルエット格闘</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #111; color: #ddd; font-family: sans-serif; }
+      body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; box-sizing: border-box; }
+      canvas { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; image-rendering: pixelated; }
+      p { margin: 0; font-size: 14px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <canvas id="screen" width="960" height="540"></canvas>
+    <p>A / D：左右に移動　S：しゃがみ　スペース：ジャンプ　（画面をクリックしてから操作してください）</p>
+    <script src="src/core/constants.js"></script>
+    <script src="src/core/rng.js"></script>
+    <script src="src/core/input.js"></script>
+    <script src="src/core/game.js"></script>
+    <script src="src/browser/keyboard.js"></script>
+    <script src="src/browser/renderer.js"></script>
+    <script src="src/browser/main.js"></script>
+  </body>
+</html>

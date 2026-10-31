@@ -1,0 +1,9 @@
+{
+  "name": "silhouette-fighter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "影の剣士と拳法家が戦う、ブラウザで遊ぶ2D格闘ゲーム",
+  "scripts": {
+    "test": "node tools/headless-check.js"
+  }
+}
