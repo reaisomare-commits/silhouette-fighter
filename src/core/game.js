@@ -5,7 +5,7 @@
   const SF = (root.SF = root.SF || {});
   const C = SF.constants;
   const { BUTTON, isDown, justPressed } = SF.input;
-  const { CHARACTERS } = SF.characters;
+  const { CHARACTERS, DOUBLE_TAP_WINDOW } = SF.characters;
 
   const S = C.SCALE;
 
@@ -24,6 +24,8 @@
       jumpForward: px(c.jumpForward),
       gravity: px(c.gravity),
       landingLag: c.landingLag,
+      forwardDash: { ...c.forwardDash, speed: px(c.forwardDash.speed) },
+      backDash: { ...c.backDash, speed: px(c.backDash.speed) },
     };
   }
 
@@ -36,6 +38,10 @@
     GUARD_CROUCH: "guardCrouch", // しゃがみガード
     JUMP: "jump", // 空中
     LANDING: "landing", // 着地して動けない
+    STEP: "step", // ステップで踏み込んでいる（カゲツ）
+    RUN: "run", // ダッシュで走っている（リン）
+    BACKSTEP: "backstep", // バックステップで下がっている
+    DASH_RECOVERY: "dashRecovery", // ステップ・ダッシュ・バックステップの止まり際（動けない）
   });
 
   function createFighter(charId, x, facing) {
@@ -49,6 +55,10 @@
       onGround: true,
       pose: POSE.STAND,
       landingTimer: 0, // 着地硬直の残りフレーム
+      action: null, // ステップなど、途中で止められない動きの最中ならその種類（POSE と同じ名前）
+      actionTimer: 0, // その動きの残りフレーム（ダッシュは走ったフレーム数）
+      tapForward: 0, // 前を1回押してからの受付の残りフレーム（2回押し判定用）
+      tapBack: 0, // 後ろを1回押してからの受付の残りフレーム
       prevInput: 0,
     };
   }
@@ -85,7 +95,28 @@
     const back = holdBack && !holdForward;
     const down = isDown(input, BUTTON.DOWN);
 
-    if (f.onGround) {
+    // 方向キーの2回押しを見張る。押した瞬間に受付中なら2回押し成立
+    const tappedForward = justPressed(input, f.prevInput, forwardBtn);
+    const tappedBack = justPressed(input, f.prevInput, backBtn);
+    let doubleForward = false;
+    let doubleBack = false;
+    if (f.tapForward > 0) f.tapForward -= 1;
+    if (f.tapBack > 0) f.tapBack -= 1;
+    if (tappedForward) {
+      doubleForward = f.tapForward > 0;
+      f.tapForward = doubleForward ? 0 : DOUBLE_TAP_WINDOW;
+      f.tapBack = 0;
+    }
+    if (tappedBack) {
+      doubleBack = f.tapBack > 0;
+      f.tapBack = doubleBack ? 0 : DOUBLE_TAP_WINDOW;
+      f.tapForward = 0;
+    }
+
+    if (f.onGround && f.action) {
+      // ステップ・ダッシュ・バックステップの最中
+      updateAction(f, st, { forward, down, jump: justPressed(input, f.prevInput, BUTTON.JUMP) });
+    } else if (f.onGround) {
       if (f.landingTimer > 0) {
         // 着地硬直中は何もできない
         f.landingTimer -= 1;
@@ -98,6 +129,10 @@
         f.vy = -st.jumpVelocity;
         f.vx = forward ? f.facing * st.jumpForward : back ? -f.facing * st.jumpForward : 0;
         f.pose = POSE.JUMP;
+      } else if (doubleForward && !down) {
+        startAction(f, st.forwardDash.type === "run" ? POSE.RUN : POSE.STEP, st);
+      } else if (doubleBack && !down) {
+        startAction(f, POSE.BACKSTEP, st);
       } else if (down) {
         // しゃがみ中は歩けない。後ろを押していればしゃがみガード
         f.vx = 0;
@@ -135,6 +170,65 @@
 
     clampToStage(f);
     f.prevInput = input;
+  }
+
+  // ステップ・ダッシュ・バックステップを始める
+  function startAction(f, action, st) {
+    f.action = action;
+    f.pose = action;
+    if (action === POSE.STEP) {
+      f.actionTimer = st.forwardDash.frames;
+      f.vx = f.facing * st.forwardDash.speed;
+    } else if (action === POSE.RUN) {
+      f.actionTimer = 0; // 走ったフレーム数を数える
+      f.vx = f.facing * st.forwardDash.speed;
+    } else if (action === POSE.BACKSTEP) {
+      f.actionTimer = st.backDash.frames;
+      f.vx = -f.facing * st.backDash.speed;
+    }
+  }
+
+  // 止まり際（動けない時間）に入る
+  function startRecovery(f, frames, keepSpeed) {
+    f.action = POSE.DASH_RECOVERY;
+    f.pose = POSE.DASH_RECOVERY;
+    f.actionTimer = frames;
+    if (!keepSpeed) f.vx = 0;
+  }
+
+  // ステップ・ダッシュ・バックステップを1フレーム進める。
+  // 途中でガードや向きの切り替えはできない（ダッシュ中のジャンプだけはできる）
+  function updateAction(f, st, { forward, down, jump }) {
+    if (f.action === POSE.STEP || f.action === POSE.BACKSTEP) {
+      f.actionTimer -= 1;
+      if (f.actionTimer <= 0) {
+        const rec = f.action === POSE.STEP ? st.forwardDash.recovery : st.backDash.recovery;
+        startRecovery(f, rec, false);
+      }
+    } else if (f.action === POSE.RUN) {
+      f.actionTimer += 1;
+      const canStop = f.actionTimer >= st.forwardDash.minFrames;
+      if (jump) {
+        // 走りながら前ジャンプ
+        f.action = null;
+        f.onGround = false;
+        f.vy = -st.jumpVelocity;
+        f.vx = f.facing * st.jumpForward;
+        f.pose = POSE.JUMP;
+      } else if (canStop && (!forward || down)) {
+        // 前を離したらブレーキをかけながら止まる
+        startRecovery(f, st.forwardDash.recovery, true);
+      }
+    } else if (f.action === POSE.DASH_RECOVERY) {
+      f.actionTimer -= 1;
+      // ダッシュのブレーキは少しずつ遅くなる。ステップの止まり際はその場で止まっている
+      f.vx = f.vx === 0 ? 0 : Math.trunc((f.vx * f.actionTimer) / (f.actionTimer + 1));
+      if (f.actionTimer <= 0) {
+        f.action = null;
+        f.vx = 0;
+        f.pose = POSE.STAND;
+      }
+    }
   }
 
   // 画面の外に出ない

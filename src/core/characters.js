@@ -19,6 +19,15 @@
       gravity: 0.75, // 毎フレーム下向きに加わる速さ
       // → 高さ約130ピクセル、滞空約37フレーム（0.6秒）
       landingLag: 3, // 着地してから動けない時間（フレーム）
+      // 前を素早く2回：ステップ（決まった距離だけ踏み込む）
+      forwardDash: {
+        type: "step",
+        frames: 16, // 動いている時間（フレーム）
+        speed: 5, // 1フレームに進むピクセル → 約80ピクセル
+        recovery: 5, // 止まってから動けるまで（フレーム）
+      },
+      // 後ろを素早く2回：バックステップ
+      backDash: { frames: 14, speed: 4.5, recovery: 6 }, // 約63ピクセル下がる
     },
     rin: {
       name: "リン",
@@ -32,10 +41,21 @@
       gravity: 0.85,
       // → 高さ約170ピクセル、滞空約40フレーム（0.67秒）
       landingLag: 3,
+      // 前を素早く2回：ダッシュ（押している間ずっと走る）
+      forwardDash: {
+        type: "run",
+        speed: 6.5, // 走る速さ（1フレームに進むピクセル）
+        minFrames: 8, // すぐ離しても最低これだけは走る
+        recovery: 6, // 離してから止まるまでのブレーキ（フレーム）
+      },
+      backDash: { frames: 12, speed: 5, recovery: 4 }, // 約60ピクセル下がる
     },
   };
 
+  // 方向キーを2回押したとみなす間隔（1回目を押してから何フレーム以内に2回目を押すか）
+  const DOUBLE_TAP_WINDOW = 12;
+
   const IDS = Object.keys(CHARACTERS);
 
-  SF.characters = { CHARACTERS, IDS };
+  SF.characters = { CHARACTERS, IDS, DOUBLE_TAP_WINDOW };
 })(globalThis);

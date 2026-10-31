@@ -18,6 +18,10 @@
     [POSE.GUARD_CROUCH]: "しゃがみガード",
     [POSE.JUMP]: "ジャンプ",
     [POSE.LANDING]: "着地硬直",
+    [POSE.STEP]: "ステップ",
+    [POSE.RUN]: "ダッシュ",
+    [POSE.BACKSTEP]: "バックステップ",
+    [POSE.DASH_RECOVERY]: "止まり際（動けない）",
   };
 
   const BUTTON_LABELS = [
@@ -96,7 +100,16 @@
       const headY = -h + headR;
       const shoulderY = headY + headR + 6;
       const hipY = airborne ? -h * 0.45 : crouching ? -h * 0.42 : -h * 0.47;
-      const lean = guarding ? -4 : p === POSE.WALK_FORWARD ? 3 : 0; // 構えると少し後ろに引く
+      // 体の傾き：構えやバックステップは後ろに、歩き・ステップ・ダッシュは前に
+      const LEAN = {
+        [POSE.GUARD_STAND]: -4,
+        [POSE.GUARD_CROUCH]: -4,
+        [POSE.WALK_FORWARD]: 3,
+        [POSE.STEP]: 10,
+        [POSE.RUN]: 14,
+        [POSE.BACKSTEP]: -10,
+      };
+      const lean = LEAN[p] || 0;
       const bodyW = w * 0.55;
 
       // 足
@@ -114,9 +127,20 @@
         limb(6, hipY, 20, -22, legW);
         limb(20, -22, 18, 0, legW);
       } else {
-        const s = p === POSE.WALK_FORWARD || p === POSE.GUARD_STAND ? stride : 0;
-        limb(-5, hipY, -12 - s, 0, legW);
-        limb(5, hipY, 12 + s, 0, legW);
+        if (p === POSE.RUN) {
+          // 大きく足を開いて走る
+          const r = Math.sin(state.frame * 0.5) * 18;
+          limb(-5, hipY, -10 - r, 0, legW);
+          limb(5, hipY, 10 + r, 0, legW);
+        } else if (p === POSE.STEP || p === POSE.BACKSTEP) {
+          // 足を前後に開いて滑るように動く
+          limb(-5, hipY, -24, 0, legW);
+          limb(5, hipY, 22, 0, legW);
+        } else {
+          const s = p === POSE.WALK_FORWARD || p === POSE.GUARD_STAND ? stride : 0;
+          limb(-5, hipY, -12 - s, 0, legW);
+          limb(5, hipY, 12 + s, 0, legW);
+        }
       }
 
       // 胴体と頭
