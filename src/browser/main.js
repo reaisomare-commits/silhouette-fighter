@@ -11,6 +11,15 @@
   const keyboard = SF.keyboard.createKeyboard(root);
   const renderer = SF.renderer.createRenderer(document.getElementById("screen"));
 
+  // キャラ選択画面ができるまでの仮の切り替え：1キーでカゲツ、2キーでリン。
+  // 右の相手は、選ばなかった方のキャラになる
+  root.addEventListener("keydown", (e) => {
+    const pick = { Digit1: "kagetsu", Digit2: "rin", Numpad1: "kagetsu", Numpad2: "rin" }[e.code];
+    if (!pick) return;
+    SF.game.setCharacter(state, 0, pick);
+    SF.game.setCharacter(state, 1, pick === "kagetsu" ? "rin" : "kagetsu");
+  });
+
   let lastTime = performance.now();
   let accumulator = 0;
   let input = 0;
