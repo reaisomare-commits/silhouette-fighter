@@ -85,6 +85,7 @@
       tapBack: 0, // 後ろを1回押してからの受付の残りフレーム
       holdBack: false, // このフレームで後ろを押しているか（ガードの判定に使う）
       holdDown: false, // このフレームで下を押しているか
+      pinned: false, // 影縫い中か（相手の技の影縫い範囲に体が入っている）
       prevInput: 0,
     };
   }
@@ -287,9 +288,9 @@
         f.vx = f.facing * st.walkForward;
         f.pose = POSE.WALK_FORWARD;
       } else if (back) {
-        // 後ろに歩く＝立ちガードの構え
+        // 後ろに歩く＝立ちガードの構え。影縫い中は下がらずその場で構える
         f.crouching = false;
-        f.vx = -f.facing * st.walkBack;
+        f.vx = f.pinned ? 0 : -f.facing * st.walkBack;
         f.pose = POSE.GUARD_STAND;
       } else {
         f.crouching = false;
@@ -429,6 +430,23 @@
     const a = x + h.x1 * f.facing;
     const b = x + h.x2 * f.facing;
     return { left: Math.min(a, b), right: Math.max(a, b), top: y - h.y2, bottom: y - h.y1 };
+  }
+
+  // 影縫い範囲：技を出してから当たる時間が終わるまで、当たる範囲を少し広げた四角。それ以外は null
+  function shadowStitchBox(f) {
+    const m = moveData(f);
+    if (!m || f.moveHit || f.moveFrame >= m.startup + m.active) return null;
+    const h = m.hitbox;
+    const x = f.x / S;
+    const y = f.y / S;
+    const a = x + (h.x1 - BATTLE.shadowStitchX) * f.facing;
+    const b = x + (h.x2 + BATTLE.shadowStitchX) * f.facing;
+    return {
+      left: Math.min(a, b),
+      right: Math.max(a, b),
+      top: y - h.y2 - BATTLE.shadowStitchY,
+      bottom: y - h.y1 + BATTLE.shadowStitchY,
+    };
   }
 
   function overlap(a, b) {
@@ -665,6 +683,12 @@
     // 戦っている間だけ操作できる
     const fighting = r.phase === PHASE.FIGHT;
     const [a, b] = state.fighters;
+    // 影縫い：動く前の位置で、相手の技の影縫い範囲に体が入っているか
+    for (let i = 0; i < 2; i++) {
+      const zone = shadowStitchBox(state.fighters[1 - i]);
+      const body = hurtbox(state.fighters[i]);
+      state.fighters[i].pinned = !!(zone && body && overlap(zone, body));
+    }
     updateFighter(a, fighting ? inputs[0] | 0 : 0);
     updateFighter(b, fighting ? inputs[1] | 0 : 0);
     pushApart(a, b);
@@ -703,6 +727,7 @@
     fighterHeight,
     hurtbox,
     hitbox,
+    shadowStitchBox,
     isFree,
     moveData,
     toStats,

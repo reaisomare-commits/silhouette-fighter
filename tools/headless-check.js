@@ -385,6 +385,30 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 22) {
   console.log(`OK 影縫い: ガードした側はその場に残り、攻めた側が${(400 * S - st2.fighters[0].x) / S}px下がる`);
 }
 
+// 影縫い：技の影縫い範囲に入っていると、後ろを押しても下がらずガードできる
+{
+  // カゲツの大振り斬りの先端ぎりぎりにリンを置き、ボタンを押した瞬間からリンが後ろを押し続ける
+  function stitch(gap) {
+    const st = closeGame("kagetsu", "rin", gap);
+    let blocked = false;
+    let pinned = false;
+    for (let i = 0; i < 30; i++) {
+      SF.game.step(st, [i === 0 ? I : 0, BUTTON.RIGHT]);
+      if (st.fighters[1].pose === POSE.BLOCK) blocked = true;
+      if (st.fighters[1].pinned) pinned = true;
+    }
+    return { blocked, pinned, hp: st.fighters[1].health, x: st.fighters[1].x };
+  }
+  const reach = CH.kagetsu.moves.standHeavy.hitbox.x2 + CH.rin.width / 2;
+  const edge = stitch(reach - 5);
+  assert.ok(edge.pinned && edge.blocked, "先端ぎりぎりでも影縫いでガードになるはず");
+  assert.strictEqual(edge.hp, CH.rin.health);
+  // 影縫い範囲の外なら、ふつうに後ろに歩いて下がれる
+  const far = stitch(reach + SF.characters.BATTLE.shadowStitchX + 20);
+  assert.ok(!far.pinned && !far.blocked, "影縫い範囲の外では下がれるはず");
+  console.log("OK 影縫い範囲: 技の先端ぎりぎりでも下がらずガード、範囲の外では下がれる");
+}
+
 // 先行入力：硬直中に押したボタンは、動けるようになった最初のフレームで出る。最後に押したものが優先
 {
   function bufferTest(seq) {

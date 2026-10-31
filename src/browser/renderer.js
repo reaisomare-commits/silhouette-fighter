@@ -389,7 +389,7 @@
       }
     }
 
-    // 当たり判定を見えるようにする（Hキー）。青＝やられる範囲、赤＝当たる範囲
+    // 当たり判定を見えるようにする（Hキー）。青＝やられる範囲、赤＝当たる範囲、黄色の点線＝影縫い範囲
     function drawBoxes(state) {
       for (const f of state.fighters) {
         const body = SF.game.hurtbox(f);
@@ -399,6 +399,14 @@
           ctx.lineWidth = 1;
           ctx.fillRect(body.left, body.top, body.right - body.left, body.bottom - body.top);
           ctx.strokeRect(body.left, body.top, body.right - body.left, body.bottom - body.top);
+        }
+        const zone = SF.game.shadowStitchBox(f);
+        if (zone) {
+          // 影縫い範囲（黄色の点線）
+          ctx.strokeStyle = "rgba(255, 220, 40, 0.95)";
+          ctx.setLineDash([6, 4]);
+          ctx.strokeRect(zone.left, zone.top, zone.right - zone.left, zone.bottom - zone.top);
+          ctx.setLineDash([]);
         }
         const box = SF.game.hitbox(f);
         if (box) {
