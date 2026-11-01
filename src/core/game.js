@@ -235,6 +235,7 @@
   }
 
   // 押した瞬間のボタンと方向キーの2回押しを先行入力として覚える。前に覚えていたものは上書き（最後の入力を優先）。
+  // 攻撃を覚えたあとに左右の移動キーを押したら、その攻撃は取り消す（移動が最後の入力なので、動けるようになったら移動する）。
   // 同じフレームに2つ押したときは 投げ（U＋I） ＞ 必殺技 ＞ 強攻撃 ＞ 弱攻撃 ＞ ジャンプ ＞ ステップ・ダッシュ・バックステップ の順
   function registerPresses(f, input) {
     // 「前」と「後ろ」は押した時点の向きで決める
@@ -261,6 +262,9 @@
     if (light) f.lightAge = 0;
     if (heavy) f.heavyAge = 0;
     // UとIを（ほぼ）同時に押したら投げ。少しずれても THROW_INPUT_WINDOW フレーム以内なら同時押し
+    // 攻撃ボタンのあとに左右の移動キーを押したら、覚えていた攻撃は取り消す（移動が最後の入力）
+    const moved = justPressed(input, f.prevInput, forwardBtn) || justPressed(input, f.prevInput, backBtn);
+    if (moved && ["light", "heavy", "special", "throw"].includes(f.buffer)) f.buffer = null;
     const win = BATTLE.throwInputWindow;
     const both = (light && f.heavyAge <= win) || (heavy && f.lightAge <= win);
     if (both) {

@@ -515,7 +515,20 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 30) {
   const r2 = bufferTest(seq2);
   assert.strictEqual(r2.second, "standHeavy", "最後に押した強攻撃が出るはず");
   assert.strictEqual(r2.at, r2.total);
-  console.log(`OK 先行入力: 硬直中に押した最後のボタンが最速（${r1.total + 1}F目）で出る`);
+  // 攻撃ボタンのあとに移動キーを押したら、攻撃は出ない（後ろ・前どちらも、押しっぱなしでも）
+  for (const dir of [BUTTON.LEFT, BUTTON.RIGHT]) {
+    const seq3 = [U];
+    seq3[5] = U;
+    for (let i = 8; i < 40; i++) seq3[i] = dir;
+    assert.strictEqual(bufferTest(seq3).second, null, "攻撃ボタンのあとに移動キーを押したら攻撃は出ないはず");
+    // 移動キーを押したあとに攻撃ボタンを押したら、攻撃が出る
+    const seq4 = [U];
+    for (let i = 3; i < 40; i++) seq4[i] = dir;
+    seq4[8] = dir | U;
+    seq4[9] = dir;
+    assert.strictEqual(bufferTest(seq4).second, "standLight", "移動キーのあとに押した攻撃は出るはず");
+  }
+  console.log(`OK 先行入力: 硬直中に押した最後のボタンが最速（${r1.total + 1}F目）で出る。攻撃のあとに移動キーを押したら攻撃は取り消し`);
 }
 
 // 先行入力：硬直中に方向キーを2回押すと、動けるようになった最初のフレームでステップ・ダッシュ・バックステップが出る
