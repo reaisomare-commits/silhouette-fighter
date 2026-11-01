@@ -40,17 +40,7 @@
   </head>
   <body>
     <canvas id="screen" width="960" height="540"></canvas>
-    <p><b data-key="LEFT">A</b> / <b data-key="RIGHT">D</b>：左右に移動（相手と反対の向きでガード）　<b data-key="DOWN">S</b>：しゃがみ（<b data-key="DOWN">S</b>＋反対の向きでしゃがみガード）　<b data-key="JUMP">スペース</b>：ジャンプ</p>
-    <p><b data-key="LIGHT">U</b>：弱攻撃　<b data-key="HEAVY">I</b>：強攻撃　（<b data-key="DOWN">S</b>＋<b data-key="LIGHT">U</b> / <b data-key="DOWN">S</b>＋<b data-key="HEAVY">I</b> でしゃがみ攻撃、ジャンプ中に <b data-key="LIGHT">U</b> / <b data-key="HEAVY">I</b> で空中攻撃）</p>
-    <p><b data-key="SPECIAL">O</b>：必殺技　<b data-key="DOWN">S</b>＋<b data-key="SPECIAL">O</b>：対空の必殺技　<b data-key="LIGHT">U</b>＋<b data-key="HEAVY">I</b>同時押し：投げ（投げられたら8F以内に<b data-key="LIGHT">U</b>＋<b data-key="HEAVY">I</b>で投げ抜け）</p>
-    <p>当たった・ガードされた <b data-key="LIGHT">U</b> / <b data-key="HEAVY">I</b> / <b data-key="DOWN">S</b>＋<b data-key="LIGHT">U</b> から <b data-key="SPECIAL">O</b> でキャンセル（<b data-key="DOWN">S</b>＋<b data-key="HEAVY">I</b> からはできない）。<b data-key="LIGHT">U</b> → <b data-key="HEAVY">I</b>（リンは <b data-key="LIGHT">U</b> → <b data-key="LIGHT">U</b> → <b data-key="HEAVY">I</b>）もつながる</p>
-    <p>ゲージ（体力の下）が満タンで <b data-key="HEAVY">I</b>＋<b data-key="SPECIAL">O</b> 同時押し：ゲージ技（カゲツ：月影斬　リン：練気＝6秒間すべての攻撃がキャンセルできる　ゲンマ：冥府球　ゴウ：大地落とし）</p>
-    <p>前を素早く2回：ステップ（カゲツ）／ダッシュ（リン）／ワープ（ゲンマ）／踏み込み（ゴウ）　後ろを素早く2回：バックステップ（ゲンマは後ろへワープ）</p>
-    <p>ゲンマ：ジャンプの頂上から<b data-key="JUMP">スペース</b>を押し続けると浮く　ジャンプ中に<b data-key="SPECIAL">O</b>：空中の異空間弾</p>
-    <p>ゴウ：<b data-key="SPECIAL">O</b>で岩落とし（投げ抜けできない投げ）　<b data-key="DOWN">S</b>＋<b data-key="SPECIAL">O</b>でつかみ上げ（空中の相手を掴む）　<b data-key="HEAVY">I</b>の大張り手は1発だけ攻撃を受け止める</p>
-    <p>メニュー：矢印キーでえらぶ　Enter：決定　Esc：もどる　キーは「モードをえらぶ」の「キーコンフィグ」で変えられます</p>
-    <p>試合中　Esc：一時停止　H：当たり判定を表示　3：相手を練習相手に（押すたびに動きを切り替え）　4：CPUにもどす</p>
-    <p>（画面をクリックしてから操作してください）</p>
+    <p>画面をクリックしてから操作してください。操作のしかたは「資料」で見られます（試合中も Esc →「資料を見る」）。</p>
     <div id="records" class="page" hidden>
       <h2>自動対戦と記録</h2>
       <div class="form">

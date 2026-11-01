@@ -1,78 +1,116 @@
 // タイトル・モード選択・キャラと強さの選択の「どこを選んでいるか」だけを持つ部分。
 // 画面やキーボードにはさわらず、「上・下・左・右・決定・もどる」の操作を受けて状態を変えるだけ。
 // 描くのは renderer.js、キーを操作に変えるのは main.js。
+//
+// モードは3つ：
+//   対戦　　　　…… あなた VS CPU か、CPU VS CPU（観戦）
+//   トレーニング …… 時間無制限・体力が自動で戻る練習。相手の動き（練習相手かCPU）を選べる
+//   資料　　　　…… 操作・ルール・キャラごとの技とフレーム。キーコンフィグもここから
 (function (root) {
   const SF = (root.SF = root.SF || {});
 
   const SCREEN = Object.freeze({
     TITLE: "title", // タイトル
     MODE: "mode", // モード選択
-    SELECT: "select", // キャラと強さの選択
+    SELECT: "select", // キャラと強さの選択（対戦・トレーニング）
   });
 
   const MODES = [
-    { id: "pvc", label: "プレイヤー VS CPU", note: "自分のキャラで、CPUと戦う" },
-    { id: "cvc", label: "CPU VS CPU", note: "CPU同士の対戦を観る" },
-    { id: "auto", label: "自動対戦と記録", note: "CPU同士を画面なしで何試合も戦わせ、勝率や技の記録を見る" },
-    { id: "learn", label: "学習AIをきたえる", note: "対戦をくり返して強くなるCPU（機械学習）を学習させる" },
-    { id: "keys", label: "キーコンフィグ", note: "移動や攻撃のキーを、好きなキーに変える" },
+    { id: "versus", label: "対戦", note: "CPUと戦う。CPU同士の対戦を観ることもできる" },
+    { id: "training", label: "トレーニング", note: "時間無制限、体力も自動で戻る。技や連続技を練習する" },
+    { id: "library", label: "資料", note: "操作のしかた・ルール・キャラごとの技とフレーム。キーの変更もここ" },
   ];
 
-  // キャラ選択画面の行。kind: char＝キャラ、level＝CPUの強さ、start＝はじめる
+  // 対戦のしかた
+  const VS_TYPES = [
+    { id: "pvc", label: "あなた VS CPU" },
+    { id: "cvc", label: "CPU VS CPU（観戦）" },
+  ];
+
+  // キャラ選択画面の行。kind: vsType＝対戦のしかた、char＝キャラ、level＝CPUの強さ、partner＝トレーニングの相手の動き、start＝はじめる
   const ROWS = {
     pvc: [
+      { kind: "vsType", label: "対戦のしかた" },
       { kind: "char", side: 0, label: "あなたのキャラ" },
       { kind: "char", side: 1, label: "相手のキャラ" },
       { kind: "level", side: 1, label: "CPUの強さ" },
-      { kind: "learnYou", label: "あなたから学ぶ" }, // 学習AIのときだけ使う
       { kind: "start", label: "たたかう！" },
     ],
     cvc: [
+      { kind: "vsType", label: "対戦のしかた" },
       { kind: "char", side: 0, label: "左のキャラ" },
       { kind: "level", side: 0, label: "左のCPUの強さ" },
       { kind: "char", side: 1, label: "右のキャラ" },
       { kind: "level", side: 1, label: "右のCPUの強さ" },
       { kind: "start", label: "観戦スタート" },
     ],
+    training: [
+      { kind: "char", side: 0, label: "あなたのキャラ" },
+      { kind: "char", side: 1, label: "相手のキャラ" },
+      { kind: "partner", side: 1, label: "相手の動き" },
+      { kind: "start", label: "練習スタート" },
+    ],
   };
 
   const charIds = () => Object.keys(SF.characters.CHARACTERS);
   const levelCount = () => SF.cpu.LEVELS.length;
+
+  // トレーニングの相手の動き：練習相手（SF.dummy の動き）のあとに、CPUの強さが並ぶ
+  function partners() {
+    const list = SF.dummy ? SF.dummy.MODES.map((m, i) => ({ dummy: i, label: m.label })) : [];
+    SF.cpu.LEVELS.forEach((lv, i) => list.push({ level: i, label: `CPU ${lv.label}` }));
+    return list;
+  }
 
   function createMenu() {
     return {
       screen: SCREEN.TITLE,
       modeCursor: 0,
       cursor: 0, // キャラ選択画面で選んでいる行
-      // モードごとに、前に選んだものを覚えておく（もどってきても選び直さなくてよい）
+      // 前に選んだものを覚えておく（もどってきても選び直さなくてよい）
       picks: {
-        pvc: { chars: ["kagetsu", "rin"], levels: [1, 1], learnYou: true },
-        cvc: { chars: ["kagetsu", "rin"], levels: [1, 1] },
+        versus: { type: 0, chars: ["kagetsu", "rin"], levels: [1, 1] },
+        training: { chars: ["kagetsu", "rin"], partner: 0 },
       },
     };
   }
 
   const modeId = (menu) => MODES[menu.modeCursor].id;
-  const rows = (menu) => ROWS[modeId(menu)];
   const picks = (menu) => menu.picks[modeId(menu)];
+  // 今の画面の行（対戦は「対戦のしかた」で行が変わる）
+  function rows(menu) {
+    const id = modeId(menu);
+    if (id === "versus") return ROWS[VS_TYPES[menu.picks.versus.type].id];
+    return ROWS[id] || [];
+  }
 
-  // 試合を始めるのに必要なもの。levels は CPU が動かす側だけ数字、プレイヤーの側は null
+  // 試合を始めるのに必要なもの。levels は CPU が動かす側だけ数字、プレイヤーの側は null。
+  // トレーニングで練習相手を選んだときは dummy に練習相手の動きの番号が入る（そのとき levels[1] は null）
   function matchConfig(menu) {
     const id = modeId(menu);
-    const p = menu.picks[id];
+    if (id === "training") {
+      const p = menu.picks.training;
+      const partner = partners()[p.partner];
+      return {
+        mode: "training",
+        chars: p.chars.slice(),
+        levels: [null, partner.level !== undefined ? partner.level : null],
+        dummy: partner.dummy !== undefined ? partner.dummy : null,
+      };
+    }
+    const p = menu.picks.versus;
+    const type = VS_TYPES[p.type].id;
     return {
-      mode: id,
+      mode: type,
       chars: p.chars.slice(),
-      levels: id === "pvc" ? [null, p.levels[1]] : p.levels.slice(),
-      // 学習AIが、あなたとの対戦から学ぶか（プレイヤー VS CPU で、相手が学習AIのときだけ true になりうる）
-      learnFromYou: id === "pvc" && !!SF.cpu.LEVELS[p.levels[1]].learned && !!p.learnYou,
+      levels: type === "pvc" ? [null, p.levels[1]] : p.levels.slice(),
     };
   }
 
   const wrap = (i, n) => (i + n) % n;
 
   // 操作を1つ受け取る。action は "up" "down" "left" "right" "ok" "back"
-  // 試合を始めるときだけ { start: 設定 }、自動対戦の画面を開くときは { auto: true }、学習AIの画面を開くときは { learn: true }、キーコンフィグを開くときは { keys: true } を返す。それ以外は null
+  // 試合を始めるときだけ { start: 設定 }、資料の画面を開くときは { library: true } を返す。それ以外は null
   function press(menu, action) {
     if (menu.screen === SCREEN.TITLE) {
       if (action === "ok") menu.screen = SCREEN.MODE;
@@ -83,9 +121,7 @@
       if (action === "up" || action === "left") menu.modeCursor = wrap(menu.modeCursor - 1, MODES.length);
       else if (action === "down" || action === "right") menu.modeCursor = wrap(menu.modeCursor + 1, MODES.length);
       else if (action === "ok") {
-        if (modeId(menu) === "auto") return { auto: true }; // 自動対戦はキャラ選択画面を使わない（別の画面で選ぶ）
-        if (modeId(menu) === "learn") return { learn: true }; // 学習AIも別の画面
-        if (modeId(menu) === "keys") return { keys: true }; // キーコンフィグも別の画面
+        if (modeId(menu) === "library") return { library: true }; // 資料は別の画面
         menu.screen = SCREEN.SELECT;
         menu.cursor = 0;
       } else if (action === "back") menu.screen = SCREEN.TITLE;
@@ -106,8 +142,10 @@
       } else if (row.kind === "level") {
         // 強さは端で止める（よわい←→つよいが一周すると分かりにくいため）
         p.levels[row.side] = Math.max(0, Math.min(levelCount() - 1, p.levels[row.side] + d));
-      } else if (row.kind === "learnYou") {
-        p.learnYou = !p.learnYou; // する・しないの切り替え
+      } else if (row.kind === "vsType") {
+        p.type = wrap(p.type + d, VS_TYPES.length);
+      } else if (row.kind === "partner") {
+        p.partner = Math.max(0, Math.min(partners().length - 1, p.partner + d));
       }
     } else if (action === "ok") {
       if (row.kind === "start") return { start: matchConfig(menu) };
@@ -116,5 +154,5 @@
     return null;
   }
 
-  SF.menu = { SCREEN, MODES, ROWS, createMenu, press, matchConfig, rows, picks };
+  SF.menu = { SCREEN, MODES, VS_TYPES, ROWS, createMenu, press, matchConfig, rows, picks, partners };
 })(globalThis);

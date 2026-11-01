@@ -10,6 +10,13 @@
   const ACCENT = { kagetsu: "#4da6ff", rin: "#ff4d4d", genma: "#b25cff", gou: "#ff8c2a" };
   const ACCENT_MIRROR = { kagetsu: "#5cff8a", rin: "#ffd24d", genma: "#ff7ad9", gou: "#5fe0d0" };
 
+  // 画面まわりの色と文字（墨と朱）。明朝は Windows・Mac・Linux それぞれにある書体を順に探す
+  const SHU = "#c42c1e"; // 朱
+  const PAPER = "#f3ead8"; // 和紙の白
+  const INK = "#140a0e"; // 墨
+  const FONT_SERIF = '"Yu Mincho", YuMincho, "Hiragino Mincho ProN", "Noto Serif JP", "Noto Serif CJK JP", "IPAMincho", serif';
+  const FONT_SANS = '"Hiragino Sans", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif';
+
   const POSE_LABEL = {
     [POSE.STAND]: "立ち",
     [POSE.WALK_FORWARD]: "前に歩く",
@@ -932,7 +939,7 @@
           const c = e.owner === 1 && other.charId === f.charId ? ACCENT_MIRROR[f.charId] : ACCENT[f.charId];
           ctx.save();
           ctx.globalAlpha = Math.min(1, e.life / 15);
-          ctx.font = "bold 40px sans-serif";
+          ctx.font = `bold 44px ${FONT_SERIF}`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.lineWidth = 8;
@@ -948,7 +955,7 @@
         if (e.kind === "text") {
           ctx.save();
           ctx.globalAlpha = Math.min(1, e.life / 15);
-          ctx.font = "bold 28px sans-serif";
+          ctx.font = `bold 28px ${FONT_SERIF}`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.lineWidth = 6;
@@ -1027,144 +1034,318 @@
       }
     }
 
+    // ---- 見た目の共通部品（墨と朱）----
+
+    // 文字の太さ・大きさを決める。serif＝明朝（見出し・名前）、そうでなければゴシック（説明文）
+    function setFont(size, weight = "bold", serif = true) {
+      ctx.font = `${weight} ${size}px ${serif ? FONT_SERIF : FONT_SANS}`;
+    }
+    function text(str, x, y, size, color, align = "center", weight = "bold", serif = false) {
+      setFont(size, weight, serif);
+      ctx.textAlign = align;
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = color;
+      ctx.fillText(str, x, y);
+    }
+    // 縁取りのある明朝の文字（背景の上でも読める）
+    function outlined(str, x, y, size, color, align = "center", serif = true) {
+      setFont(size, "bold", serif);
+      ctx.textAlign = align;
+      ctx.textBaseline = "middle";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = Math.max(3, size / 7);
+      ctx.strokeStyle = "rgba(10, 5, 8, 0.85)";
+      ctx.strokeText(str, x, y);
+      ctx.fillStyle = color;
+      ctx.fillText(str, x, y);
+    }
+    // 筆で引いたような形（左右の端が斜めに細くなる帯）。dir＝-1 で左右反転
+    function brushPath(x, y, w, h, dir = 1) {
+      const pts = [
+        [0, h * 0.3],
+        [w, 0],
+        [w - h * 0.5, h],
+        [h * 0.25, h * 0.88],
+      ];
+      ctx.beginPath();
+      pts.forEach(([px, py], k) => {
+        const xx = dir === 1 ? x + px : x + w - px;
+        if (k === 0) ctx.moveTo(xx, y + py);
+        else ctx.lineTo(xx, y + py);
+      });
+      ctx.closePath();
+    }
+    // 朱の筆跡（見出しの後ろや、選んでいる項目に敷く）
+    function shuStroke(x, y, w, h, alpha = 0.9) {
+      const g = ctx.createLinearGradient(x, 0, x + w, 0);
+      g.addColorStop(0, `rgba(196, 44, 30, ${alpha})`);
+      g.addColorStop(0.75, `rgba(196, 44, 30, ${alpha * 0.85})`);
+      g.addColorStop(1, "rgba(196, 44, 30, 0)");
+      ctx.fillStyle = g;
+      brushPath(x, y, w, h);
+      ctx.fill();
+    }
+    // 落款（赤い四角の判子）。filled＝false なら枠だけ
+    function seal(x, y, size, ch, filled = true) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-0.06);
+      if (filled) {
+        ctx.fillStyle = SHU;
+        ctx.fillRect(-size / 2, -size / 2, size, size);
+        text(ch, 0, 1, size * 0.68, PAPER, "center", "bold", true);
+      } else {
+        ctx.fillStyle = "rgba(10, 5, 8, 0.55)";
+        ctx.fillRect(-size / 2, -size / 2, size, size);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "rgba(243, 234, 216, 0.5)";
+        ctx.strokeRect(-size / 2 + 1, -size / 2 + 1, size - 2, size - 2);
+      }
+      ctx.restore();
+    }
+    // 墨の板（メニューの下地）。上下に細い線を引いて巻物のように
+    function inkPanel(x, y, w, h, alpha = 0.72) {
+      ctx.fillStyle = `rgba(12, 6, 10, ${alpha})`;
+      ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = "rgba(243, 234, 216, 0.35)";
+      ctx.fillRect(x, y, w, 1);
+      ctx.fillRect(x, y + h - 1, w, 1);
+    }
+    // メニューの1行。選んでいる行は朱の筆跡を敷いて、左に小さな菱形を置く
+    function menuRow(x, y, w, h, sel) {
+      ctx.fillStyle = "rgba(12, 6, 10, 0.6)";
+      ctx.fillRect(x, y, w, h);
+      if (sel) {
+        shuStroke(x - 6, y + 2, w + 6, h - 4, 0.95);
+        ctx.fillStyle = PAPER;
+        ctx.save();
+        ctx.translate(x + 14, y + h / 2);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillRect(-4, -4, 8, 8);
+        ctx.restore();
+      }
+    }
+    function dim(alpha) {
+      ctx.fillStyle = `rgba(8, 4, 10, ${alpha})`;
+      ctx.fillRect(0, 0, C.STAGE_WIDTH, C.STAGE_HEIGHT);
+    }
+    // 画面のいちばん下の操作のヒント
+    function hint(str) {
+      text(str, C.STAGE_WIDTH / 2, C.STAGE_HEIGHT - 22, 14, "rgba(243, 234, 216, 0.75)", "center", "normal");
+    }
+    // 見出し：明朝の大きな文字の下に朱の筆跡
+    function heading(str, y, size = 32) {
+      setFont(size, "bold", true);
+      const w = ctx.measureText(str).width;
+      shuStroke(C.STAGE_WIDTH / 2 - w / 2 - 20, y + size * 0.18, w + 60, size * 0.42, 0.85);
+      outlined(str, C.STAGE_WIDTH / 2, y, size, PAPER);
+    }
+    // キーの札（白い角丸の板に黒い文字）。幅を返す
+    function keyChip(label, x, y, size = 15) {
+      setFont(size, "bold", false);
+      const w = Math.max(size * 1.6, ctx.measureText(label).width + size * 0.9);
+      const h = size * 1.6;
+      ctx.fillStyle = PAPER;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(x, y - h / 2, w, h, 4);
+      else ctx.rect(x, y - h / 2, w, h);
+      ctx.fill();
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.fillRect(x + 2, y + h / 2 - 2, w - 4, 2);
+      text(label, x + w / 2, y + 1, size, INK, "center", "bold", false);
+      return w;
+    }
+    // 「{DOWN}＋{LIGHT}」のような書き方を、キーの札と文字に分けて描く。幅を返す（draw＝false なら測るだけ）
+    function keyLine(spec, x, y, size = 15, draw = true) {
+      let cx = x;
+      spec.split(/(\{[A-Z]+\})/).forEach((part) => {
+        if (!part) return;
+        const m = part.match(/^\{([A-Z]+)\}$/);
+        if (m) {
+          const label = KC.keyLabel(bindings[m[1]]);
+          if (draw) cx += keyChip(label, cx, y, size) + 3;
+          else {
+            setFont(size, "bold", false);
+            cx += Math.max(size * 1.6, ctx.measureText(label).width + size * 0.9) + 3;
+          }
+        } else {
+          setFont(size, "bold", false);
+          if (draw) text(part, cx, y, size, PAPER, "left", "bold", false);
+          cx += ctx.measureText(part).width + 3;
+        }
+      });
+      return cx - x;
+    }
+    // 決まった幅で折り返して書く。書いた行数を返す
+    function wrapText(str, x, y, maxW, size, color, lineH = size * 1.5) {
+      setFont(size, "normal", false);
+      const lines = [];
+      let line = "";
+      for (const ch of str) {
+        if (ctx.measureText(line + ch).width > maxW && line) {
+          lines.push(line);
+          line = ch;
+        } else line += ch;
+      }
+      if (line) lines.push(line);
+      lines.forEach((l, k) => text(l, x, y + k * lineH, size, color, "left", "normal", false));
+      return lines.length;
+    }
+
+    // ---- 試合の表示 ----
+
     // 連続技の表示：何発つながったかと合計ダメージ（2発以上のとき）
     function drawCombo(state) {
       state.comboInfo.forEach((info, i) => {
         if (!info || info.hits < 2) return;
         ctx.save();
         ctx.globalAlpha = Math.min(1, info.timer / 20);
-        ctx.textAlign = i === 0 ? "left" : "right";
-        ctx.textBaseline = "top";
         const x = i === 0 ? 40 : C.STAGE_WIDTH - 40;
-        ctx.lineWidth = 6;
-        ctx.strokeStyle = "rgba(0,0,0,0.8)";
-        ctx.font = "bold 34px sans-serif";
-        ctx.strokeText(`${info.hits} ヒット`, x, 110);
-        ctx.fillStyle = "#ffd24d";
-        ctx.fillText(`${info.hits} ヒット`, x, 110);
-        ctx.font = "bold 18px sans-serif";
-        ctx.strokeText(`${info.damage} ダメージ`, x, 150);
-        ctx.fillStyle = "#fff";
-        ctx.fillText(`${info.damage} ダメージ`, x, 150);
+        const align = i === 0 ? "left" : "right";
+        outlined(`${info.hits}`, x, 132, 48, PAPER, align);
+        setFont(48, "bold", true);
+        const nw = ctx.measureText(`${info.hits}`).width;
+        outlined("ヒット", i === 0 ? x + nw + 8 : x - nw - 8, 140, 22, "#ffcf6b", align);
+        outlined(`${info.damage} ダメージ`, x, 172, 16, PAPER, align, false);
         ctx.restore();
       });
     }
 
-    // ゲージ：体力バーの下。満タンになると光って「ゲージ技（I＋O）」と出る。リンの練気で強くなっている間は残り時間を出す
-    function drawGauge(state, f, i, barX, y, barW) {
-      const w = 220;
-      const gh = 10;
-      const x = i === 0 ? barX + barW - w : barX; // 体力と同じく真ん中（時計の側）にそろえる
+    // ゲージ：画面の下（地面の上）に左右それぞれ。満タンになると金色に脈打って「ゲージ技 I＋O」と出る。
+    // リンの練気で強くなっている間は残り時間を白い線で出す
+    function drawGauge(state, f, i) {
+      const w = 280;
+      const h = 14;
+      const y = C.GROUND_Y + 26;
+      const x = i === 0 ? 40 : C.STAGE_WIDTH - 40 - w;
       const rate = f.gauge / SF.game.GAUGE_FULL;
       const full = SF.game.gaugeFull(f);
-      const other = state.fighters[1 - i];
-      const accent = i === 1 && other.charId === f.charId ? ACCENT_MIRROR[f.charId] : ACCENT[f.charId];
-      ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-      ctx.fillRect(x - 2, y - 2, w + 4, gh + 4);
-      ctx.fillStyle = "#1c1c2c";
-      ctx.fillRect(x, y, w, gh);
-      const fillW = Math.round(w * rate);
-      ctx.fillStyle = full ? (Math.floor(state.frame / 6) % 2 ? "#fff6c8" : "#ffd24d") : accent;
-      ctx.fillRect(i === 0 ? x + w - fillW : x, y, fillW, gh);
-      // 練気の残り時間（ゲージの上に重ねて、白い線が減っていく）
+      // 名札「気」
+      seal(i === 0 ? x + 11 : x + w - 11, y + h / 2, 22, "気", full || rate > 0);
+      const bx = i === 0 ? x + 28 : x;
+      const bw = w - 28;
+      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+      brushPath(bx, y, bw, h, i === 0 ? 1 : -1);
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(243, 234, 216, 0.35)";
+      ctx.stroke();
+      // 中身は外側（画面の端）から溜まっていく
+      const fillW = Math.round(bw * rate);
+      ctx.save();
+      brushPath(bx, y, bw, h, i === 0 ? 1 : -1);
+      ctx.clip();
+      if (full) {
+        const pulse = 0.5 + 0.5 * Math.sin(state.frame / 5);
+        ctx.fillStyle = `rgb(${232 + 23 * pulse}, ${176 + 60 * pulse}, ${74 + 100 * pulse})`;
+      } else ctx.fillStyle = SHU;
+      ctx.fillRect(i === 0 ? bx : bx + bw - fillW, y, fillW, h);
+      // 4つの区切り
+      ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+      for (let k = 1; k < 4; k++) ctx.fillRect(bx + (bw * k) / 4, y, 2, h);
       const sup = CHARACTERS[f.charId].moves.super;
       if (f.buffTimer > 0 && sup && sup.buff) {
-        const bw = Math.round((w * f.buffTimer) / sup.buff.frames);
-        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-        ctx.fillRect(i === 0 ? x + w - bw : x, y + gh - 3, bw, 3);
+        const tw = Math.round((bw * f.buffTimer) / sup.buff.frames);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+        ctx.fillRect(i === 0 ? bx : bx + bw - tw, y + h - 4, tw, 4);
       }
+      ctx.restore();
       let note = null;
       if (f.buffTimer > 0 && sup && sup.buff) note = `${sup.name} のこり${Math.ceil(f.buffTimer / C.FPS)}秒`;
       else if (full) note = `ゲージ技 ${keyOf(BUTTON.HEAVY)}＋${keyOf(BUTTON.SPECIAL)}`;
-      if (note) {
-        ctx.save();
-        ctx.font = "bold 13px sans-serif";
-        ctx.textBaseline = "middle";
-        ctx.textAlign = i === 0 ? "right" : "left";
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "rgba(0,0,0,0.8)";
-        const tx = i === 0 ? x - 8 : x + w + 8;
-        ctx.strokeText(note, tx, y + gh / 2);
-        ctx.fillStyle = full ? "#ffd24d" : "#fff";
-        ctx.fillText(note, tx, y + gh / 2);
-        ctx.restore();
-      }
+      if (note) outlined(note, i === 0 ? x : x + w, y - 12, 15, full ? "#ffcf6b" : PAPER, i === 0 ? "left" : "right", false);
     }
 
-    // 画面上部：体力バー、名前、残り時間、取ったラウンド数
+    // 体力の「減ったばかりの分」を朱で少し残してから縮める（どれだけ減ったか目で追えるように）
+    const trail = [0, 0];
+    const trailWait = [0, 0];
+    const lastHealth = [0, 0];
+    function updateTrail(state) {
+      state.fighters.forEach((f, i) => {
+        const max = CHARACTERS[f.charId].health;
+        if (f.health < lastHealth[i]) trailWait[i] = 0; // 減ったばかりなら少し待つ
+        lastHealth[i] = f.health;
+        if (f.health >= trail[i] || trail[i] > max) trail[i] = f.health; // 回復（次のラウンド）や最初はそろえる
+        else if (trailWait[i] < 30) trailWait[i] += 1;
+        else trail[i] = Math.max(f.health, trail[i] - max * 0.008);
+      });
+    }
+
+    // 画面上部：体力バー（筆の帯）、名前、だれが動かしているか、取ったラウンド（判子）、残り時間
     function drawHud(state, sideLabels) {
       const r = state.round;
-      const barW = 360;
+      const barW = 370;
       const barH = 22;
-      const top = 20;
+      const top = 22;
+      updateTrail(state);
       state.fighters.forEach((f, i) => {
         const c = CHARACTERS[f.charId];
         const x = i === 0 ? 40 : C.STAGE_WIDTH - 40 - barW;
+        const dir = i === 0 ? -1 : 1; // 太い側を真ん中（時計の側）に
         const rate = f.health / c.health;
-        ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-        ctx.fillRect(x - 3, top - 3, barW + 6, barH + 6);
-        ctx.fillStyle = "#5a1010";
+        const trailRate = trail[i] / c.health;
+        // 下地
+        ctx.fillStyle = "rgba(10, 5, 8, 0.75)";
+        brushPath(x - 4, top - 4, barW + 8, barH + 8, dir);
+        ctx.fill();
+        ctx.save();
+        brushPath(x, top, barW, barH, dir);
+        ctx.clip();
+        ctx.fillStyle = "#3a0c0c";
         ctx.fillRect(x, top, barW, barH);
         // 体力は真ん中（時計の側）から減っていく
-        ctx.fillStyle = rate > 0.3 ? "#f2d14b" : "#ff5a3c";
+        const tW = Math.round(barW * trailRate);
+        ctx.fillStyle = SHU;
+        ctx.fillRect(i === 0 ? x + barW - tW : x, top, tW, barH);
         const fillW = Math.round(barW * rate);
+        ctx.fillStyle = rate > 0.3 ? PAPER : "#ff9a5a";
         ctx.fillRect(i === 0 ? x + barW - fillW : x, top, fillW, barH);
+        // 上半分を少し明るく（つや）
+        ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
+        ctx.fillRect(x, top, barW, barH * 0.35);
+        ctx.restore();
 
-        drawGauge(state, f, i, x, top + barH + 5, barW);
-
-        const lt = top + barH + 22; // 名前を書く高さ（ゲージの下）
-        ctx.font = "bold 16px sans-serif";
-        ctx.textBaseline = "top";
-        ctx.textAlign = i === 0 ? "left" : "right";
-        ctx.fillStyle = "#fff";
-        ctx.strokeStyle = "rgba(0,0,0,0.7)";
-        ctx.lineWidth = 3;
-        const label = `${c.name}  ${f.health}`;
+        // 名前とだれが動かしているか
         const lx = i === 0 ? x : x + barW;
-        ctx.strokeText(label, lx, lt);
-        ctx.fillText(label, lx, lt);
-        // だれが動かしているか（あなた／CPU の強さ）
+        const align = i === 0 ? "left" : "right";
+        outlined(c.name, lx, top + barH + 20, 22, PAPER, align);
         if (sideLabels && sideLabels[i]) {
-          ctx.font = "bold 13px sans-serif";
-          ctx.fillStyle = sideLabels[i] === "あなた" ? "#ffd24d" : "#cfe3ff";
-          ctx.strokeText(sideLabels[i], lx, lt + 22);
-          ctx.fillText(sideLabels[i], lx, lt + 22);
+          setFont(22, "bold", true);
+          const nw = ctx.measureText(c.name).width;
+          const you = sideLabels[i] === "あなた";
+          outlined(sideLabels[i], i === 0 ? lx + nw + 12 : lx - nw - 12, top + barH + 22, 13, you ? "#ffcf6b" : "#cfe3ff", align, false);
         }
 
-        // 取ったラウンド数（丸）
+        // 取ったラウンド（判子「勝」）
         for (let k = 0; k < BATTLE.winsToMatch; k++) {
-          const cx = i === 0 ? x + barW - 10 - k * 22 : x + 10 + k * 22;
-          ctx.beginPath();
-          ctx.arc(cx, lt + 10, 7, 0, Math.PI * 2);
-          ctx.fillStyle = k < r.wins[i] ? "#f2d14b" : "rgba(0,0,0,0.5)";
-          ctx.fill();
-          ctx.strokeStyle = "#fff";
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
+          const cx = i === 0 ? x + barW - 12 - k * 26 : x + 12 + k * 26;
+          seal(cx, top + barH + 20, 20, "勝", k < r.wins[i]);
         }
       });
-      // 残り時間
-      const sec = Math.ceil(r.timer / C.FPS);
-      ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-      ctx.fillRect(C.STAGE_WIDTH / 2 - 40, 10, 80, 50);
-      ctx.fillStyle = sec <= 10 ? "#ff6a4a" : "#fff";
-      ctx.font = "bold 36px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(String(sec), C.STAGE_WIDTH / 2, 37);
+      // 残り時間：墨の丸に明朝の数字
+      const sec = state.training ? "∞" : Math.ceil(r.timer / C.FPS);
+      const cx = C.STAGE_WIDTH / 2;
+      ctx.fillStyle = "rgba(10, 5, 8, 0.85)";
+      circle(cx, 38, 32);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = sec <= 10 ? SHU : "rgba(243, 234, 216, 0.6)";
+      ctx.beginPath();
+      ctx.arc(cx, 38, 28, 0, Math.PI * 2);
+      ctx.stroke();
+      text(String(sec), cx, 40, 32, sec <= 10 ? "#ff7a5a" : PAPER, "center", "bold", true);
       ctx.textAlign = "left";
     }
 
-    function bigText(text, y, size, color) {
-      ctx.font = `bold ${size}px sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.lineWidth = 8;
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
-      ctx.strokeText(text, C.STAGE_WIDTH / 2, y);
-      ctx.fillStyle = color;
-      ctx.fillText(text, C.STAGE_WIDTH / 2, y);
+    function bigText(str, y, size, color) {
+      outlined(str, C.STAGE_WIDTH / 2, y, size, color);
       ctx.textAlign = "left";
+    }
+    // 筆跡を敷いた大きな文字（ラウンド開始など）
+    function bannerText(str, y, size, color) {
+      setFont(size, "bold", true);
+      const w = ctx.measureText(str).width;
+      shuStroke(C.STAGE_WIDTH / 2 - (w + 120) / 2, y - size * 0.32, w + 120, size * 0.7, 0.85);
+      outlined(str, C.STAGE_WIDTH / 2, y, size, color);
     }
 
     // 画面の真ん中の大きな文字（ラウンド開始、KO、勝敗）
@@ -1172,39 +1353,73 @@
       const r = state.round;
       const name = (i) => CHARACTERS[state.fighters[i].charId].name;
       if (r.phase === PHASE.INTRO) {
-        if (r.phaseTimer > 35) bigText(`ラウンド ${r.number}`, 200, 56, "#fff");
-        else bigText("ファイト！", 200, 64, "#ffd24d");
+        if (r.phaseTimer > 35) bannerText(`第${r.number}戦`, 200, 60, PAPER);
+        else bannerText("勝負！", 200, 72, PAPER);
       } else if (r.phase === PHASE.ROUND_END || r.phase === PHASE.MATCH_END) {
-        bigText(r.reason === "ko" ? "KO" : "時間切れ", 180, 72, "#ff5a3c");
+        bigText(r.reason === "ko" ? "KO" : "時間切れ", 176, 80, r.reason === "ko" ? "#ff5a3c" : PAPER);
         const result = r.winner === "draw" ? "引き分け" : `${name(r.winner)}の勝ち`;
-        bigText(result, 250, 36, "#fff");
+        bigText(result, 250, 34, PAPER);
         if (r.phase === PHASE.MATCH_END) {
-          const m = r.matchWinner === "draw" ? "試合は引き分け" : `試合終了：${name(r.matchWinner)}の勝利！`;
-          bigText(m, 310, 32, "#ffd24d");
+          const m = r.matchWinner === "draw" ? "試合は引き分け" : `${name(r.matchWinner)}の勝利！`;
+          bannerText(m, 310, 34, "#ffcf6b");
         }
       }
     }
 
-    // 地面の上に、確認用の情報を小さく出す
-    function drawDebug(state, info) {
+    // 確認モード（Hキー）のときだけ、地面の真ん中に確認用の情報を小さく出す
+    let lastMove = null; // トレーニング：あなたが最後に出した技
+    function drawTraining(state, info) {
       const me = state.fighters[0];
-      ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
-      ctx.font = "13px sans-serif";
-      ctx.textBaseline = "top";
-      ctx.textAlign = "left";
+      const m = SF.game.moveData(me);
+      if (m) lastMove = { m, key: me.move };
+      const x = 40;
+      const y = 196;
+      if (lastMove) {
+        const t = lastMove.m;
+        inkPanel(x, y, 250, 76, 0.7);
+        text(t.name, x + 12, y + 16, 16, PAPER, "left", "bold", true);
+        const rows = [
+          `発生 ${t.buff ? "−" : t.startup + "F"}　持続 ${t.buff || t.projectile ? "−" : t.active + "F"}　硬直 ${t.recovery === null ? "着地まで" : t.recovery + "F"}`,
+          t.kind === "throw" ? `投げ　${t.noTech ? "投げ抜けできない" : "投げ抜けできる"}` : `当てて ${adv(t.hitAdv)}　ガードされて ${adv(t.blockAdv)}`,
+        ];
+        rows.forEach((r, k) => text(r, x + 12, y + 40 + k * 20, 12, "rgba(243,234,216,0.85)", "left", "normal"));
+      }
+      ctx.fillStyle = "rgba(10, 5, 8, 0.7)";
+      ctx.fillRect(0, C.STAGE_HEIGHT - 24, C.STAGE_WIDTH, 24);
+      text(
+        `トレーニング　H：当たり判定（${info.showBoxes ? "表示中" : "なし"}）　G：ゲージ満タン（${info.fullGauge ? "オン" : "オフ"}）　3：相手の動きを変える　4：CPUにする　Esc：一時停止`,
+        C.STAGE_WIDTH / 2,
+        C.STAGE_HEIGHT - 12,
+        12,
+        "rgba(243, 234, 216, 0.85)",
+        "center",
+        "normal",
+      );
+    }
+
+    function drawDebug(state, info) {
+      if (info.training) {
+        drawTraining(state, info);
+        return;
+      }
+      if (!info.showBoxes) {
+        text(`Esc：一時停止`, C.STAGE_WIDTH / 2, C.STAGE_HEIGHT - 16, 12, "rgba(243, 234, 216, 0.5)", "center", "normal");
+        return;
+      }
+      const me = state.fighters[0];
       const pressed = KC.ACTIONS.filter((a) => isDown(info.input, a.button)).map((a) => keyOf(a.button));
       const m = SF.game.moveData(me);
       const now = poseLabel(me.pose) + (m ? `（${m.name}）` : "");
-      ctx.fillText(
-        `計算 ${info.updatesPerSec}回/秒　描画 ${info.drawsPerSec}回/秒　押しているキー: ${pressed.length ? pressed.join(" ") : "なし"}　いまの動き: ${now}`,
-        16,
-        C.GROUND_Y + 14,
-      );
-      const extra = info.mode === "pvc" ? "　3:練習相手にする（押すたびに動きを切り替え） 4:CPUにもどす" : "";
-      ctx.fillText(
-        `Esc:一時停止　当たり判定（H）: ${info.showBoxes ? "あり" : "なし"}${extra}`,
-        16,
-        C.GROUND_Y + 36,
+      ctx.fillStyle = "rgba(10, 5, 8, 0.7)";
+      ctx.fillRect(0, C.STAGE_HEIGHT - 26, C.STAGE_WIDTH, 26);
+      text(
+        `確認モード（H で閉じる）　計算 ${info.updatesPerSec}回/秒　描画 ${info.drawsPerSec}回/秒　押しているキー: ${pressed.length ? pressed.join(" ") : "なし"}　いまの動き: ${now}`,
+        C.STAGE_WIDTH / 2,
+        C.STAGE_HEIGHT - 13,
+        12,
+        "rgba(255, 255, 255, 0.85)",
+        "center",
+        "normal",
       );
     }
 
@@ -1213,9 +1428,12 @@
     const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家", genma: "ワープと術で翻弄する悪役", gou: "近づいて投げる力自慢の大男" };
     // キャラ一覧に出す短い説明
     const CHAR_SHORT = { kagetsu: "飛び道具と対空", rin: "速さで攻める", genma: "離れて術で戦う", gou: "投げで大ダメージ" };
+    // 判子に使う1文字
+    const CHAR_SEAL = { kagetsu: "影", rin: "拳", genma: "冥", gou: "剛" };
     const LEVEL_NOTE = ["はじめての人に", "慣れてきたら", "腕に自信がある人に", "対戦から学んだCPU"];
     const HINT_MENU = "↑↓：えらぶ　Enter：決定　Esc：もどる";
     const HINT_SELECT = "↑↓：項目をえらぶ　←→：変える　Enter：決定　Esc：もどる";
+    const SIDE_COLOR = [SHU, "#3d6fb5"]; // あなた（左）＝朱、相手（右）＝藍
 
     // 見本のキャラは、試合と同じ描き方で描く。キャラの組み合わせごとに状態を作っておく
     const previews = {};
@@ -1235,72 +1453,56 @@
       return st;
     }
 
-    function text(str, x, y, size, color, align = "center", weight = "bold") {
-      ctx.font = `${weight} ${size}px sans-serif`;
-      ctx.textAlign = align;
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = color;
-      ctx.fillText(str, x, y);
-    }
-    function outlined(str, x, y, size, color, align = "center") {
-      ctx.font = `bold ${size}px sans-serif`;
-      ctx.textAlign = align;
-      ctx.textBaseline = "middle";
-      ctx.lineWidth = Math.max(3, size / 8);
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
-      ctx.strokeText(str, x, y);
-      ctx.fillStyle = color;
-      ctx.fillText(str, x, y);
-    }
-    function panel(x, y, w, h, selected) {
-      ctx.fillStyle = selected ? "rgba(0, 0, 0, 0.8)" : "rgba(20, 12, 20, 0.72)";
-      ctx.fillRect(x, y, w, h);
-      ctx.lineWidth = selected ? 3 : 1;
-      ctx.strokeStyle = selected ? "#ffd24d" : "rgba(255, 255, 255, 0.25)";
-      ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-    }
-    function dim(alpha) {
-      ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
-      ctx.fillRect(0, 0, C.STAGE_WIDTH, C.STAGE_HEIGHT);
-    }
-    function hint(str) {
-      text(str, C.STAGE_WIDTH / 2, C.STAGE_HEIGHT - 24, 15, "rgba(255, 255, 255, 0.8)", "center", "normal");
-    }
-
     function drawTitle(tick) {
       drawBackground();
       drawPreview(["kagetsu", "rin"], [C.STAGE_WIDTH * 0.3, C.STAGE_WIDTH * 0.7], tick);
-      // 上を少し暗くして文字を読みやすく
-      const shade = ctx.createLinearGradient(0, 0, 0, 260);
-      shade.addColorStop(0, "rgba(10, 5, 25, 0.75)");
-      shade.addColorStop(1, "rgba(10, 5, 25, 0)");
+      // 上を暗くして文字を読みやすく
+      const shade = ctx.createLinearGradient(0, 0, 0, 290);
+      shade.addColorStop(0, "rgba(10, 5, 20, 0.8)");
+      shade.addColorStop(1, "rgba(10, 5, 20, 0)");
       ctx.fillStyle = shade;
-      ctx.fillRect(0, 0, C.STAGE_WIDTH, 260);
-      outlined("シルエット格闘", C.STAGE_WIDTH / 2, 110, 84, "#fff");
-      text("S I L H O U E T T E   F I G H T E R", C.STAGE_WIDTH / 2, 172, 18, "#ffd8a0");
-      // 点滅する「スタート」
-      if (Math.floor(tick / 30) % 2 === 0) outlined("Enterキーでスタート", C.STAGE_WIDTH / 2, 236, 28, "#ffd24d");
-      // バージョン（右下）
-      text(`ver ${C.VERSION}`, C.STAGE_WIDTH - 16, C.STAGE_HEIGHT - 24, 15, "rgba(255, 255, 255, 0.8)", "right", "normal");
+      ctx.fillRect(0, 0, C.STAGE_WIDTH, 290);
+      // 題字の後ろの朱の筆跡と、横の判子
+      shuStroke(170, 128, 640, 36, 0.9);
+      outlined("シルエット格闘", C.STAGE_WIDTH / 2, 108, 88, PAPER);
+      seal(812, 70, 40, "影");
+      text("S I L H O U E T T E   F I G H T E R", C.STAGE_WIDTH / 2, 186, 16, "#ffd8a0", "center", "bold", true);
+      // ゆっくり明滅する「スタート」
+      ctx.save();
+      ctx.globalAlpha = 0.55 + 0.45 * Math.sin(tick / 14);
+      outlined("Enter キーで はじめる", C.STAGE_WIDTH / 2, 240, 26, "#ffcf6b");
+      ctx.restore();
+      text(`ver ${C.VERSION}`, C.STAGE_WIDTH - 16, C.STAGE_HEIGHT - 22, 13, "rgba(243, 234, 216, 0.7)", "right", "normal");
       hint("（画面をクリックしてから操作してください）");
     }
 
     function drawModeSelect(menu, tick) {
       drawBackground();
-      drawPreview(["kagetsu", "rin"], [C.STAGE_WIDTH * 0.3, C.STAGE_WIDTH * 0.7], tick);
-      dim(0.5);
-      outlined("モードをえらぶ", C.STAGE_WIDTH / 2, 70, 36, "#fff");
-      const w = 600;
-      const h = 70;
-      const x = (C.STAGE_WIDTH - w) / 2;
+      drawPreview(["kagetsu", "rin"], [C.STAGE_WIDTH * 0.66, C.STAGE_WIDTH * 0.86], tick);
+      // 左側を墨で暗く
+      const shade = ctx.createLinearGradient(0, 0, C.STAGE_WIDTH * 0.62, 0);
+      shade.addColorStop(0, "rgba(8, 4, 10, 0.85)");
+      shade.addColorStop(0.8, "rgba(8, 4, 10, 0.6)");
+      shade.addColorStop(1, "rgba(8, 4, 10, 0)");
+      ctx.fillStyle = shade;
+      ctx.fillRect(0, 0, C.STAGE_WIDTH, C.STAGE_HEIGHT);
+      outlined("モードをえらぶ", 70, 56, 34, PAPER, "left");
+      shuStroke(60, 72, 260, 12, 0.85);
+      const x = 70;
+      const w = 400;
+      const h = 46;
+      const top = 100;
       SF.menu.MODES.forEach((m, i) => {
-        const y = 104 + i * 80;
+        const y = top + i * (h + 8);
         const sel = i === menu.modeCursor;
-        panel(x, y, w, h, sel);
-        if (sel) text("▶", x + 34, y + h / 2, 26, "#ffd24d");
-        text(m.label, C.STAGE_WIDTH / 2, y + 27, 28, sel ? "#fff" : "rgba(255,255,255,0.55)");
-        text(m.note, C.STAGE_WIDTH / 2, y + 54, 15, sel ? "#ffd8a0" : "rgba(255,255,255,0.4)", "center", "normal");
+        menuRow(x, y, w, h, sel);
+        text(m.label, x + 34, y + h / 2 + 1, 24, sel ? PAPER : "rgba(243, 234, 216, 0.6)", "left", "bold", true);
       });
+      // 選んでいるモードの説明（一か所にまとめて出す）
+      const note = SF.menu.MODES[menu.modeCursor].note;
+      const ny = top + SF.menu.MODES.length * (h + 8) + 8;
+      inkPanel(x, ny, w, 40, 0.6);
+      text(note, x + 14, ny + 20, 14, "#ffd8a0", "left", "normal");
       hint(HINT_MENU);
     }
 
@@ -1308,99 +1510,125 @@
       const mode = SF.menu.MODES[menu.modeCursor];
       const p = SF.menu.picks(menu);
       const rows = SF.menu.rows(menu);
-      const xs = [140, C.STAGE_WIDTH - 140];
+      const xs = [118, C.STAGE_WIDTH - 118];
 
       drawBackground();
-      dim(0.3);
+      dim(0.35);
       drawPreview(p.chars, xs, tick);
 
       // 左右のキャラの名前と説明、だれが動かすか
       [0, 1].forEach((i) => {
         const id = p.chars[i];
-        const who = mode.id === "pvc" && i === 0 ? "あなた" : `CPU ${SF.cpu.LEVELS[p.levels[i]].label}`;
-        outlined(who, xs[i], 150, 18, i === 0 && mode.id === "pvc" ? "#ffd24d" : "#cfe3ff");
-        outlined(CHARACTERS[id].name, xs[i], 186, 34, "#fff");
-        outlined(CHAR_NOTE[id] || "", xs[i], 220, 14, "#ffd8a0");
-        // 同じキャラ同士のときは、右の差し色が変わることを知らせる
-        if (i === 1 && p.chars[0] === p.chars[1]) outlined("（同キャラ：差し色が変わります）", xs[i], 242, 12, "#ddd");
+        const cfg = SF.menu.matchConfig(menu);
+        const you = cfg.levels[i] === null && !(i === 1 && cfg.dummy !== null && cfg.dummy !== undefined);
+        let who = you ? "あなた" : `CPU ${SF.cpu.LEVELS[cfg.levels[i]] ? SF.cpu.LEVELS[cfg.levels[i]].label : ""}`;
+        if (i === 1 && cfg.dummy !== null && cfg.dummy !== undefined) who = "練習相手";
+        seal(xs[i], 118, 44, CHAR_SEAL[id] || "影");
+        outlined(who, xs[i], 158, 15, you ? "#ffcf6b" : "#cfe3ff", "center", false);
+        outlined(CHARACTERS[id].name, xs[i], 190, 32, PAPER);
+        outlined(CHAR_NOTE[id] || "", xs[i], 222, 12, "#ffd8a0", "center", false);
+        if (i === 1 && p.chars[0] === p.chars[1]) outlined("（同キャラ：差し色が変わります）", xs[i], 242, 11, "#ddd", "center", false);
       });
 
-      outlined("キャラと強さをえらぶ", C.STAGE_WIDTH / 2, 44, 30, "#fff");
-      text(mode.label, C.STAGE_WIDTH / 2, 78, 16, "#ffd8a0");
+      heading("キャラと強さをえらぶ", 36, 28);
+      text(mode.id === "training" ? "トレーニング" : `対戦：${SF.menu.VS_TYPES[p.type].label}`, C.STAGE_WIDTH / 2, 70, 13, "#ffd8a0", "center", "normal");
 
-      const w = 340;
+      drawRoster(mode.id === "versus" && SF.menu.VS_TYPES[p.type].id === "cvc" ? "cvc" : "pvc", p, rows[menu.cursor], tick, 86);
+
+      const w = 480;
       const x = (C.STAGE_WIDTH - w) / 2;
-      const rowH = 48;
-      const top = 92;
+      const rowH = rows.length > 5 ? 34 : 38;
+      const top = rows.length > 5 ? 230 : 240;
       rows.forEach((row, r) => {
-        const y = top + r * (rowH + 8);
+        const y = top + r * (rowH + 6);
         const sel = r === menu.cursor;
         if (row.kind === "start") {
-          ctx.fillStyle = sel ? "#ffd24d" : "#7a5a22";
-          ctx.fillRect(x, y + 4, w, rowH - 8);
-          if (sel) {
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = "#fff";
-            ctx.strokeRect(x + 1.5, y + 5.5, w - 3, rowH - 11);
+          ctx.fillStyle = sel ? SHU : "rgba(12, 6, 10, 0.7)";
+          brushPath(x + 40, y + 2, w - 80, rowH, 1);
+          ctx.fill();
+          if (!sel) {
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = "rgba(196, 44, 30, 0.9)";
+            ctx.stroke();
           }
-          text(row.label, C.STAGE_WIDTH / 2, y + rowH / 2, 26, sel ? "#2a1a1a" : "rgba(255,255,255,0.7)");
+          text(row.label, C.STAGE_WIDTH / 2, y + rowH / 2 + 3, 24, sel ? PAPER : "rgba(243, 234, 216, 0.7)", "center", "bold", true);
           return;
         }
-        panel(x, y, w, rowH, sel);
-        text(row.label, x + 12, y + 12, 13, sel ? "#ffd8a0" : "rgba(255,255,255,0.5)", "left", "normal");
         let value;
         let note = "";
         let off = false; // 今は使われない行（薄く描く）
         if (row.kind === "char") value = CHARACTERS[p.chars[row.side]].name;
-        else if (row.kind === "learnYou") {
-          off = !SF.cpu.LEVELS[p.levels[1]].learned;
-          value = off ? "ー" : p.learnYou ? "する" : "しない";
-          note = off ? "学習AIのときだけ" : p.learnYou ? "あなたに合わせて変わる" : "いつもの学習AI";
+        else if (row.kind === "vsType") value = SF.menu.VS_TYPES[p.type].label;
+        else if (row.kind === "partner") {
+          value = SF.menu.partners()[p.partner].label;
+          note = p.partner < SF.dummy.MODES.length ? "決まった動きをくり返す" : "CPUが本気で戦う";
         } else {
           const lv = p.levels[row.side];
           value = SF.cpu.LEVELS[lv].label;
           note = LEVEL_NOTE[lv] || "";
-          // 強さを丸の数でも見せる
+        }
+        const under = row.kind === "level" || row.kind === "partner"; // 説明を値の下に書く行
+        menuRow(x, y, w, rowH, sel && !off);
+        if (sel && off) {
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = "rgba(243, 234, 216, 0.4)";
+          ctx.strokeRect(x + 0.5, y + 0.5, w - 1, rowH - 1);
+        }
+        text(row.label, x + 28, y + rowH / 2, 13, sel ? PAPER : "rgba(243, 234, 216, 0.55)", "left", "normal");
+        const vx = x + 260;
+        text(value, vx, y + rowH / 2 + (under ? -4 : 1), 20, off ? "rgba(243,234,216,0.3)" : sel ? PAPER : "rgba(243, 234, 216, 0.75)", "center", "bold", true);
+        if (row.kind === "level" && SF.cpu.LEVELS[p.levels[row.side]].learned) note = "どの試合からも学ぶCPU";
+        if (row.kind === "level") {
+          // 強さを判子の数でも見せる
+          const lv = p.levels[row.side];
           for (let k = 0; k < SF.cpu.LEVELS.length; k++) {
-            ctx.fillStyle = k <= lv ? "#ff8a4a" : "rgba(255,255,255,0.2)";
-            circle(C.STAGE_WIDTH / 2 - 16 + k * 16, y + 43, 4);
+            ctx.fillStyle = k <= lv ? (sel ? PAPER : "#e07a4a") : "rgba(243,234,216,0.2)";
+            ctx.fillRect(x + w - 70 + k * 14, y + rowH / 2 - 4, 9, 9);
           }
         }
-        text(value, C.STAGE_WIDTH / 2, y + 27, 22, off ? "rgba(255,255,255,0.3)" : sel ? "#fff" : "rgba(255,255,255,0.7)");
-        if (note) text(note, x + w - 12, y + 12, 12, sel ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.4)", "right", "normal");
+        if (note && !under) text(note, x + w - 12, y + rowH / 2, 11, sel ? "rgba(243,234,216,0.85)" : "rgba(243,234,216,0.4)", "right", "normal");
+        if (under) text(note, vx, y + rowH - 7, 10, sel ? "rgba(243,234,216,0.8)" : "rgba(243,234,216,0)", "center", "normal");
         if (sel && !off) {
           // 左右で変えられることを示す矢印（端の強さでは、それ以上いけない側を薄く）
-          const lv = p.levels[row.side];
-          const canL = row.kind !== "level" || lv > 0;
-          const canR = row.kind !== "level" || lv < SF.cpu.LEVELS.length - 1;
-          text("◀", x + 50, y + 27, 18, canL ? "#ffd24d" : "rgba(255,210,77,0.25)");
-          text("▶", x + w - 50, y + 27, 18, canR ? "#ffd24d" : "rgba(255,210,77,0.25)");
+          const lv = row.kind === "level" ? p.levels[row.side] : 0;
+          let canL = row.kind !== "level" || lv > 0;
+          let canR = row.kind !== "level" || lv < SF.cpu.LEVELS.length - 1;
+          if (row.kind === "partner") {
+            canL = p.partner > 0;
+            canR = p.partner < SF.menu.partners().length - 1;
+          }
+          text("◀", vx - 110, y + rowH / 2, 15, canL ? PAPER : "rgba(243,234,216,0.25)");
+          text("▶", vx + 110, y + rowH / 2, 15, canR ? PAPER : "rgba(243,234,216,0.25)");
         }
       });
-      drawRoster(mode, p, rows[menu.cursor], tick, top + rows.length * (rowH + 6) + 4);
       hint(HINT_SELECT);
     }
 
-    // キャラ一覧：全員を並べて、今だれを選んでいるか（左右）を印で見せる。キャラの行を選んでいるときは、その側の枠を光らせる
+    // キャラ一覧：4人を大きなカードで並べて、今だれを選んでいるか（左右）を札で見せる。キャラの行を選んでいるときは、その側の枠を光らせる
     const rosterStates = {};
-    function drawRoster(mode, p, row, tick, top) {
+    function drawRoster(kind, p, row, tick, top) {
       const ids = Object.keys(CHARACTERS);
-      const cw = 136;
-      const ch = 118;
+      const cw = 116;
+      const ch = 136;
       const gap = 10;
       const left = (C.STAGE_WIDTH - (ids.length * cw + (ids.length - 1) * gap)) / 2;
-      const sideLabel = mode.id === "pvc" ? ["あなた", "相手"] : ["左", "右"];
-      const sideColor = ["#ffd24d", "#8fc8ff"];
+      const sideLabel = kind === "pvc" ? ["あなた", "相手"] : ["左", "右"];
       ids.forEach((id, k) => {
         const cx = left + k * (cw + gap);
         const picked = [0, 1].filter((side) => p.chars[side] === id);
         const focus = row && row.kind === "char" && p.chars[row.side] === id ? row.side : -1;
-        ctx.fillStyle = picked.length ? "rgba(0, 0, 0, 0.78)" : "rgba(20, 12, 20, 0.6)";
+        // カードの下地：夕焼けを切り取ったような色
+        const g = ctx.createLinearGradient(0, top, 0, top + ch);
+        g.addColorStop(0, picked.length ? "rgba(90, 30, 40, 0.9)" : "rgba(30, 16, 24, 0.75)");
+        g.addColorStop(1, picked.length ? "rgba(200, 90, 60, 0.85)" : "rgba(60, 30, 30, 0.7)");
+        ctx.fillStyle = g;
         ctx.fillRect(cx, top, cw, ch);
-        ctx.lineWidth = focus >= 0 ? 3 : 1;
-        ctx.strokeStyle = focus >= 0 ? sideColor[focus] : picked.length ? "rgba(255, 255, 255, 0.55)" : "rgba(255, 255, 255, 0.2)";
-        ctx.strokeRect(cx + 0.5, top + 0.5, cw - 1, ch - 1);
-        // 小さなシルエット（試合と同じ描き方）
+        ctx.fillStyle = "rgba(10, 5, 8, 0.85)";
+        ctx.fillRect(cx, top + ch - 38, cw, 38);
+        ctx.lineWidth = focus >= 0 ? 4 : 1;
+        ctx.strokeStyle = focus >= 0 ? (focus === 0 ? "#ff6a4a" : "#6fa0ff") : picked.length ? "rgba(243, 234, 216, 0.6)" : "rgba(243, 234, 216, 0.2)";
+        ctx.strokeRect(cx + ctx.lineWidth / 2, top + ctx.lineWidth / 2, cw - ctx.lineWidth, ch - ctx.lineWidth);
+        // シルエット（試合と同じ描き方）
         if (!rosterStates[id]) {
           const st = SF.game.createGame(1, [id, id]);
           st.fighters[0].x = 0;
@@ -1410,22 +1638,24 @@
         const st = rosterStates[id];
         st.frame = tick;
         ctx.save();
-        ctx.globalAlpha = picked.length ? 1 : 0.6;
-        ctx.translate(cx + cw / 2, top + 80);
-        ctx.scale(0.37, 0.37);
+        ctx.beginPath();
+        ctx.rect(cx, top, cw, ch - 38);
+        ctx.clip();
+        ctx.globalAlpha = picked.length ? 1 : 0.55;
+        ctx.translate(cx + cw / 2, top + ch - 40);
+        ctx.scale(0.42, 0.42);
         drawFighter(st.fighters[0], 0, st);
         ctx.restore();
-        text(CHARACTERS[id].name, cx + cw / 2, top + 93, 16, picked.length ? "#fff" : "rgba(255,255,255,0.6)");
-        text(CHAR_SHORT[id] || "", cx + cw / 2, top + 109, 11, picked.length ? "#ffd8a0" : "rgba(255,216,160,0.5)", "center", "normal");
-        // 選んでいる側の印（同じキャラ同士なら2つ）
+        text(CHARACTERS[id].name, cx + cw / 2, top + ch - 25, 17, picked.length ? PAPER : "rgba(243,234,216,0.6)", "center", "bold", true);
+        text(CHAR_SHORT[id] || "", cx + cw / 2, top + ch - 9, 10, picked.length ? "#ffd8a0" : "rgba(255,216,160,0.5)", "center", "normal");
+        // 選んでいる側の札（同じキャラ同士なら2つ）
         picked.forEach((side) => {
-          const lx = side === 0 ? cx + 4 : cx + cw - 4;
-          ctx.font = "bold 12px sans-serif";
+          setFont(12, "bold", false);
           const tw = ctx.measureText(sideLabel[side]).width + 10;
-          const bx = side === 0 ? lx : lx - tw;
-          ctx.fillStyle = sideColor[side];
+          const bx = side === 0 ? cx + 4 : cx + cw - 4 - tw;
+          ctx.fillStyle = SIDE_COLOR[side];
           ctx.fillRect(bx, top + 4, tw, 18);
-          text(sideLabel[side], bx + tw / 2, top + 13, 12, "#1a1020");
+          text(sideLabel[side], bx + tw / 2, top + 13, 12, PAPER);
         });
       });
     }
@@ -1438,63 +1668,255 @@
       ctx.textAlign = "left";
     }
 
-    // キーコンフィグ画面。左に操作の名前、右に今のキー
+    // キーコンフィグ画面。左に操作の名前、右に今のキー（札）
     function drawKeyConfig(screen, tick) {
       drawBackground();
-      dim(0.6);
-      outlined("キーコンフィグ", C.STAGE_WIDTH / 2, 40, 32, "#fff");
-      text("操作をえらんで Enter を押し、使いたいキーを押してください（ほかの操作と同じキーなら入れ替わります）", C.STAGE_WIDTH / 2, 74, 14, "#ffd8a0", "center", "normal");
-      const w = 460;
+      dim(0.65);
+      heading("キーコンフィグ", 38, 30);
+      text("操作をえらんで Enter を押し、使いたいキーを押してください（ほかの操作と同じキーなら入れ替わります）", C.STAGE_WIDTH / 2, 76, 13, "#ffd8a0", "center", "normal");
+      const w = 440;
       const x = (C.STAGE_WIDTH - w) / 2;
-      const rowH = 38;
-      const top = 92;
+      const rowH = 36;
+      const top = 96;
       KC.ROWS.forEach((row, r) => {
-        const y = top + r * (rowH + 4) + (row.kind === "action" ? 0 : 8);
+        const y = top + r * (rowH + 4) + (row.kind === "action" ? 0 : 10);
         const sel = r === screen.cursor;
-        panel(x, y, w, rowH, sel);
-        if (sel) text("▶", x + 22, y + rowH / 2, 16, "#ffd24d");
+        menuRow(x, y, w, rowH, sel);
         if (row.kind !== "action") {
-          text(row.label, C.STAGE_WIDTH / 2, y + rowH / 2, 20, sel ? "#fff" : "rgba(255,255,255,0.6)");
+          text(row.label, C.STAGE_WIDTH / 2, y + rowH / 2 + 1, 18, sel ? PAPER : "rgba(243,234,216,0.6)", "center", "bold", true);
           return;
         }
-        text(row.label, x + 44, y + rowH / 2, 20, sel ? "#fff" : "rgba(255,255,255,0.7)", "left");
-        let key = KC.keyLabel(bindings[row.id]);
-        let color = sel ? "#ffd24d" : "rgba(255,255,255,0.85)";
+        text(row.label, x + 34, y + rowH / 2 + 1, 19, sel ? PAPER : "rgba(243,234,216,0.75)", "left", "bold", true);
         if (sel && screen.waiting) {
-          key = Math.floor(tick / 20) % 2 === 0 ? "キーを押してください" : "";
-          color = "#ff8a4a";
+          if (Math.floor(tick / 20) % 2 === 0) text("キーを押してください", x + w - 16, y + rowH / 2, 16, "#ffcf6b", "right");
+          return;
         }
-        text(key, x + w - 24, y + rowH / 2, 20, color, "right");
+        const label = KC.keyLabel(bindings[row.id]);
+        setFont(15, "bold", false);
+        const cw = Math.max(24, ctx.measureText(label).width + 13.5);
+        keyChip(label, x + w - 16 - cw, y + rowH / 2, 15);
       });
-      if (screen.message) text(screen.message, C.STAGE_WIDTH / 2, C.STAGE_HEIGHT - 52, 15, "#cfe3ff", "center", "normal");
+      if (screen.message) text(screen.message, C.STAGE_WIDTH / 2, C.STAGE_HEIGHT - 50, 14, "#cfe3ff", "center", "normal");
       hint(screen.waiting ? "使いたいキーを押す　Esc：やめる" : "↑↓：えらぶ　Enter：キーを変える　Esc：もどる");
+      ctx.textAlign = "left";
+    }
+
+    // ---- 資料（操作・ルール・キャラごとの技とフレーム）----
+    // 行は [キーの書き方, 説明]。キーの書き方の {LIGHT} などは、今の割り当てのキーの札になる
+    const CHAR_IDS = Object.keys(CHARACTERS);
+    const LIBRARY_PAGES = [
+      {
+        title: "基本の動き",
+        rows: [
+          ["{LEFT} {RIGHT}", "左右に移動"],
+          ["相手と反対", "立ちガード（相手と反対の向きに歩くとガード）"],
+          ["{DOWN}", "しゃがむ（{DOWN}＋相手と反対でしゃがみガード）"],
+          ["{JUMP}", "ジャンプ（{LEFT} か {RIGHT} と一緒で斜めジャンプ）"],
+          ["前を2回", "ステップ・ダッシュ・ワープ・踏み込み（キャラで変わる）"],
+          ["後ろを2回", "バックステップ（ゲンマは後ろへワープ）"],
+        ],
+        tip: "下段は しゃがみガード、中段と空中攻撃は 立ちガードでしか防げません。",
+      },
+      {
+        title: "攻撃",
+        rows: [
+          ["{LIGHT}", "弱攻撃（速い）"],
+          ["{HEAVY}", "強攻撃（遅いけど痛い）"],
+          ["{DOWN}＋{LIGHT} / {HEAVY}", "しゃがみ攻撃（下段）"],
+          ["空中で {LIGHT} / {HEAVY}", "空中攻撃（1回のジャンプで1回）"],
+          ["{SPECIAL}", "必殺技"],
+          ["{DOWN}＋{SPECIAL}", "対空の必殺技（跳んできた相手に）"],
+          ["{LIGHT}＋{HEAVY}", "投げ（近くで。投げられたら8F以内に同じ押し方で投げ抜け）"],
+        ],
+        tip: "ガードを固める相手には投げ、投げようとする相手には攻撃が勝ちます。",
+      },
+      {
+        title: "つなぎとゲージ",
+        rows: [
+          ["{LIGHT} → {HEAVY}", "当たるかガードされたらつながる（リンは {LIGHT} → {LIGHT} → {HEAVY}）"],
+          ["→ {SPECIAL}", "{LIGHT} {HEAVY} {DOWN}＋{LIGHT} の途中で必殺技を出せる（キャンセル）"],
+          ["コンボ補正", "連続技は2発目90%、3発目80%…とダメージが下がる"],
+          ["ゲージ", "画面の下。攻撃を当てる・受ける・ガードすると溜まる"],
+          ["{HEAVY}＋{SPECIAL}", "ゲージが満タン（金色）のときゲージ技"],
+          ["消極的", "前に出ず飛び道具だけの時間が5秒続くとゲージが減る"],
+        ],
+        tip: "ゲージ技はどんな技の途中からでも出せます。体力バーの朱色は今減った分です。",
+      },
+      ...CHAR_IDS.map((id) => ({ title: CHARACTERS[id].name, char: id })),
+      {
+        title: "便利なキー",
+        rows: [
+          ["Esc", "一時停止（資料を見る・キャラ選択・タイトルへ）"],
+          ["H", "当たり判定と、押しているキーなどを表示"],
+          ["G", "トレーニング：ゲージをずっと満タンにする"],
+          ["3", "相手を練習相手に（押すたびに動きが変わる）"],
+          ["4", "練習相手からCPUにもどす"],
+        ],
+        tip: "3・4 は あなた VS CPU とトレーニングで使えます。試合の操作に割り当てたキーでは働きません。",
+      },
+      { title: "キーの変更", keys: true },
+    ];
+
+    // キャラのページの説明（技の表の下に出す）
+    const CHAR_TIPS = {
+      kagetsu: "リーチの長い剣士。飛刃で牽制し、跳んできたら昇り斬り。前2回でステップ。ゲージ技の月影斬は出だし10F無敵で、暗転前からガードしていないと防げない。",
+      rin: "速い拳法家。突進拳は押してためて離す（最大ためで飛び道具をすり抜け、ガードされても+1）。前2回でダッシュ。練気は6秒間すべての攻撃がキャンセルできる。",
+      genma: "術で戦う悪役。異空間弾は離れた所に開く門から出て、空中でも撃てる。前2回でワープ。ジャンプの頂上から押し続けると浮く。冥府球はガードされても押し続ける。",
+      gou: "体力1300の投げの大男。張り手はリーチが長い。大張り手は1発だけ攻撃を受け止める（踏ん張り）。岩落とし・つかみ上げ・大地落としは投げ抜けできない。",
+    };
+    // 技の表に並べる順番と、出し方
+    const MOVE_ORDER = [
+      ["standLight", "{LIGHT}"],
+      ["standHeavy", "{HEAVY}"],
+      ["crouchLight", "{DOWN}＋{LIGHT}"],
+      ["crouchHeavy", "{DOWN}＋{HEAVY}"],
+      ["airLight", "空中 {LIGHT}"],
+      ["airHeavy", "空中 {HEAVY}"],
+      ["special", "{SPECIAL}"],
+      ["airSpecial", "空中 {SPECIAL}"],
+      ["crouchSpecial", "{DOWN}＋{SPECIAL}"],
+      ["throw", "{LIGHT}＋{HEAVY}"],
+      ["super", "{HEAVY}＋{SPECIAL}"],
+    ];
+    const GUARD_LABEL = { mid: "上下どちらでも", high: "中段（立ち）", low: "下段（しゃがみ）", air: "立ちガード" };
+    const adv = (v) => (v === undefined || v === null ? "−" : v === "down" ? "ダウン" : v > 0 ? `+${v}` : String(v));
+
+    function drawCharPage(id, top) {
+      const c = CHARACTERS[id];
+      const x = 40;
+      const w = C.STAGE_WIDTH - 80;
+      seal(x + 18, top + 16, 28, CHAR_SEAL[id] || "影");
+      text(c.name, x + 42, top + 17, 24, PAPER, "left", "bold", true);
+      text(`体力 ${c.health}　${CHAR_NOTE[id] || ""}`, x + 42 + 24 * c.name.length + 12, top + 18, 13, "#ffd8a0", "left", "normal");
+      // 列：出し方・技・発生・持続・硬直・当てて・ガードされて・ダメージ・防ぎ方
+      const cols = [
+        { label: "出し方", x: x + 8, align: "left" },
+        { label: "技", x: x + 150, align: "left" },
+        { label: "発生", x: x + 350, align: "right" },
+        { label: "持続", x: x + 405, align: "right" },
+        { label: "硬直", x: x + 470, align: "right" },
+        { label: "当てて", x: x + 545, align: "right" },
+        { label: "ガードされて", x: x + 640, align: "right" },
+        { label: "ダメージ", x: x + 715, align: "right" },
+        { label: "防ぎ方", x: x + 735, align: "left" },
+      ];
+      const ty = top + 44;
+      inkPanel(x, ty, w, 24, 0.85);
+      cols.forEach((col) => text(col.label, col.x, ty + 12, 12, "#ffcf6b", col.align, "bold"));
+      const rowH = 23;
+      let y = ty + 26;
+      MOVE_ORDER.forEach(([key, how]) => {
+        const m = c.moves[key];
+        if (!m) return;
+        ctx.fillStyle = key === "super" ? "rgba(196, 44, 30, 0.35)" : "rgba(12, 6, 10, 0.55)";
+        ctx.fillRect(x, y, w, rowH - 2);
+        const cy = y + rowH / 2 - 1;
+        keyLine(how, x + 8, cy, 11);
+        const isThrow = m.kind === "throw";
+        const name = m.name + (key === "super" ? "（ゲージ技）" : "");
+        const vals = [
+          name,
+          m.buff ? "−" : `${m.startup}F`,
+          m.buff || m.projectile ? "−" : `${m.active}F`,
+          m.recovery === null ? "着地まで" : `${m.recovery}F`,
+          isThrow || m.buff ? "−" : adv(m.hitAdv),
+          isThrow || m.buff ? "−" : adv(m.blockAdv),
+          m.damage ? String(m.damage) : "−",
+          isThrow ? (m.noTech ? "投げ抜け不可" : "投げ抜け") : m.buff ? "−" : GUARD_LABEL[m.guard] || "",
+        ];
+        vals.forEach((v, k) => {
+          const col = cols[k + 1];
+          let color = "rgba(243,234,216,0.9)";
+          if ((k === 4 || k === 5) && /^[+]/.test(v)) color = "#8fe08a";
+          if ((k === 4 || k === 5) && /^-/.test(v)) color = "#ff9a7a";
+          text(v, col.x, cy, k === 0 ? 13 : 12, color, col.align, k === 0 ? "bold" : "normal", k === 0);
+        });
+        y += rowH;
+      });
+      wrapText(CHAR_TIPS[id] || "", x + 4, y + 16, w - 8, 13, "#ffd8a0", 19);
+    }
+
+    function drawKeysPage(top) {
+      const w = 420;
+      const x = (C.STAGE_WIDTH - w) / 2;
+      KC.ACTIONS.forEach((a, r) => {
+        const y = top + 8 + r * 38;
+        inkPanel(x, y, w, 34, 0.55);
+        text(a.label, x + 16, y + 17, 17, PAPER, "left", "bold", true);
+        const label = KC.keyLabel(bindings[a.id]);
+        setFont(15, "bold", false);
+        keyChip(label, x + w - 16 - Math.max(24, ctx.measureText(label).width + 13.5), y + 17, 15);
+      });
+      const by = top + 8 + KC.ACTIONS.length * 38 + 8;
+      menuRow(x, by, w, 38, true);
+      text("Enter：キーを変える", C.STAGE_WIDTH / 2, by + 20, 18, PAPER, "center", "bold", true);
+    }
+
+    function drawLibrary(page, tick) {
+      drawBackground();
+      dim(0.75);
+      heading("資料", 30, 26);
+      // ページの見出し（いま見ているページを朱で）
+      const pages = LIBRARY_PAGES;
+      setFont(13, "bold", true);
+      const widths = pages.map((pg) => ctx.measureText(pg.title).width + 20);
+      const total = widths.reduce((a, b) => a + b, 0) + (pages.length - 1) * 4;
+      let tx = (C.STAGE_WIDTH - total) / 2;
+      pages.forEach((pg, k) => {
+        const sel = k === page;
+        ctx.fillStyle = sel ? SHU : "rgba(12, 6, 10, 0.65)";
+        ctx.fillRect(tx, 56, widths[k], 24);
+        text(pg.title, tx + widths[k] / 2, 69, 13, sel ? PAPER : "rgba(243,234,216,0.55)", "center", "bold", true);
+        tx += widths[k] + 4;
+      });
+      const pg = pages[page];
+      if (pg.char) drawCharPage(pg.char, 92);
+      else if (pg.keys) drawKeysPage(92);
+      else {
+        const x = 90;
+        const w = C.STAGE_WIDTH - 180;
+        const rowH = 40;
+        pg.rows.forEach(([keys, desc], r) => {
+          const y = 100 + r * (rowH + 4);
+          inkPanel(x, y, w, rowH, 0.55);
+          if (/\{/.test(keys)) keyLine(keys, x + 14, y + rowH / 2, 15);
+          else text(keys, x + 14, y + rowH / 2, 15, "#ffcf6b", "left", "bold");
+          keyLine(desc, x + 230, y + rowH / 2, 14);
+        });
+        if (pg.tip) {
+          const y = 100 + pg.rows.length * (rowH + 4) + 12;
+          seal(x + 12, y + 14, 22, "要");
+          text(pg.tip, x + 32, y + 14, 14, "#ffd8a0", "left", "normal");
+        }
+      }
+      // 左右の矢印
+      const pulse = 0.5 + 0.5 * Math.sin(tick / 10);
+      text("◀", 20, 290, 20, `rgba(243,234,216,${0.3 + 0.5 * pulse})`);
+      text("▶", C.STAGE_WIDTH - 20, 290, 20, `rgba(243,234,216,${0.3 + 0.5 * pulse})`);
+      hint(`←→：ページ（${page + 1} / ${pages.length}）　Esc：もどる`);
       ctx.textAlign = "left";
     }
 
     // 試合の上に出す小さなメニュー（一時停止・試合終了）
     function drawOverlay(o) {
-      const w = 300;
-      const itemH = 36;
-      const h = o.items.length * itemH + 16;
+      const w = 320;
+      const itemH = 40;
+      const h = o.items.length * (itemH + 4) + 12;
       const x = (C.STAGE_WIDTH - w) / 2;
       let y;
       if (o.kind === "pause") {
-        dim(0.55);
-        outlined("一時停止", C.STAGE_WIDTH / 2, 170, 44, "#fff");
-        y = 220;
+        dim(0.6);
+        heading("一時停止", 150, 40);
+        y = 196;
       } else {
-        y = C.GROUND_Y - h - 4; // 決着の文字の下、地面より上に
+        y = C.GROUND_Y - h + 30; // 決着の文字の下
       }
-      panel(x, y, w, h, true);
+      inkPanel(x - 16, y, w + 32, h, 0.75);
       o.items.forEach((item, i) => {
-        const iy = y + 8 + i * itemH + itemH / 2;
+        const iy = y + 8 + i * (itemH + 4);
         const sel = i === o.cursor;
-        if (sel) {
-          ctx.fillStyle = "rgba(255, 210, 77, 0.2)";
-          ctx.fillRect(x + 8, iy - itemH / 2 + 3, w - 16, itemH - 6);
-          text("▶", x + 30, iy, 16, "#ffd24d");
-        }
-        text(item, C.STAGE_WIDTH / 2, iy, 20, sel ? "#fff" : "rgba(255,255,255,0.6)");
+        if (sel) menuRow(x, iy, w, itemH, true);
+        text(item, C.STAGE_WIDTH / 2, iy + itemH / 2 + 1, 20, sel ? PAPER : "rgba(243,234,216,0.6)", "center", "bold", true);
       });
       ctx.textAlign = "left";
     }
@@ -1513,6 +1935,7 @@
         if (info.showBoxes) drawBoxes(state);
         drawEffects(state);
         drawHud(state, info.sideLabels);
+        state.fighters.forEach((f, i) => drawGauge(state, f, i));
         drawCombo(state);
         drawMessages(state);
         drawDebug(state, info);
@@ -1520,6 +1943,8 @@
       },
       drawMenu,
       drawKeyConfig,
+      drawLibrary,
+      LIBRARY_PAGE_COUNT: LIBRARY_PAGES.length,
       setBindings(b) {
         bindings = Object.assign({}, b);
       },

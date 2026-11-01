@@ -154,6 +154,11 @@
     if (options.record) {
       Object.defineProperty(state, "log", { value: { moves: [{}, {}] }, enumerable: false });
     }
+    // options.training = true：トレーニング。時間が減らず、KOにならず（体力は1で止まる）、
+    // 連続技が途切れて少したつと体力が満タンに戻る（training は描画や記録には使わない、試合の決まりだけの印）
+    if (options.training) {
+      Object.defineProperty(state, "training", { value: { wait: [0, 0] }, enumerable: false });
+    }
     if (options.intro === false) {
       state.round.phase = PHASE.FIGHT;
       state.round.phaseTimer = 0;
@@ -1415,9 +1420,25 @@
   }
 
   // ラウンドの勝ち負けを調べる
+  // トレーニングで体力が満タンに戻るまでの待ち（連続技が途切れてから何フレームか）
+  const TRAINING_REFILL = 40;
+
   function checkRoundEnd(state) {
     const r = state.round;
     const [a, b] = state.fighters;
+    if (state.training) {
+      r.timer = BATTLE.roundSeconds * C.FPS;
+      state.fighters.forEach((f, i) => {
+        const max = CHARACTERS[f.charId].health;
+        f.health = Math.max(1, f.health);
+        if (f.combo > 0 || f.health >= max) state.training.wait[i] = 0;
+        else if (++state.training.wait[i] >= TRAINING_REFILL) {
+          f.health = max;
+          state.training.wait[i] = 0;
+        }
+      });
+      return;
+    }
     let winner = null;
     if (a.health === 0 || b.health === 0) {
       r.reason = "ko";
