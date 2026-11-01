@@ -851,6 +851,20 @@ for (const att of ["kagetsu", "rin", "genma"]) {
     assert.ok(floatMove(L) < -40, "浮いている間に左へ動けるはず");
     assert.strictEqual(floatMove(0), 0, "キーを押さなければ浮いたまま止まるはず");
   }
+  // 浮いている間は、やられる範囲の下側が hurtCut だけ小さい
+  {
+    const st = newGame(1, ["genma", "kagetsu"]);
+    const g = st.fighters[0];
+    let before = null;
+    let during = null;
+    for (let i = 0; i < 40; i++) {
+      SF.game.step(st, [BUTTON.JUMP, 0]);
+      const hb = SF.game.hurtbox(g);
+      if (!g.floating && !g.onGround) before = hb.bottom - hb.top;
+      if (g.floating && !during) during = hb.bottom - hb.top;
+    }
+    assert.strictEqual(before - during, G.float.hurtCut, "浮いている間のやられる範囲の下側が小さくなっていない");
+  }
   // カゲツは浮かない
   {
     const st = newGame(1, ["kagetsu", "genma"]);

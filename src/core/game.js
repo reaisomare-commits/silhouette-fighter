@@ -660,7 +660,9 @@
     const w = CHARACTERS[f.charId].width;
     const x = f.x / S;
     const y = f.y / S;
-    return { left: x - w / 2, right: x + w / 2, top: y - fighterHeight(f), bottom: y };
+    // 浮いている間は、やられる範囲の下側が小さくなる（ゲンマ）
+    const cut = f.floating ? CHARACTERS[f.charId].float.hurtCut || 0 : 0;
+    return { left: x - w / 2, right: x + w / 2, top: y - fighterHeight(f), bottom: y - cut };
   }
 
   // 技を出している間の、伸ばした手足・刀のやられる範囲（hurtExtend があればその範囲、なければ当たる範囲）。

@@ -127,7 +127,8 @@
       // 浮遊：ジャンプの頂上を過ぎてからジャンプのキーを押し続けると、落ちずに浮いて止まる（1回のジャンプで1回）。
       //   frames: 浮いていられる最大のフレーム数、speed: 浮いている間に左右のキーで動く速さ（1フレームに何ピクセル）
       //   離すとそこから（そのときの横の速さのまま）落ち始め、もう浮けない
-      float: { frames: 40, speed: 2.5 },
+      //   hurtCut: 浮いている間は、やられる範囲の下側をこのピクセルだけ小さくする（衣のすそには当たらない）
+      float: { frames: 40, speed: 2.5, hurtCut: 50 },
       // 前を素早く2回：ワープ（消えて、distance ピクセル先に現れる）。消えている frames の間は攻撃も投げも当たらない。
       // 相手をすり抜けて裏に回れる。recovery は現れてから動けるまで
       forwardDash: { type: "warp", frames: 12, distance: 170, recovery: 12 },
@@ -148,8 +149,8 @@
         // 異空間弾（空中）：空中で O。前の門から斜め下へ飛び、相手の高さへ曲がっていく（fall＝はじめに1フレームに下へ進むピクセル）。1回のジャンプで空中攻撃とどちらか1回。
         // 硬直差は「自分が低い所で出して、すぐ着地したとき」の値
         airSpecial: { name: "異空間弾（空中）", kind: "special", startup: 12, active: 1, recovery: null, hitAdv: 6, blockAdv: 1, damage: 90, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 40, y1: 40, y2: 100 }, push: 10, projectile: { speed: 5, fall: 5, width: 32, height: 32, spawnX: 60, y: 40, portal: true, homing: { turn: 0.25, max: 5 } } },
-        // 闇柱：対空。少し前の地面の門から、頭の上まで闇の柱が立つ。柱は門から出るので、伸びるやられる範囲は小さい
-        crouchSpecial: { name: "闇柱", kind: "special", startup: 9, active: 6, recovery: 22, hitAdv: "down", blockAdv: -14, damage: 120, guard: "mid", hitbox: { x1: 10, x2: 90, y1: 0, y2: 230 }, hurtExtend: { x1: 0, x2: 30, y1: 40, y2: 160 }, push: 16 },
+        // 闇柱：対空。少し前の地面の門から、頭の上まで太い闇の柱が立つ（自分の少し後ろから前へ130pxまで）。柱は門から出るので、伸びるやられる範囲は小さい
+        crouchSpecial: { name: "闇柱", kind: "special", startup: 9, active: 6, recovery: 22, hitAdv: "down", blockAdv: -14, damage: 120, guard: "mid", hitbox: { x1: -10, x2: 130, y1: 0, y2: 230 }, hurtExtend: { x1: 0, x2: 30, y1: 40, y2: 160 }, push: 16 },
         throw: { name: "闇引き", kind: "throw", startup: 5, active: 2, recovery: 22, damage: 135, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 } },
       },
     },
