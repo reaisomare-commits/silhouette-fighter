@@ -72,10 +72,11 @@
       crouchHeight: 85,
       walkForward: 3.6,
       walkBack: 2.8,
-      jumpVelocity: 15.7,
-      jumpForward: 3.4,
-      gravity: 0.6,
-      // → 高さ約205ピクセル、滞空約52フレーム（0.87秒）
+      // ジャンプはカゲツと同じ
+      jumpVelocity: 13,
+      jumpForward: 2.6,
+      gravity: 0.53,
+      // → 高さ約160ピクセル、滞空約49フレーム（0.8秒）
       landingLag: 3,
       // 前を素早く2回：ダッシュ（押している間ずっと走る）
       forwardDash: {

@@ -76,7 +76,7 @@ function jumpInfo(id) {
 }
 const kj = jumpInfo("kagetsu");
 const rj = jumpInfo("rin");
-assert.ok(rj.height > kj.height, "リンの方がジャンプが高いはず");
+assert.deepStrictEqual(rj, kj, "ジャンプは2人とも同じはず");
 console.log(`OK ジャンプ: カゲツ 高さ${kj.height}px/${kj.air}F、リン 高さ${rj.height}px/${rj.air}F`);
 
 {
@@ -307,7 +307,7 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 30) {
     const st = newGame(1, [att, att === "rin" ? "kagetsu" : "rin"]);
     const [a, b] = st.fighters;
     a.x = 300 * S;
-    b.x = (att === "rin" ? 470 : 430) * S; // リンは遠くまで跳ぶので離しておく
+    b.x = 430 * S;
     let hitAt = -1;
     let pose = null;
     let sa = -1;
