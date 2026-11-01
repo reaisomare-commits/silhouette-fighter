@@ -14,7 +14,7 @@
   const renderer = SF.renderer.createRenderer(document.getElementById("screen"));
   const menu = SF.menu.createMenu();
 
-  let scene = "menu"; // "menu" か "battle"
+  let scene = "menu"; // "menu"（メニュー）、"battle"（試合）、"records"（自動対戦と記録）
   let config = null; // 試合の設定（モード、キャラ、強さ）。メニューで決まる
   let state = null;
   let cpus = [null, null]; // CPUが動かす側だけ入る
@@ -43,6 +43,12 @@
     useDummy = false;
     scene = "battle";
     newMatch();
+  }
+
+  // 自動対戦と記録の画面を開く。閉じたらタイトルにもどる
+  function openRecords() {
+    scene = "records";
+    SF.recordsPage.open(() => backToMenu(SF.menu.SCREEN.TITLE));
   }
 
   function backToMenu(screen) {
@@ -85,6 +91,7 @@
   }
 
   root.addEventListener("keydown", (e) => {
+    if (scene === "records") return; // 自動対戦の画面はボタンとマウスで操作する（キーはふつうに入力欄で使う）
     const action = MENU_KEYS[e.code];
     if (e.code.startsWith("Arrow") || e.code === "Space" || e.code === "Backspace") e.preventDefault(); // 画面がスクロールしないように
 
@@ -92,6 +99,7 @@
       if (!action || (e.repeat && (action === "ok" || action === "back"))) return;
       const result = SF.menu.press(menu, action);
       if (result && result.start) startBattle(result.start);
+      if (result && result.auto) openRecords();
       return;
     }
 
@@ -174,7 +182,9 @@
       counterStart = now;
     }
 
-    if (scene === "menu") {
+    if (scene === "records") {
+      // 自動対戦の画面では何も描かない（計算の邪魔をしない）
+    } else if (scene === "menu") {
       renderer.drawMenu(menu, tick);
     } else {
       const label = (i) => {

@@ -9,6 +9,28 @@
       body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; box-sizing: border-box; }
       canvas { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; image-rendering: pixelated; }
       p { margin: 0; font-size: 14px; text-align: center; }
+      /* 自動対戦と記録の画面 */
+      body.records-open { justify-content: flex-start; }
+      body.records-open > canvas, body.records-open > p { display: none; }
+      #records { width: 100%; max-width: 960px; }
+      #records h2 { margin: 4px 0 12px; font-size: 22px; color: #ffd8a0; }
+      #records h3 { margin: 20px 0 6px; font-size: 16px; color: #fff; }
+      #records .note { text-align: left; font-size: 12px; color: #999; margin: 0 0 6px; }
+      #records .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 16px; background: #1c1c1c; padding: 12px; border-radius: 8px; }
+      #records label { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+      #records select, #records input[type="number"] { flex: 1; min-width: 0; font-size: 14px; padding: 4px; background: #2a2a2a; color: #eee; border: 1px solid #444; border-radius: 4px; }
+      #records .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 8px; }
+      #records button { font-size: 15px; padding: 8px 16px; border-radius: 6px; border: 1px solid #555; background: #333; color: #eee; cursor: pointer; }
+      #records button.primary { background: #c56a1c; border-color: #e08a3a; color: #fff; }
+      #records button:disabled { opacity: 0.4; cursor: default; }
+      #records progress { width: 100%; height: 10px; }
+      #ab-status { text-align: left; font-size: 14px; color: #ccc; margin: 4px 0; }
+      #records .table-wrap { overflow-x: auto; }
+      #records table { border-collapse: collapse; font-size: 13px; width: 100%; white-space: nowrap; }
+      #records th, #records td { border-bottom: 1px solid #333; padding: 4px 8px; text-align: right; }
+      #records thead th { color: #ffd8a0; font-weight: normal; border-bottom: 1px solid #666; }
+      #records tbody th { text-align: left; font-weight: normal; color: #fff; }
+      #records thead th:first-child { text-align: left; }
     </style>
   </head>
   <body>
@@ -21,6 +43,35 @@
     <p>メニュー：矢印キーかWASDでえらぶ　Enter：決定　Esc：もどる</p>
     <p>試合中　Esc：一時停止　H：当たり判定を表示　3：相手を練習相手に（押すたびに動きを切り替え）　4：CPUにもどす</p>
     <p>（画面をクリックしてから操作してください）</p>
+    <div id="records" hidden>
+      <h2>自動対戦と記録</h2>
+      <div class="form">
+        <label>左のキャラ <select id="ab-char0"></select></label>
+        <label>左の強さ <select id="ab-level0"></select></label>
+        <label>右のキャラ <select id="ab-char1"></select></label>
+        <label>右の強さ <select id="ab-level1"></select></label>
+        <label>試合数
+          <select id="ab-matches">
+            <option>100</option>
+            <option>500</option>
+            <option selected>1000</option>
+            <option>2000</option>
+            <option>5000</option>
+          </select>
+        </label>
+        <label>種（シード） <input id="ab-seed" type="number" min="0" value="1" /></label>
+        <label><input id="ab-swap" type="checkbox" checked /> 左右を入れ替えた試合も半分行う</label>
+      </div>
+      <div class="buttons">
+        <button id="ab-start" class="primary">開始</button>
+        <button id="ab-stop" disabled>中止</button>
+        <button id="ab-csv" disabled>CSVで保存</button>
+        <button id="ab-back">タイトルにもどる</button>
+      </div>
+      <progress id="ab-bar" value="0"></progress>
+      <p id="ab-status">条件を選んで「開始」を押してください。同じ条件と種なら、何度やっても同じ結果になります。</p>
+      <div id="ab-result"></div>
+    </div>
     <script src="src/core/constants.js"></script>
     <script src="src/core/rng.js"></script>
     <script src="src/core/input.js"></script>
@@ -29,8 +80,10 @@
     <script src="src/core/dummy.js"></script>
     <script src="src/core/cpu.js"></script>
     <script src="src/core/menu.js"></script>
+    <script src="src/core/autobattle.js"></script>
     <script src="src/browser/keyboard.js"></script>
     <script src="src/browser/renderer.js"></script>
+    <script src="src/browser/autobattle-page.js"></script>
     <script src="src/browser/main.js"></script>
   </body>
 </html>
