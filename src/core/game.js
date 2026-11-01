@@ -821,7 +821,7 @@
     const ready = def.onGround && ((isFree(def) && def.landingTimer === 0) || def.pose === POSE.BLOCK);
     if (!ready || !def.holdBack) return false;
     if (m.guard === "low") return def.holdDown; // 下段はしゃがみガードだけ
-    if (m.guard === "air") return !def.holdDown; // 空中攻撃は立ちガードだけ
+    if (m.guard === "air" || m.guard === "high") return !def.holdDown; // 空中攻撃と中段技は立ちガードだけ
     return true;
   }
 

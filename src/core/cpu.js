@@ -173,7 +173,7 @@
     return cpu.history[i];
   }
 
-  // 見えている相手の技が、自分に届きそうなら { key, guard } を返す（ガードの種類 "mid"・"low"・"air"）
+  // 見えている相手の技が、自分に届きそうなら { key, guard } を返す（ガードの種類 "mid"・"low"・"high"・"air"）
   function threat(cpu, me, opp, o) {
     const dist = Math.abs(me.x - o.x) / S;
     // 飛び道具がこちらに向かってきている
