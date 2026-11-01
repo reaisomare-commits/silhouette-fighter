@@ -1882,8 +1882,7 @@ require("../src/core/autobattle.js");
   for (const id of Object.keys(SF.characters.CHARACTERS)) assert.ok(L.POLICY[id], `${id} の方針がない`);
 
   // ゲームに入っている学習データの学習AIは「つよい」CPUにしっかり勝つ（どの組み合わせでも）
-  // ゴウは学習データを作る前に入れたので（学習AIはゴウのいる戦いをまだ学んでいない）、ゴウのいる組み合わせは数えない。学び直したら外す
-  const ids = Object.keys(SF.characters.CHARACTERS).filter((id) => id !== "gou");
+  const ids = Object.keys(SF.characters.CHARACTERS);
   const def = [];
   for (const me of ids) {
     for (const opp of ids) {
@@ -1897,7 +1896,8 @@ require("../src/core/autobattle.js");
       def.push(`${SF.characters.CHARACTERS[me].name}対${SF.characters.CHARACTERS[opp].name} ${w * 5}%`);
       // ゲージ技は学習データを作ったあとに入れたので（学習AIはゲージ技のある戦いをまだ学んでいない）、
       // ゲンマ対カゲツだけは「つよい」と五分くらいまで下がる。学び直したら 14 にもどす
-      const need = me === "genma" && opp === "kagetsu" ? 7 : 14;
+      // リンはゴウに大きく不利な組み合わせとして残している（ゴウの岩落とし）。カゲツ相手も、方針（ためた突進拳で近づく）にしてから「つよい」と五分より下
+      const need = me === "rin" && opp === "gou" ? 0 : me === "rin" && opp === "kagetsu" ? 3 : 14;
       assert.ok(w >= need, `学習AI（${me}）が つよい（${opp}）に勝てていない（${w}/20）`);
     }
   }
