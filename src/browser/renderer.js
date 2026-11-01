@@ -610,6 +610,18 @@
         ctx.strokeStyle = "#000";
       }
 
+      // 最大までためた突進拳：飛び道具をすり抜ける間、体のまわりが差し色に光る
+      if (SF.game.fullCharge(f)) {
+        ctx.save();
+        ctx.strokeStyle = accent;
+        ctx.globalAlpha = 0.55 + 0.25 * Math.sin(state.frame * 0.8);
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.ellipse(0, -h * 0.5, w * 0.9, h * 0.6, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // ガード中だとわかるよう、体の前に薄い光の弧を出す
       if (guarding) {
         ctx.strokeStyle = p === POSE.BLOCK ? "rgba(160, 220, 255, 0.9)" : "rgba(255, 255, 255, 0.55)";
