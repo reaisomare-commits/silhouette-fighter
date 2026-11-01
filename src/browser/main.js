@@ -14,7 +14,7 @@
   const renderer = SF.renderer.createRenderer(document.getElementById("screen"));
   const menu = SF.menu.createMenu();
 
-  let scene = "menu"; // "menu"（メニュー）、"battle"（試合）、"records"（自動対戦と記録）
+  let scene = "menu"; // "menu"（メニュー）、"battle"（試合）、"records"（自動対戦と記録・学習AIをきたえる）
   let config = null; // 試合の設定（モード、キャラ、強さ）。メニューで決まる
   let state = null;
   let cpus = [null, null]; // CPUが動かす側だけ入る
@@ -49,6 +49,12 @@
   function openRecords() {
     scene = "records";
     SF.recordsPage.open(() => backToMenu(SF.menu.SCREEN.TITLE));
+  }
+
+  // 学習AIの画面を開く。閉じたらタイトルにもどる
+  function openLearn() {
+    scene = "records";
+    SF.learnPage.open(() => backToMenu(SF.menu.SCREEN.TITLE));
   }
 
   function backToMenu(screen) {
@@ -100,6 +106,7 @@
       const result = SF.menu.press(menu, action);
       if (result && result.start) startBattle(result.start);
       if (result && result.auto) openRecords();
+      if (result && result.learn) openLearn();
       return;
     }
 

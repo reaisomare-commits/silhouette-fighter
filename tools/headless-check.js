@@ -946,8 +946,10 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
   console.log(`OK 技のやられる範囲: 発生前・硬直中は${(m.hitbox.x1 + m.hitbox.x2) / 2}px、当たる時間は${m.hitbox.x2}pxまで伸び、伸ばした腕や刀にも当たる。対空技は上側が小さい`);
 }
 
-// 6. CPU（よわい・ふつう・つよい）
+// 6. CPU（よわい・ふつう・つよい・学習AI）
 require("../src/core/cpu.js");
+require("../src/core/learn.js");
+require("../src/core/learned-data.js");
 {
   const LV = SF.cpu.LEVELS;
   // CPU同士の試合。同じ種なら同じ結果になり、出す入力はボタンのビットだけ
@@ -1118,9 +1120,9 @@ require("../src/core/cpu.js");
   let r = go(m, "right", "down", "right", "down", "right", "right", "right");
   assert.strictEqual(r, null);
   r = go(m, "down", "ok");
-  assert.deepStrictEqual(r.start, { mode: "pvc", chars: ["rin", "kagetsu"], levels: [null, 2] }, "プレイヤー VS CPU の設定がちがう");
+  assert.deepStrictEqual(r.start, { mode: "pvc", chars: ["rin", "kagetsu"], levels: [null, SF.cpu.LEARN_LEVEL] }, "プレイヤー VS CPU の設定がちがう");
 
-  // 強さは端で止まる（つよいの右はつよい、よわいの左はよわい）
+  // 強さは端で止まる（学習AIの右は学習AI、よわいの左はよわい）
   go(m, "up", "left", "left", "left", "left");
   assert.strictEqual(M.matchConfig(m).levels[1], 0, "よわいより下にいってしまう");
 
@@ -1231,6 +1233,76 @@ require("../src/core/autobattle.js");
   for (const m of AB.schedule({ ...setup, matches: 100 })) AB.addMatch(sum, AB.runMatch(m.seed, m.chars, m.levels));
   const ms1 = Number(process.hrtime.bigint() - t1) / 1e6;
   console.log(`OK 自動対戦と記録: 記録しても試合は同じ、ダメージの記録は減った体力と一致、集計とCSV（20試合の勝率 ${win}）、CPU同士100試合を ${ms1.toFixed(0)} ミリ秒`);
+}
+
+// 8. 学習AI（機械学習）
+{
+  const L = SF.learn;
+  const AB = SF.autobattle;
+  const LEARN = SF.cpu.LEARN_LEVEL;
+  assert.ok(SF.cpu.LEVELS[LEARN].learned, "学習AIの強さがない");
+  assert.ok(SF.menu.MODES.some((m) => m.id === "learn"), "モード選択に学習AIの画面がない");
+
+  // 状況番号は表の大きさの中におさまる
+  const st0 = SF.game.createGame(1, ["kagetsu", "rin"], { intro: false });
+  const cpu0 = SF.cpu.createCpu(LEARN, 1);
+  for (let i = 0; i < 600; i++) SF.game.step(st0, [SF.cpu.input(cpu0, st0, 0), 0]);
+  const s0 = L.stateOf(st0, 0, cpu0.history[cpu0.history.length - 1]);
+  assert.ok(Number.isInteger(s0) && s0 >= 0 && s0 < L.STATES, "状況番号が表の外");
+  assert.ok(cpu0.learner.decisions > 0, "学習AIが一度も考えていない");
+
+  // 同じ頭脳・同じ種なら、学習AIの試合も同じ結果になる（学習しないとき）
+  const brainA = L.defaultBrain();
+  const m1 = AB.runMatch(11, ["rin", "kagetsu"], [LEARN, 2], { brain: brainA });
+  const m2 = AB.runMatch(11, ["rin", "kagetsu"], [LEARN, 2], { brain: brainA });
+  assert.deepStrictEqual(m1.health, m2.health, "同じ種なのに学習AIの試合が違う");
+  assert.deepStrictEqual(L.serialize(brainA), L.serialize(L.defaultBrain()), "学習しないのに頭脳が変わった");
+
+  // 保存して読み込むと同じ頭脳にもどる。形のちがうデータは読まない
+  const saved = JSON.parse(JSON.stringify(L.serialize(brainA)));
+  assert.deepStrictEqual(L.serialize(L.deserialize(saved)), L.serialize(brainA), "保存と読み込みで頭脳が変わった");
+  assert.strictEqual(L.deserialize({ version: 999 }), null, "古い版のデータを読んでしまう");
+
+  // 何も覚えていない頭脳から学習すると、勝率が上がる（カゲツ学習AI 対 リン つよい）
+  function winRate(brain, n) {
+    let w = 0;
+    for (let i = 0; i < n; i++) {
+      const side = i % 2;
+      const chars = side ? ["rin", "kagetsu"] : ["kagetsu", "rin"];
+      const levels = side ? [2, LEARN] : [LEARN, 2];
+      if (AB.runMatch(50000 + i, chars, levels, { brain }).winner === side) w += 1;
+    }
+    return Math.round((100 * w) / n);
+  }
+  const t1 = process.hrtime.bigint();
+  const fresh = L.createBrain();
+  const before = winRate(fresh, 40);
+  for (let i = 0; i < 400; i++) {
+    const side = i % 2;
+    L.trainMatch(fresh, i + 1, side ? ["rin", "kagetsu"] : ["kagetsu", "rin"], side, 2, 0.3);
+  }
+  const after = winRate(fresh, 40);
+  const ms = Number(process.hrtime.bigint() - t1) / 1e6;
+  assert.strictEqual(L.tableFor(fresh, "kagetsu", "rin").matches, 400, "学習した試合数が数えられていない");
+  assert.ok(after >= before + 30, `学習しても強くならない（${before}% → ${after}%）`);
+
+  // ゲームに入っている学習データの学習AIは「つよい」CPUにしっかり勝つ（どの組み合わせでも）
+  const ids = Object.keys(SF.characters.CHARACTERS);
+  const def = [];
+  for (const me of ids) {
+    for (const opp of ids) {
+      let w = 0;
+      for (let i = 0; i < 20; i++) {
+        const side = i % 2;
+        const chars = side ? [opp, me] : [me, opp];
+        const levels = side ? [2, LEARN] : [LEARN, 2];
+        if (AB.runMatch(80000 + i, chars, levels).winner === side) w += 1;
+      }
+      def.push(`${SF.characters.CHARACTERS[me].name}対${SF.characters.CHARACTERS[opp].name} ${w * 5}%`);
+      assert.ok(w >= 14, `学習AI（${me}）が つよい（${opp}）に勝てていない（${w}/20）`);
+    }
+  }
+  console.log(`OK 学習AI: 何も覚えていない状態から400試合の学習で つよい への勝率 ${before}% → ${after}%（${(ms / 1000).toFixed(1)}秒）、入っている学習データは つよい に ${def.join("・")}`);
 }
 
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める

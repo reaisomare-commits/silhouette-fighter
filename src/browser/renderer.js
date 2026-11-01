@@ -649,7 +649,7 @@
     // ---- メニュー（タイトル・モード選択・キャラ選択）と、試合の上に出す小さなメニュー ----
 
     const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家" };
-    const LEVEL_NOTE = ["はじめての人に", "慣れてきたら", "腕に自信がある人に"];
+    const LEVEL_NOTE = ["はじめての人に", "慣れてきたら", "腕に自信がある人に", "対戦から学んだCPU"];
     const HINT_MENU = "↑↓ / W S：えらぶ　Enter：決定　Esc：もどる";
     const HINT_SELECT = "↑↓ / W S：項目をえらぶ　←→ / A D：変える　Enter：決定　Esc：もどる";
 
@@ -724,16 +724,16 @@
       drawPreview(["kagetsu", "rin"], [C.STAGE_WIDTH * 0.3, C.STAGE_WIDTH * 0.7], tick);
       dim(0.5);
       outlined("モードをえらぶ", C.STAGE_WIDTH / 2, 70, 36, "#fff");
-      const w = 560;
-      const h = 100;
+      const w = 600;
+      const h = 82;
       const x = (C.STAGE_WIDTH - w) / 2;
       SF.menu.MODES.forEach((m, i) => {
-        const y = 115 + i * 120;
+        const y = 108 + i * 96;
         const sel = i === menu.modeCursor;
         panel(x, y, w, h, sel);
         if (sel) text("▶", x + 34, y + h / 2, 26, "#ffd24d");
-        text(m.label, C.STAGE_WIDTH / 2, y + 40, 34, sel ? "#fff" : "rgba(255,255,255,0.55)");
-        text(m.note, C.STAGE_WIDTH / 2, y + 76, 17, sel ? "#ffd8a0" : "rgba(255,255,255,0.4)", "center", "normal");
+        text(m.label, C.STAGE_WIDTH / 2, y + 32, 30, sel ? "#fff" : "rgba(255,255,255,0.55)");
+        text(m.note, C.STAGE_WIDTH / 2, y + 62, 16, sel ? "#ffd8a0" : "rgba(255,255,255,0.4)", "center", "normal");
       });
       hint(HINT_MENU);
     }

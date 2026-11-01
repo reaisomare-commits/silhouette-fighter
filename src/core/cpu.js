@@ -19,7 +19,11 @@
     { id: "easy", label: "よわい", reaction: 30, guard: 30, antiAir: 20, combo: 30, tech: 0 },
     { id: "normal", label: "ふつう", reaction: 18, guard: 60, antiAir: 50, combo: 70, tech: 30 },
     { id: "hard", label: "つよい", reaction: 10, guard: 85, antiAir: 80, combo: 95, tech: 60 },
+    // 学習AI：反射神経（反応・ガード・対空・連続技・投げ抜け）は「つよい」と同じで、
+    // 様子見で何をするかだけを機械学習（src/core/learn.js）の表で決める
+    { id: "learn", label: "学習AI", reaction: 10, guard: 85, antiAir: 80, combo: 95, tech: 60, learned: true },
   ];
+  const LEARN_LEVEL = LEVELS.findIndex((lv) => lv.learned);
 
   // 連続技のつなぎ方。始めの技ごとに、そのあと押すボタンの順番
   //   "light"＝U、"heavy"＝I、"special"＝O、"crouchSpecial"＝S+O（しゃがみ技からはS押しっぱなし）
@@ -55,8 +59,11 @@
   const ANTI_AIR_RANGE = 130; // 跳んできた相手がこれより近づいたら対空技を出す（ピクセル、横の距離）
   const HISTORY = 64; // 相手の様子を何フレーム前まで覚えておくか（反応の速さより長く）
 
-  function createCpu(level = 1, seed = 1) {
+  // opts は学習AIのときだけ使う：brain＝使う頭脳（なければ今の頭脳）、train＝学習するか、explore＝わざと別の行動を試す確率
+  function createCpu(level = 1, seed = 1, opts = {}) {
+    const learner = LEVELS[level].learned ? SF.learn.createLearner(opts.brain || SF.learn.currentBrain(), opts.train, opts.explore) : null;
     return {
+      learner, // 学習AIの記録（学習AIでなければ null）
       level,
       rng: SF.rng.createRng(seed ^ 0x5bd1e995),
       history: [], // 相手の様子（古い順）
@@ -190,6 +197,7 @@
 
     let out = 0;
     if (state.round.phase !== PHASE.FIGHT) {
+      if (cpu.learner) SF.learn.endRound(cpu.learner, state, index); // ラウンドの勝ち負けを学習に伝える
       cpu.queue = [];
       cpu.hold = 0;
       cpu.thinkTimer = 0;
@@ -305,11 +313,17 @@
     cpu.hold = 0;
     const plans = PLANS[me.charId] || PLANS.kagetsu;
     const band = dist <= reachOf(me, opp, "standLight") ? "near" : dist <= reachOf(me, opp, "standHeavy") ? "mid" : "far";
-    let plan = pick(cpu, plans[band]);
-    // 飛刃は画面に1つまで
-    if (plan === "special" && state.projectiles.some((p) => p.owner === index)) plan = "forward";
-    if (plan === "throw" && dist > reachOf(me, opp, "throw") + 4) plan = "light";
-    if (plan === "crouchHeavy" && dist > reachOf(me, opp, "crouchHeavy")) plan = "forward";
+    let plan;
+    if (cpu.learner) {
+      // 学習AI：表を見て選ぶ（届かない技を選んでも直さない。空振りして損をしたら、それも学習する）
+      plan = SF.learn.decide(cpu.learner, cpu.rng, state, index, o);
+    } else {
+      plan = pick(cpu, plans[band]);
+      // 飛刃は画面に1つまで
+      if (plan === "special" && state.projectiles.some((p) => p.owner === index)) plan = "forward";
+      if (plan === "throw" && dist > reachOf(me, opp, "throw") + 4) plan = "light";
+      if (plan === "crouchHeavy" && dist > reachOf(me, opp, "crouchHeavy")) plan = "forward";
+    }
 
     switch (plan) {
       case "light":
@@ -322,6 +336,9 @@
       case "crouchHeavy":
         cpu.queue.push(BUTTON.DOWN | BUTTON.HEAVY, BUTTON.DOWN);
         return finish(cpu, BUTTON.DOWN);
+      case "crouchSpecial":
+        cpu.queue.push(BUTTON.DOWN | BUTTON.SPECIAL, BUTTON.DOWN);
+        return finish(cpu, BUTTON.DOWN);
       case "throw":
         return finish(cpu, BUTTON.LIGHT | BUTTON.HEAVY);
       case "forward":
@@ -330,15 +347,31 @@
       case "back":
         cpu.hold = back;
         return finish(cpu, back);
+      case "guardLow":
+        cpu.hold = back | BUTTON.DOWN;
+        return finish(cpu, cpu.hold);
       case "dash":
         // 前を素早く2回（リンは押している間走る）
         cpu.queue.push(0, forward, forward, forward, forward, forward, forward, forward);
         cpu.thinkTimer = Math.max(cpu.thinkTimer, 10);
         return finish(cpu, forward);
+      case "backdash":
+        // 後ろを素早く2回
+        cpu.queue.push(0, back);
+        cpu.thinkTimer = Math.max(cpu.thinkTimer, 10);
+        return finish(cpu, back);
       case "jump":
         cpu.hold = forward;
         cpu.thinkTimer = 50; // 着地するまで考え直さない
         return finish(cpu, BUTTON.JUMP | forward);
+      case "jumpUp":
+        cpu.hold = 0;
+        cpu.thinkTimer = 50;
+        return finish(cpu, BUTTON.JUMP);
+      case "jumpBack":
+        cpu.hold = back;
+        cpu.thinkTimer = 50;
+        return finish(cpu, BUTTON.JUMP | back);
       default:
         return finish(cpu, 0);
     }
@@ -357,5 +390,5 @@
     return out;
   }
 
-  SF.cpu = { LEVELS, createCpu, nextLevel, input };
+  SF.cpu = { LEVELS, LEARN_LEVEL, createCpu, nextLevel, input };
 })(globalThis);
