@@ -1052,6 +1052,10 @@ require("../src/core/learned-data.js");
   assert.strictEqual(techs[0], 0, "よわいCPUは投げ抜けしないはず");
 
   // 前ジャンプで跳び込んでくる相手に、CPUがどれだけ対空技を出すか
+  // 学習AIは、様子見を選ぶ頭脳で測る（学んだ立ち回りで先に技を出して動けないと、反射神経が測れないため）
+  const waitBrain = SF.learn.createBrain();
+  const waitTable = SF.learn.tableFor(waitBrain, "kagetsu", "rin");
+  for (let k = 0; k < waitTable.q.length; k += SF.learn.ACTIONS.length) waitTable.q[k] = 1;
   function antiAirRate(lv) {
     let jumps = 0;
     let aa = 0;
@@ -1059,7 +1063,7 @@ require("../src/core/learned-data.js");
       const st = newGame(seed, ["rin", "kagetsu"]);
       st.fighters[0].x = 300 * S;
       st.fighters[1].x = 480 * S;
-      const cpu = SF.cpu.createCpu(lv, seed);
+      const cpu = SF.cpu.createCpu(lv, seed, { brain: waitBrain });
       jumps++;
       for (let i = 0; i < 70; i++) {
         SF.game.step(st, [i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0, SF.cpu.input(cpu, st, 1)]);

@@ -1,9 +1,9 @@
 // 自動対戦を画面なしで行い、結果を表示する（CSVでも保存できる）。
 // 使い方: node tools/auto-battle.js [左のキャラ] [右のキャラ] [左の強さ] [右の強さ] [試合数] [CSVの保存先]
 //   例: node tools/auto-battle.js kagetsu rin 1 1 1000 result.csv
-//   キャラは kagetsu / rin、強さは 0（よわい）1（ふつう）2（つよい）。左右を入れ替えた試合も半分ずつ行う
+//   キャラは kagetsu / rin、強さは 0（よわい）1（ふつう）2（つよい）3（学習AI）。左右を入れ替えた試合も半分ずつ行う
 const fs = require("node:fs");
-for (const f of ["constants", "rng", "input", "characters", "game", "cpu", "autobattle"]) require(`../src/core/${f}.js`);
+for (const f of ["constants", "rng", "input", "characters", "game", "cpu", "autobattle", "learn", "learned-data"]) require(`../src/core/${f}.js`);
 const SF = globalThis.SF;
 
 const [c0 = "kagetsu", c1 = "rin", l0 = "1", l1 = "1", n = "1000", out] = process.argv.slice(2);
