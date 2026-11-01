@@ -56,8 +56,6 @@
 
   // 通常技（地上のU・I）か。必殺技キャンセル・連続技ができるのはこれだけ
   const GROUND_NORMALS = ["standLight", "standHeavy", "crouchLight", "crouchHeavy"];
-  // I＋Oを少しずらして押したとき、先に出かけた技をゲージ技に変えられるもの
-  const SUPER_FROM = ["standHeavy", "crouchHeavy", "special", "crouchSpecial"];
   const isLightMove = (name) => name === "standLight" || name === "crouchLight";
   // 空中で出す技（1回のジャンプで1回だけ）
   const isAirMove = (name) => name === "airLight" || name === "airHeavy" || name === "airSpecial";
@@ -119,6 +117,7 @@
       gauge: 0, // ゲージ（100倍の整数。満タンは BATTLE.gauge.max × 100）。次のラウンドに持ち越す
       specialAge: 99, // Oを押してから何フレームたったか（I＋Oの同時押し判定用）
       buffTimer: 0, // ゲージ技で強くなっている残りフレーム（リンの練気：すべての攻撃がキャンセルできる）
+      passive: 0, // 消極的な動き（前に出ない・飛び道具しか撃たない）が続いているフレーム数
       superGuardable: true, // 今出しているゲージ技を、相手がガードできるか（暗転する前からガードを押していたか）
     };
   }
@@ -269,6 +268,31 @@
     startMove(state, f, "super", chain);
     // 暗転する前からガード（後ろ）を押していないと、ガードできない技（カゲツの月影斬）
     f.superGuardable = !m.guardBeforeFreeze || opp.holdBack;
+  }
+
+  // 消極的な動きのペナルティ。前に出る動きや飛び道具でない攻撃で数え直し、攻撃を受けている間などは止める
+  function updatePassive(state, f, opp) {
+    const P = BATTLE.passive;
+    const toward = Math.sign(opp.x - f.x) || f.facing;
+    const m = moveData(f);
+    const forward =
+      f.pose === POSE.WALK_FORWARD ||
+      f.pose === POSE.RUN ||
+      f.pose === POSE.STEP ||
+      (f.action === POSE.WARP && f.warpDir > 0) ||
+      (!f.onGround && !f.move && f.vx * toward > 0);
+    const engaging = m && !m.projectile; // 飛び道具でない攻撃（投げ・ゲージ技も）
+    if (forward || engaging || f.buffTimer > 0) {
+      f.passive = 0;
+      return;
+    }
+    const busy = f.stun > 0 || f.grab || f.pose === POSE.BLOCK || f.pose === POSE.HIT || f.pose === POSE.DOWN || f.pose === POSE.LAUNCH || f.pose === POSE.THROWN;
+    if (busy) return;
+    f.passive += 1;
+    if (f.passive >= P.frames && (f.passive - P.frames) % P.every === 0) {
+      f.gauge = Math.max(0, f.gauge - P.drain * 100);
+      state.effects.push({ kind: "text", text: "消極的！ゲージ減少", x: f.x / S, y: f.y / S - fighterHeight(f) - 30, life: 45 });
+    }
   }
 
   // ゲージ技の出だしの無敵中か（攻撃も投げも飛び道具も当たらない）
@@ -441,10 +465,11 @@
       if (f.stun === 0) {
         f.pose = f.crouching ? POSE.CROUCH : POSE.STAND;
       }
-    } else if (f.onGround && f.buffer === "super" && SUPER_FROM.includes(f.move) && !f.moveHit && f.moveFrame <= BATTLE.throwInputWindow + 1) {
-      // IかOを押した直後にもう片方を押したら、出かけた技をゲージ技に変える（出かけた技は出なかったことにする）
-      record(state, f, f.move, "uses", -1);
-      startSuper(state, f);
+    } else if (f.onGround && f.buffer === "super" && f.move && f.move !== "super") {
+      // ゲージ技は、どんな技の途中でも（当たっていなくても、硬直中でも）キャンセルして出せる。
+      // IかOを押した直後にもう片方を押したとき（出かけた技がまだ当たっていない）は、出かけた技は出なかったことにする
+      if (!f.moveHit && f.moveFrame <= BATTLE.throwInputWindow + 1) record(state, f, f.move, "uses", -1);
+      startSuper(state, f, true);
     } else if (f.onGround && f.move && f.charging && isDown(input, BUTTON.SPECIAL) && f.chargeFrames < moveData(f).charge.max) {
       // ためる技：ボタンを押している間は、出る前の構えのまま止まってためる（離したら出る）
       f.chargeFrames += 1;
@@ -494,6 +519,9 @@
       updateAction(f, st, { forward, down, jump: wantJump });
     } else if (f.onGround) {
       groundControl();
+    } else if (f.buffer === "super" && CHARACTERS[f.charId].moves.super && CHARACTERS[f.charId].moves.super.buff) {
+      // 強くなるゲージ技（リンの練気）は空中でも出せる（空中攻撃の途中でもキャンセルして）
+      startSuper(state, f, true);
     } else if (f.move && cancelAllActive(f) && f.moveHit && (f.buffer === "light" || f.buffer === "heavy") && f.move !== "airSpecial") {
       // 強くなっている間（リンの練気）は、空中攻撃も当たるかガードされたら別の空中攻撃でキャンセルできる
       startMove(state, f, f.buffer === "light" ? "airLight" : "airHeavy", true);
@@ -1035,6 +1063,8 @@
       def.vx = 0;
       // ガードさせた側もゲージが少し溜まる（ゲージ技では溜まらない）
       if (moveName !== "super") addGauge(att, (m.damage * BATTLE.gauge.blocked * 100) / CHARACTERS[def.charId].health);
+      // ガードした側も溜まる。飛び道具（冥府球も）をガードしたときは、食らったときと同じだけ
+      addGauge(def, (m.damage * (proj ? BATTLE.gauge.guardedProjectile : BATTLE.gauge.guarded) * 100) / CHARACTERS[def.charId].health);
       // 必殺技はガードされても少しだけ体力が減る（削り）
       if (m.kind === "special") {
         const chip = Math.min(def.health, Math.floor((m.damage * BATTLE.chipRate) / 100));
@@ -1395,6 +1425,10 @@
     pushApart(a, b);
     moveProjectiles(state);
     if (fighting) checkHits(state);
+    if (fighting) {
+      updatePassive(state, a, b);
+      updatePassive(state, b, a);
+    }
     updateFacing(a, b);
 
     if (r.phase === PHASE.INTRO) {
