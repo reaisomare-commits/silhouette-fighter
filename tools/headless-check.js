@@ -277,12 +277,12 @@ for (const att of ["kagetsu", "rin"]) {
 }
 
 // 空中攻撃：立ちガードで防げる。しゃがみガードでは防げない。1回のジャンプで1回だけ
-function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 22) {
+function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 30) {
   const st = newGame(1, [att, "rin"]);
   st.fighters[0].x = 330 * S;
   st.fighters[1].x = 450 * S;
   let attacks = 0;
-  for (let i = 0; i < 70; i++) {
+  for (let i = 0; i < 100; i++) {
     const inA = (i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0) | (i === pressAt || i === pressAt + 6 ? btn : 0);
     SF.game.step(st, [inA, guardInput]);
     const mv = st.fighters[0].move;
@@ -306,7 +306,7 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 22) {
   function airAdv(att, btn, pressAt, blocking) {
     const st = newGame(1, [att, att === "rin" ? "kagetsu" : "rin"]);
     const [a, b] = st.fighters;
-    a.x = 330 * S;
+    a.x = 300 * S;
     b.x = 430 * S;
     let hitAt = -1;
     let pose = null;
@@ -344,7 +344,7 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 22) {
       const m = CH[att].moves[name];
       // 早めに当てた場合と遅めに当てた場合
       const advs = [];
-      for (const pressAt of [12, 20]) {
+      for (const pressAt of [16, 28]) {
         const h = airAdv(att, btn, pressAt, false);
         const g = airAdv(att, btn, pressAt, true);
         if (h.hitAt < 0) continue;
@@ -479,9 +479,9 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 22) {
     b.x = 430 * S;
     let hits = 0;
     let freeBetween = false;
-    for (let i = 0; i < 90; i++) {
+    for (let i = 0; i < 110; i++) {
       // ジャンプ強攻撃のあと、着地前に弱攻撃を連打（先行入力）
-      const inA = (i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0) | (i === 18 ? I : 0) | (i > 22 && i % 2 === 0 ? U : 0);
+      const inA = (i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0) | (i === 26 ? I : 0) | (i > 30 && i % 2 === 0 ? U : 0);
       const before = b.health;
       SF.game.step(st, [inA, 0]);
       if (b.health < before) hits++;
@@ -886,25 +886,57 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
   console.log("OK 同時に当たったとき: 弱と強なら強、同じ強さなら相打ち、投げと攻撃なら攻撃");
 }
 
-// 技を出すと、当たる範囲のあたりまでやられる範囲が伸びる（空振りした刀を叩ける）
+// 技を出すと、やられる範囲が伸びる。当たる時間は当たる範囲と同じくらい、発生前と硬直中はその半分
 {
   const st = closeGame("kagetsu", "rin", 200); // 大振り斬りが届かない距離
   const [a, b] = st.fighters;
   const m = CH.kagetsu.moves.standHeavy;
-  let hpB = b.health;
-  for (let i = 0; i < 40; i++) {
-    // カゲツの大振り斬りが空振りした直後に、リンがジャブで刀を叩く
-    SF.game.step(st, [i === 0 ? I : 0, i === m.startup + m.active ? U : 0]);
+  const reach = () => {
+    const box = SF.game.limbHurtbox(a);
+    return box ? Math.round(box.right - a.x / S) : 0;
+  };
+  const seen = {};
+  for (let i = 0; i < 45; i++) {
+    // カゲツの大振り斬りが当たる時間に、リンのジャブも当たる時間になるように押す
+    SF.game.step(st, [i === 0 ? I : 0, i === m.startup - CH.rin.moves.standLight.startup ? U : 0]);
+    if (a.move === "standHeavy" && st.hitstop === 0) {
+      const phase = a.moveFrame < m.startup ? "startup" : a.moveFrame < m.startup + m.active ? "active" : "recovery";
+      seen[phase] = Math.max(seen[phase] || 0, reach());
+    }
   }
-  assert.strictEqual(b.health, hpB, "大振り斬りは届かないはず");
-  assert.ok(a.health < CH.kagetsu.health, "空振りした刀にジャブが当たるはず");
+  // 体には届かない距離でも、伸ばした腕と刀が触れて、強い大振り斬りの方が当たる
+  assert.strictEqual(b.health, CH.rin.health - m.damage, "伸ばしたジャブの腕に大振り斬りが当たるはず");
+  assert.strictEqual(a.health, CH.kagetsu.health, "弱と強なら強が勝つはず");
+  const half = Math.round((m.hitbox.x1 + m.hitbox.x2) / 2);
+  assert.strictEqual(seen.startup, half, "発生前は半分まで伸びるはず");
+  // 当たる時間はジャブで潰されるので、そのあと別に確かめる
+  const st2 = closeGame("kagetsu", "rin", 300);
+  const a2 = st2.fighters[0];
+  const r2 = [];
+  for (let i = 0; i < 40; i++) {
+    SF.game.step(st2, [i === 0 ? I : 0, 0]);
+    const box = SF.game.limbHurtbox(a2);
+    if (a2.move) r2.push(box ? Math.round(box.right - a2.x / S) : 0);
+  }
+  assert.ok(r2.includes(m.hitbox.x2), "当たる時間は当たる範囲まで伸びるはず");
+  assert.strictEqual(r2.at(-1), half, "硬直中は半分まで伸びるはず");
   // 対空技は上に伸びるやられる範囲が少ない
   for (const id of ["kagetsu", "rin"]) {
     const aa = CH[id].moves.crouchSpecial;
     assert.ok(aa.hurtExtend.y2 < aa.hitbox.y2 - 50, "対空技の上側のやられる範囲は小さいはず");
     assert.ok(aa.hurtExtend.y2 <= CH[id].height, "対空技のやられる範囲は頭の高さまで");
   }
-  console.log("OK 技のやられる範囲: 空振りした技の先を叩ける。対空技は上側が小さい");
+  // 投げ（掴みにいく手）と飛刃（振る刀）にもやられる範囲が伸びる
+  for (const [btn, name] of [[U | I, "throw"], [O, "special"]]) {
+    const st3 = closeGame("kagetsu", "rin", 300);
+    let found = false;
+    for (let i = 0; i < 20; i++) {
+      SF.game.step(st3, [i === 0 ? btn : 0, 0]);
+      if (st3.fighters[0].move === name && SF.game.limbHurtbox(st3.fighters[0])) found = true;
+    }
+    assert.ok(found, `${name} にもやられる範囲が伸びるはず`);
+  }
+  console.log(`OK 技のやられる範囲: 発生前・硬直中は${(m.hitbox.x1 + m.hitbox.x2) / 2}px、当たる時間は${m.hitbox.x2}pxまで伸び、伸ばした腕や刀にも当たる。対空技は上側が小さい`);
 }
 
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める

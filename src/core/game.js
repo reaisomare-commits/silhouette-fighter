@@ -547,13 +547,17 @@
     return { left: x - w / 2, right: x + w / 2, top: y - fighterHeight(f), bottom: y };
   }
 
-  // 技を出している間の、伸ばした手足・刀のやられる範囲。当たり始めてから技が終わるまで、
-  // 技の当たる範囲と同じくらいの所までやられる範囲が伸びる（hurtExtend があればその範囲）
+  // 技を出している間の、伸ばした手足・刀のやられる範囲（hurtExtend があればその範囲、なければ当たる範囲）。
+  // 当たる時間はその範囲まで、発生前と硬直中は前への長さが半分になる。投げや飛び道具を撃つ技にもある
   function limbHurtbox(f) {
     const m = moveData(f);
-    if (!m || !m.hitbox || m.kind === "throw" || f.moveFrame < m.startup) return null;
-    if (!hurtbox(f)) return null;
-    return boxAt(f, m.hurtExtend || m.hitbox);
+    const ext = m && (m.hurtExtend || m.hitbox);
+    if (!ext || !hurtbox(f)) return null;
+    // 掴んでいる間・投げきったあとは伸ばさない
+    if (f.grab) return null;
+    const full = isActive(f);
+    const half = { ...ext, x2: full ? ext.x2 : (ext.x1 + ext.x2) / 2 };
+    return boxAt(f, half);
   }
 
   // やられる範囲をすべて（体と、伸ばした手足）
