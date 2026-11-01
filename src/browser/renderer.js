@@ -634,7 +634,9 @@
       if (f.buffTimer > 0) {
         ctx.save();
         ctx.strokeStyle = accent;
-        const burst = atk && move === "super" ? 1 - Math.min(1, f.moveFrame / 20) : 0;
+        // 出した直後の20Fは大きく広がる（暗転の間も広がったまま）
+        const sup = c.moves.super;
+        const burst = state.superFreeze > 0 && state.superOwner === index ? 1 : Math.max(0, (f.buffTimer - (sup.buff.frames - 20)) / 20);
         ctx.globalAlpha = 0.45 + 0.25 * Math.sin(state.frame * 0.5) + burst * 0.3;
         ctx.lineWidth = 3 + burst * 4;
         for (let k = 0; k < 3; k++) {

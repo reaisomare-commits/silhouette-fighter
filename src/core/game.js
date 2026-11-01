@@ -249,16 +249,26 @@
     const i = state.fighters.indexOf(f);
     const opp = state.fighters[1 - i];
     f.gauge -= GAUGE_FULL;
+    const m = CHARACTERS[f.charId].moves.super;
+    state.superFreeze = BATTLE.superFreeze;
+    state.superOwner = i;
+    state.effects.push({ kind: "superName", owner: i, text: m.name, life: BATTLE.superFreeze + 30 });
+    if (m.buff) {
+      // 強くなる技（リンの練気）：構えはなく、暗転が終わったらすぐ動ける。出しかけの技やためも取り消す
+      record(state, f, "super", "uses");
+      f.buffTimer = m.buff.frames;
+      f.move = null;
+      f.buffer = null;
+      f.charging = false;
+      f.chargeFrames = 0;
+      f.pose = f.onGround ? (f.crouching ? POSE.CROUCH : POSE.STAND) : POSE.JUMP;
+      return;
+    }
     f.crouching = false;
     f.vx = 0;
     startMove(state, f, "super", chain);
-    const m = CHARACTERS[f.charId].moves.super;
     // 暗転する前からガード（後ろ）を押していないと、ガードできない技（カゲツの月影斬）
     f.superGuardable = !m.guardBeforeFreeze || opp.holdBack;
-    if (m.buff) f.buffTimer = m.buff.frames;
-    state.superFreeze = BATTLE.superFreeze;
-    state.superOwner = i;
-    state.effects.push({ kind: "superName", owner: i, text: CHARACTERS[f.charId].moves.super.name, life: BATTLE.superFreeze + 30 });
   }
 
   // ゲージ技の出だしの無敵中か（攻撃も投げも飛び道具も当たらない）
@@ -775,6 +785,14 @@
     return boxAt(f, half);
   }
 
+  // 空中でやられて落ちている間の体の範囲（何回も当たる飛び道具だけが使う）
+  function launchBox(f) {
+    const w = CHARACTERS[f.charId].width;
+    const x = f.x / S;
+    const y = f.y / S;
+    return { left: x - w / 2, right: x + w / 2, top: y - fighterHeight(f), bottom: y };
+  }
+
   // やられる範囲をすべて（体と、伸ばした手足）
   function hurtboxes(f) {
     return [hurtbox(f), limbHurtbox(f)].filter(Boolean);
@@ -1034,7 +1052,14 @@
       def.buffer = null; // 当たる前の入力は捨てる（のけぞり中に押したものは出る）
       state.hitstop = Math.max(state.hitstop, BATTLE.hitstopHit);
       state.effects.push({ kind: "hit", x: fx, y: fy, life: 14 });
-      if (!def.onGround) {
+      if (!def.onGround && midMulti) {
+        // 何回も当たる飛び道具（冥府球）を空中で受けたら、球の中に浮いたまま運ばれる（次の1発も当たる）
+        def.pose = POSE.LAUNCH;
+        def.stun = 0;
+        def.crouching = false;
+        def.vy = -multi.airLift * S;
+        def.vx = proj.vx;
+      } else if (!def.onGround) {
         // 空中で受けたら落ちてダウン
         def.pose = POSE.LAUNCH;
         def.stun = 0;
@@ -1094,7 +1119,9 @@
       if (fullCharge(def) && moveData(def).charge.full.projectileInvincible) continue;
       if (p.cooldown > 0) continue; // 何回も当たる飛び道具の、次に当たれるまで
       const box = projectileBox(p);
-      const body = touching(box, def);
+      // 何回も当たる飛び道具は、空中でやられている相手（ふつうは攻撃が当たらない）にも当たり続ける
+      const juggled = p.strong && def.pose === POSE.LAUNCH ? launchBox(def) : null;
+      const body = touching(box, def) || (juggled && overlap(box, juggled) ? juggled : null);
       if (body) hits.push({ att, def, m: CHARACTERS[att.charId].moves[p.move], box, body, p, rank: hitRank(p.move), name: p.move });
     }
     // 両方が当てていたら、相手より弱い方の当たりは消す
