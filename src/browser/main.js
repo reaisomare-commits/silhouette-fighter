@@ -14,7 +14,28 @@
   const renderer = SF.renderer.createRenderer(document.getElementById("screen"));
   const menu = SF.menu.createMenu();
 
-  let scene = "menu"; // "menu"（メニュー）、"battle"（試合）、"records"（自動対戦と記録・学習AIをきたえる）
+  // ---- キーコンフィグ：割り当てはこのブラウザ（localStorage）に保存する ----
+  const KC = SF.keyconfig;
+  const KEYS_STORE = "silhouette-fighter.keys";
+  function loadBindings() {
+    try {
+      const text = root.localStorage.getItem(KEYS_STORE);
+      return KC.fromSaved(text ? JSON.parse(text) : null);
+    } catch (e) {
+      return KC.defaults(); // 保存できない設定のブラウザや、こわれたデータのときは初期値
+    }
+  }
+  function saveBindings() {
+    try {
+      root.localStorage.setItem(KEYS_STORE, JSON.stringify(KC.toSaved(bindings)));
+    } catch (e) {
+      // 保存できなくても、開いている間はその割り当てで遊べる
+    }
+  }
+  const bindings = loadBindings();
+  let keyScreen = KC.createScreen();
+
+  let scene = "menu"; // "menu"（メニュー）、"battle"（試合）、"keys"（キーコンフィグ）、"records"（自動対戦と記録・学習AIをきたえる）
   let config = null; // 試合の設定（モード、キャラ、強さ）。メニューで決まる
   let state = null;
   let cpus = [null, null]; // CPUが動かす側だけ入る
@@ -79,24 +100,65 @@
     menu.screen = screen;
   }
 
-  // キーをメニューの操作に変える（矢印キーでも WASD でも動かせる）
-  const MENU_KEYS = {
+  // キーをメニューの操作に変える。矢印キー・Enter・Esc はいつでも使える。
+  // それに加えて、試合の操作のキーでも動かせる（初期値なら WASD でえらび、U・スペースで決定、I でもどる）
+  const FIXED_MENU_KEYS = {
     ArrowUp: "up",
-    KeyW: "up",
     ArrowDown: "down",
-    KeyS: "down",
     ArrowLeft: "left",
-    KeyA: "left",
     ArrowRight: "right",
-    KeyD: "right",
     Enter: "ok",
     NumpadEnter: "ok",
-    Space: "ok",
-    KeyU: "ok",
     Escape: "back",
     Backspace: "back",
-    KeyI: "back",
   };
+  let MENU_KEYS = {};
+  function applyBindings() {
+    keyboard.setBindings(bindings);
+    renderer.setBindings(bindings);
+    const m = {};
+    if (!keyboard.isBound("KeyW")) m.KeyW = "up"; // 上はゲームの操作にないので、W がほかで使われていなければ W
+    m[bindings.DOWN] = "down";
+    m[bindings.LEFT] = "left";
+    m[bindings.RIGHT] = "right";
+    m[bindings.JUMP] = "ok";
+    m[bindings.LIGHT] = "ok";
+    m[bindings.HEAVY] = "back";
+    MENU_KEYS = Object.assign(m, FIXED_MENU_KEYS); // 矢印キー・Enter・Esc を優先する
+    updateHelp();
+  }
+  // ページの下の操作説明を、今のキーの割り当てに合わせて書き換える
+  function updateHelp() {
+    document.querySelectorAll("[data-key]").forEach((el) => {
+      el.textContent = KC.keyLabel(bindings[el.dataset.key]);
+    });
+  }
+
+  function openKeyConfig() {
+    scene = "keys";
+    keyScreen = KC.createScreen();
+  }
+  function onKeyConfigKey(e) {
+    KC.rememberKey(e.code, e.key);
+    if (keyScreen.waiting) {
+      if (e.repeat) return; // 決定キーを押しっぱなしにしていても、そのキーが入らないように
+      if (!KC.isReserved(e.code) || e.code === "Escape") e.preventDefault();
+      const r = KC.pressKey(keyScreen, bindings, e.code);
+      if (r && r.changed) {
+        saveBindings();
+        applyBindings();
+      }
+      return;
+    }
+    const action = MENU_KEYS[e.code];
+    if (!action || (e.repeat && (action === "ok" || action === "back"))) return;
+    const r = KC.press(keyScreen, bindings, action);
+    if (r && r.changed) {
+      saveBindings();
+      applyBindings();
+    }
+    if (r && r.close) backToMenu(SF.menu.SCREEN.MODE);
+  }
 
   function pressOverlay(action) {
     const n = overlay.items.length;
@@ -116,6 +178,10 @@
     if (scene === "records") return; // 自動対戦の画面はボタンとマウスで操作する（キーはふつうに入力欄で使う）
     const action = MENU_KEYS[e.code];
     if (e.code.startsWith("Arrow") || e.code === "Space" || e.code === "Backspace") e.preventDefault(); // 画面がスクロールしないように
+    if (scene === "keys") {
+      onKeyConfigKey(e);
+      return;
+    }
 
     if (scene === "menu") {
       if (!action || (e.repeat && (action === "ok" || action === "back"))) return;
@@ -123,6 +189,7 @@
       if (result && result.start) startBattle(result.start);
       if (result && result.auto) openRecords();
       if (result && result.learn) openLearn();
+      if (result && result.keys) openKeyConfig();
       return;
     }
 
@@ -135,6 +202,8 @@
       overlay = { kind: "pause", items: PAUSE_ITEMS, cursor: 0 };
       return;
     }
+    // 確認用のキー（H・3・4）は、試合の操作に割り当てたときは使わない
+    if (keyboard.isBound(e.code)) return;
     if (e.code === "KeyH") showBoxes = !showBoxes;
     if (config.mode === "pvc") {
       if (e.code === "Digit3" || e.code === "Numpad3") {
@@ -215,6 +284,8 @@
       // 自動対戦の画面では何も描かない（計算の邪魔をしない）
     } else if (scene === "menu") {
       renderer.drawMenu(menu, tick);
+    } else if (scene === "keys") {
+      renderer.drawKeyConfig(keyScreen, tick);
     } else {
       const label = (i) => {
         if (!cpus[i]) return "あなた";
@@ -231,6 +302,8 @@
     }
     requestAnimationFrame(frame);
   }
+
+  applyBindings();
 
   requestAnimationFrame((now) => {
     lastTime = now;

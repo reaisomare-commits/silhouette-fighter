@@ -9,6 +9,7 @@
       body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; box-sizing: border-box; }
       canvas { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; image-rendering: pixelated; }
       p { margin: 0; font-size: 14px; text-align: center; }
+      p b[data-key] { font-weight: normal; color: #ffd8a0; }
       /* 自動対戦と記録の画面 */
       body.records-open { justify-content: flex-start; }
       body.records-open > canvas, body.records-open > p { display: none; }
@@ -39,12 +40,12 @@
   </head>
   <body>
     <canvas id="screen" width="960" height="540"></canvas>
-    <p>A / D：左右に移動（相手と反対の向きでガード）　S：しゃがみ（S＋反対の向きでしゃがみガード）　スペース：ジャンプ</p>
-    <p>U：弱攻撃　I：強攻撃　（S＋U / S＋I でしゃがみ攻撃、ジャンプ中に U / I で空中攻撃）</p>
-    <p>O：必殺技　S＋O：対空の必殺技　U＋I同時押し：投げ（投げられたら8F以内にU＋Iで投げ抜け）</p>
-    <p>当たった・ガードされた U / I / S＋U から O でキャンセル（S＋I からはできない）。U → I（リンは U → U → I）もつながる</p>
+    <p><b data-key="LEFT">A</b> / <b data-key="RIGHT">D</b>：左右に移動（相手と反対の向きでガード）　<b data-key="DOWN">S</b>：しゃがみ（<b data-key="DOWN">S</b>＋反対の向きでしゃがみガード）　<b data-key="JUMP">スペース</b>：ジャンプ</p>
+    <p><b data-key="LIGHT">U</b>：弱攻撃　<b data-key="HEAVY">I</b>：強攻撃　（<b data-key="DOWN">S</b>＋<b data-key="LIGHT">U</b> / <b data-key="DOWN">S</b>＋<b data-key="HEAVY">I</b> でしゃがみ攻撃、ジャンプ中に <b data-key="LIGHT">U</b> / <b data-key="HEAVY">I</b> で空中攻撃）</p>
+    <p><b data-key="SPECIAL">O</b>：必殺技　<b data-key="DOWN">S</b>＋<b data-key="SPECIAL">O</b>：対空の必殺技　<b data-key="LIGHT">U</b>＋<b data-key="HEAVY">I</b>同時押し：投げ（投げられたら8F以内に<b data-key="LIGHT">U</b>＋<b data-key="HEAVY">I</b>で投げ抜け）</p>
+    <p>当たった・ガードされた <b data-key="LIGHT">U</b> / <b data-key="HEAVY">I</b> / <b data-key="DOWN">S</b>＋<b data-key="LIGHT">U</b> から <b data-key="SPECIAL">O</b> でキャンセル（<b data-key="DOWN">S</b>＋<b data-key="HEAVY">I</b> からはできない）。<b data-key="LIGHT">U</b> → <b data-key="HEAVY">I</b>（リンは <b data-key="LIGHT">U</b> → <b data-key="LIGHT">U</b> → <b data-key="HEAVY">I</b>）もつながる</p>
     <p>前を素早く2回：ステップ（カゲツ）／ダッシュ（リン）　後ろを素早く2回：バックステップ</p>
-    <p>メニュー：矢印キーかWASDでえらぶ　Enter：決定　Esc：もどる</p>
+    <p>メニュー：矢印キーでえらぶ　Enter：決定　Esc：もどる　キーは「モードをえらぶ」の「キーコンフィグ」で変えられます</p>
     <p>試合中　Esc：一時停止　H：当たり判定を表示　3：相手を練習相手に（押すたびに動きを切り替え）　4：CPUにもどす</p>
     <p>（画面をクリックしてから操作してください）</p>
     <div id="records" class="page" hidden>
@@ -128,6 +129,7 @@
     <script src="src/core/constants.js"></script>
     <script src="src/core/rng.js"></script>
     <script src="src/core/input.js"></script>
+    <script src="src/core/keyconfig.js"></script>
     <script src="src/core/characters.js"></script>
     <script src="src/core/game.js"></script>
     <script src="src/core/dummy.js"></script>
