@@ -261,7 +261,7 @@
         } else if (move === "crouchLight" || move === "airLight") {
           hand = { x: lean + lerp(20, 50, ext), y: move === "airLight" ? shoulderY + lerp(30, 56, ext) : -lerp(30, 10, ext) };
           claw = 0.5;
-        } else if (move === "special" || move === "airSpecial") {
+        } else if (move === "special" || move === "airSpecial" || move === "super") {
           // 手を前にかざして門を開く
           hand = { x: lean + lerp(18, 40, Math.max(ext, wind)), y: shoulderY + 14 };
           claw = -0.2;
@@ -317,7 +317,7 @@
             ctx.fillStyle = "#12001f";
             ctx.fillRect(cx - half * 0.3, -m.hitbox.y2 * e, half * 0.6, m.hitbox.y2 * e);
           }
-        } else if ((move === "special" || move === "airSpecial") && !atk.rec) {
+        } else if ((move === "special" || move === "airSpecial" || move === "super") && !atk.rec) {
           // 異空間弾：門が先に開いてから弾が出る（弾が出たら門は効果として残る）
           const pr = m.projectile;
           ctx.restore();
@@ -435,7 +435,7 @@
       let lean = LEAN[p] || 0;
       if (atk) {
         // 攻撃は振りかぶりで少し後ろ、当たる瞬間に前へ
-        const forwardLean = { standHeavy: 10, standLight: 6, crouchLight: 6, crouchHeavy: 8, special: isKagetsu ? 8 : 16, crouchSpecial: -2, throw: 8 }[move] || 4;
+        const forwardLean = { standHeavy: 10, standLight: 6, crouchLight: 6, crouchHeavy: 8, special: isKagetsu ? 8 : 16, crouchSpecial: -2, throw: 8, super: isKagetsu ? 18 : -6 }[move] || 4;
         const kickBack = !isKagetsu && (move === "standHeavy") ? -10 : 0;
         lean = lerp(-3 * atk.wind, forwardLean, atk.ext) + kickBack * atk.ext;
       }
@@ -484,7 +484,7 @@
         const r = Math.sin(state.frame * 0.5) * 18;
         limb(-5, hipY, -10 - r, 0, legW);
         limb(5, hipY, 10 + r, 0, legW);
-      } else if (p === POSE.STEP || p === POSE.BACKSTEP || (atk && (move === "standHeavy" || move === "special"))) {
+      } else if (p === POSE.STEP || p === POSE.BACKSTEP || (atk && (move === "standHeavy" || move === "special" || move === "super"))) {
         // 足を前後に開く
         limb(-5, hipY, -24, 0, legW);
         limb(5, hipY, 22, 0, legW);
@@ -559,6 +559,11 @@
             hand = { x: lean + lerp(10, 34, Math.max(ext, rec ? 0.8 : 0)), y: handY + 12 };
             angle = rec ? 0.05 : wind < 1 ? lerp(-0.55, 2.4, wind) : 0.05;
             len = 100;
+          } else if (move === "super") {
+            // 月影斬：刀を腰に構えて駆け抜け、前へ水平に斬り抜く
+            hand = { x: lean + lerp(4, 36, ext), y: handY + lerp(16, 10, ext) };
+            angle = rec ? lerp(-0.55, 0.1, ext) : ext > 0 ? 0.1 : lerp(-0.55, 2.6, wind);
+            len = ext > 0 ? 118 : 90;
           } else if (move === "crouchSpecial") {
             // 昇り斬り：下から真上へ斬り上げる
             hand = { x: lean + lerp(22, 14, ext), y: handY + lerp(20, -26, ext) };
@@ -588,6 +593,11 @@
           let back = { from: shoulderY + 6, x: lean + 12, y: handY + 12 };
           if (atk && move === "standLight") front = { x: lean + lerp(24, 54, atk.ext), y: handY - 6 * atk.ext };
           if (atk && move === "special") front = { x: lean + lerp(24, 62, atk.ext), y: handY - 4 * atk.ext };
+          if (atk && move === "super") {
+            // 練気：両の拳を腰に引いて気をためる
+            front = { x: lean + 10, y: handY + 18 };
+            back = { from: shoulderY + 8, x: lean - 4, y: handY + 20 };
+          }
           if ((atk && move === "throw") || throwFollow) {
             // 投げ：両手を前に出して掴む（後ろの手も前へ伸ばす。腕は2本のまま）
             const e = throwFollow ? 1 : Math.max(atk.ext, atk.wind * 0.5);
@@ -610,6 +620,31 @@
         ctx.strokeStyle = "#000";
       }
 
+      // 月影斬：駆け抜けた跡に、差し色の残像の帯を残す
+      if (isKagetsu && atk && move === "super" && !atk.rec && f.moveFrame >= 4) {
+        ctx.save();
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = accent;
+        const trail = Math.min(f.moveFrame - 3, 14) * 17;
+        ctx.fillRect(-trail, -h * 0.62, trail, 10);
+        ctx.fillRect(-trail * 0.7, -h * 0.4, trail * 0.7, 6);
+        ctx.restore();
+      }
+      // 練気（リン）：強くなっている間、体のまわりに差し色の気がゆらめく。出した瞬間は大きく広がる
+      if (f.buffTimer > 0) {
+        ctx.save();
+        ctx.strokeStyle = accent;
+        const burst = atk && move === "super" ? 1 - Math.min(1, f.moveFrame / 20) : 0;
+        ctx.globalAlpha = 0.45 + 0.25 * Math.sin(state.frame * 0.5) + burst * 0.3;
+        ctx.lineWidth = 3 + burst * 4;
+        for (let k = 0; k < 3; k++) {
+          const flick = Math.sin(state.frame * 0.35 + k * 2) * 6;
+          ctx.beginPath();
+          ctx.ellipse(0, -h * 0.5, w * (0.75 + k * 0.18 + burst * 0.8) + flick, h * (0.55 + k * 0.06 + burst * 0.4), 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
       // 最大までためた突進拳：飛び道具をすり抜ける間、体のまわりが差し色に光る
       if (SF.game.fullCharge(f)) {
         ctx.save();
@@ -689,6 +724,26 @@
           ctx.save();
           ctx.globalAlpha = Math.min(1, e.life / 10);
           portal(e.x, e.y, 22, e.h / 2 + 10, Math.min(1, e.life / 14), e.mirror ? ACCENT_MIRROR[e.charId] : c);
+          ctx.restore();
+          continue;
+        }
+        if (e.kind === "superName") {
+          // ゲージ技の名前：出した側の頭の上に大きく
+          const f = state.fighters[e.owner];
+          const other = state.fighters[1 - e.owner];
+          const c = e.owner === 1 && other.charId === f.charId ? ACCENT_MIRROR[f.charId] : ACCENT[f.charId];
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, e.life / 15);
+          ctx.font = "bold 40px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.lineWidth = 8;
+          ctx.strokeStyle = "rgba(0,0,0,0.85)";
+          const x = Math.max(120, Math.min(C.STAGE_WIDTH - 120, f.x / C.SCALE));
+          const y = f.y / C.SCALE - SF.game.fighterHeight(f) - 60;
+          ctx.strokeText(e.text, x, y);
+          ctx.fillStyle = c;
+          ctx.fillText(e.text, x, y);
           ctx.restore();
           continue;
         }
@@ -794,6 +849,47 @@
       });
     }
 
+    // ゲージ：体力バーの下。満タンになると光って「ゲージ技（I＋O）」と出る。リンの練気で強くなっている間は残り時間を出す
+    function drawGauge(state, f, i, barX, y, barW) {
+      const w = 220;
+      const gh = 10;
+      const x = i === 0 ? barX + barW - w : barX; // 体力と同じく真ん中（時計の側）にそろえる
+      const rate = f.gauge / SF.game.GAUGE_FULL;
+      const full = SF.game.gaugeFull(f);
+      const other = state.fighters[1 - i];
+      const accent = i === 1 && other.charId === f.charId ? ACCENT_MIRROR[f.charId] : ACCENT[f.charId];
+      ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+      ctx.fillRect(x - 2, y - 2, w + 4, gh + 4);
+      ctx.fillStyle = "#1c1c2c";
+      ctx.fillRect(x, y, w, gh);
+      const fillW = Math.round(w * rate);
+      ctx.fillStyle = full ? (Math.floor(state.frame / 6) % 2 ? "#fff6c8" : "#ffd24d") : accent;
+      ctx.fillRect(i === 0 ? x + w - fillW : x, y, fillW, gh);
+      // 練気の残り時間（ゲージの上に重ねて、白い線が減っていく）
+      const sup = CHARACTERS[f.charId].moves.super;
+      if (f.buffTimer > 0 && sup && sup.buff) {
+        const bw = Math.round((w * f.buffTimer) / sup.buff.frames);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.fillRect(i === 0 ? x + w - bw : x, y + gh - 3, bw, 3);
+      }
+      let note = null;
+      if (f.buffTimer > 0 && sup && sup.buff) note = `${sup.name} のこり${Math.ceil(f.buffTimer / C.FPS)}秒`;
+      else if (full) note = `ゲージ技 ${keyOf(BUTTON.HEAVY)}＋${keyOf(BUTTON.SPECIAL)}`;
+      if (note) {
+        ctx.save();
+        ctx.font = "bold 13px sans-serif";
+        ctx.textBaseline = "middle";
+        ctx.textAlign = i === 0 ? "right" : "left";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(0,0,0,0.8)";
+        const tx = i === 0 ? x - 8 : x + w + 8;
+        ctx.strokeText(note, tx, y + gh / 2);
+        ctx.fillStyle = full ? "#ffd24d" : "#fff";
+        ctx.fillText(note, tx, y + gh / 2);
+        ctx.restore();
+      }
+    }
+
     // 画面上部：体力バー、名前、残り時間、取ったラウンド数
     function drawHud(state, sideLabels) {
       const r = state.round;
@@ -813,6 +909,9 @@
         const fillW = Math.round(barW * rate);
         ctx.fillRect(i === 0 ? x + barW - fillW : x, top, fillW, barH);
 
+        drawGauge(state, f, i, x, top + barH + 5, barW);
+
+        const lt = top + barH + 22; // 名前を書く高さ（ゲージの下）
         ctx.font = "bold 16px sans-serif";
         ctx.textBaseline = "top";
         ctx.textAlign = i === 0 ? "left" : "right";
@@ -821,21 +920,21 @@
         ctx.lineWidth = 3;
         const label = `${c.name}  ${f.health}`;
         const lx = i === 0 ? x : x + barW;
-        ctx.strokeText(label, lx, top + barH + 6);
-        ctx.fillText(label, lx, top + barH + 6);
+        ctx.strokeText(label, lx, lt);
+        ctx.fillText(label, lx, lt);
         // だれが動かしているか（あなた／CPU の強さ）
         if (sideLabels && sideLabels[i]) {
           ctx.font = "bold 13px sans-serif";
           ctx.fillStyle = sideLabels[i] === "あなた" ? "#ffd24d" : "#cfe3ff";
-          ctx.strokeText(sideLabels[i], lx, top + barH + 28);
-          ctx.fillText(sideLabels[i], lx, top + barH + 28);
+          ctx.strokeText(sideLabels[i], lx, lt + 22);
+          ctx.fillText(sideLabels[i], lx, lt + 22);
         }
 
         // 取ったラウンド数（丸）
         for (let k = 0; k < BATTLE.winsToMatch; k++) {
           const cx = i === 0 ? x + barW - 10 - k * 22 : x + 10 + k * 22;
           ctx.beginPath();
-          ctx.arc(cx, top + barH + 16, 7, 0, Math.PI * 2);
+          ctx.arc(cx, lt + 10, 7, 0, Math.PI * 2);
           ctx.fillStyle = k < r.wins[i] ? "#f2d14b" : "rgba(0,0,0,0.5)";
           ctx.fill();
           ctx.strokeStyle = "#fff";
@@ -1150,7 +1249,13 @@
     return {
       draw(state, info) {
         drawBackground();
-        state.fighters.forEach((f, i) => drawFighter(f, i, state));
+        // ゲージ技を出した瞬間（暗転）：背景を暗くして、出した側を前に描く
+        if (state.superFreeze > 0) {
+          ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(0.65, state.superFreeze * 0.05)})`;
+          ctx.fillRect(0, 0, C.STAGE_WIDTH, C.STAGE_HEIGHT);
+        }
+        const order = state.superFreeze > 0 && state.superOwner >= 0 ? [1 - state.superOwner, state.superOwner] : [0, 1];
+        order.forEach((i) => drawFighter(state.fighters[i], i, state));
         drawProjectiles(state);
         if (info.showBoxes) drawBoxes(state);
         drawEffects(state);

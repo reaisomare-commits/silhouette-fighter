@@ -15,13 +15,14 @@
   //   antiAir: 相手が跳んできたときに対空技（S+O）を出す確率（1回のジャンプごとに決める）
   //   combo: 連続技を最後までつなぐ確率（失敗すると途中で止める）
   //   tech: 投げ抜けする確率
+  //   superUse: ゲージが満タンのとき、ゲージ技を使う確率（連続技の締め・切り返しなど、場面ごとに決める）
   const LEVELS = [
-    { id: "easy", label: "よわい", reaction: 30, guard: 30, antiAir: 20, combo: 30, tech: 0 },
-    { id: "normal", label: "ふつう", reaction: 18, guard: 60, antiAir: 50, combo: 70, tech: 30 },
-    { id: "hard", label: "つよい", reaction: 10, guard: 85, antiAir: 80, combo: 95, tech: 60 },
+    { id: "easy", label: "よわい", reaction: 30, guard: 30, antiAir: 20, combo: 30, tech: 0, superUse: 20 },
+    { id: "normal", label: "ふつう", reaction: 18, guard: 60, antiAir: 50, combo: 70, tech: 30, superUse: 50 },
+    { id: "hard", label: "つよい", reaction: 10, guard: 85, antiAir: 80, combo: 95, tech: 60, superUse: 80 },
     // 学習AI：反射神経（反応・ガード・対空・連続技・投げ抜け）は「つよい」と同じで、
     // 様子見で何をするかだけを機械学習（src/core/learn.js）の表で決める
-    { id: "learn", label: "学習AI", reaction: 10, guard: 85, antiAir: 80, combo: 95, tech: 60, learned: true },
+    { id: "learn", label: "学習AI", reaction: 10, guard: 85, antiAir: 80, combo: 95, tech: 60, superUse: 80, learned: true },
   ];
   const LEARN_LEVEL = LEVELS.findIndex((lv) => lv.learned);
 
@@ -72,7 +73,23 @@
 
   const PROJECTILE_ALERT = 260; // 飛び道具がこれより近づいたらガードを考える（ピクセル）
   const ANTI_AIR_RANGE = 130; // 跳んできた相手がこれより近づいたら対空技を出す（ピクセル、横の距離）
-  const HISTORY = 64; // 相手の様子を何フレーム前まで覚えておくか（反応の速さより長く）
+  const HISTORY = 64;
+  const SUPER = BUTTON.HEAVY | BUTTON.SPECIAL; // ゲージ技（I＋O の同時押し）
+  // ゲージ技を様子見のときに使う場面。band＝距離（近い・中くらい・遠い）、rate＝superUse の何分の1の確率で使うか
+  //   カゲツの月影斬は突進するので中くらい〜少し遠い所から、リンの練気は近づく前に、ゲンマの冥府球は離れた所から
+  const SUPER_PLAN = {
+    kagetsu: { bands: ["mid", "far"], maxDist: 300, rate: 4 },
+    rin: { bands: ["mid", "far"], maxDist: 999, rate: 3 },
+    genma: { bands: ["mid", "far"], maxDist: 999, rate: 3 },
+  };
+  // リンの練気で強くなっている間の連続技（すべての攻撃がキャンセルできるので長くつなぐ）
+  const BUFF_COMBOS = {
+    rin: {
+      standLight: ["light", "heavy", "crouchLight", "heavy", "special"], // ジャブ → ジャブ → 回し蹴り → 小足 → 回し蹴り → 突進拳
+      standHeavy: ["crouchLight", "heavy", "special"], // 回し蹴り → 小足 → 回し蹴り → 突進拳
+      crouchLight: ["light", "special"], // 小足 → 小足 → 跳び蹴り上げ
+    },
+  }; // 相手の様子を何フレーム前まで覚えておくか（反応の速さより長く）
 
   // opts は学習AIのときだけ使う：brain＝使う頭脳（なければ今の頭脳）、train＝学習するか、explore＝わざと別の行動を試す確率、alpha＝表を直す強さ
   function createCpu(level = 1, seed = 1, opts = {}) {
@@ -107,6 +124,8 @@
       comboFrom: null, // 連続技の始めの技
       comboStop: null, // 今の連続技で何回つないだら止めるか
       comboPressedFor: -1, // どの技のときにつなぎのボタンを押したか
+      comboSuper: false, // 今の連続技の締めをゲージ技にするか
+      reversalOk: false, // 今の相手の技に、ゲージ技で切り返すか（無敵のあるゲージ技だけ）
       techAt: -1, // 投げ抜けのU＋Iを押すフレーム
       grabbed: 0, // 掴まれたフレーム（掴まれていなければ0）
       myAir: false, // 前のフレームで自分が空中にいたか（ジャンプ1回ごとに浮くかを決める）
@@ -252,18 +271,25 @@
 
     // 連続技：自分の技が当たったら、決めた確率で次のボタンを押す
     if (me.move && me.moveHit && opp.pose === POSE.HIT && cpu.comboPressedFor !== cpu.myMoveId) {
-      const route = (COMBOS[me.charId] || {})[cpu.comboFrom];
+      const buffed = SF.game.cancelAllActive(me);
+      const route = ((buffed && BUFF_COMBOS[me.charId]) || COMBOS[me.charId] || {})[cpu.comboFrom];
       if (route && cpu.comboStep < route.length) {
         // 最後までつなぐかを1回だけ決める。失敗するときは途中のどこかで止める（1回もつながないこともある）
         if (cpu.comboStop === null) {
           cpu.comboStop = chance(cpu, lv.combo) ? route.length : SF.rng.nextInt(cpu.rng, route.length);
+          // ゲージが満タンなら、最後のつなぎをゲージ技にするかを決める（当たる技で、そのまま連続技になるカゲツの月影斬だけ）
+          const sup = CHARACTERS[me.charId].moves.super;
+          cpu.comboSuper = !!(sup && sup.hitbox) && SF.game.gaugeFull(me) && chance(cpu, lv.superUse);
         }
         if (cpu.comboStep < cpu.comboStop) {
-          const next = route[cpu.comboStep];
+          const last = cpu.comboStep === route.length - 1;
+          const next = last && cpu.comboSuper && SF.game.gaugeFull(me) ? "super" : route[cpu.comboStep];
           cpu.comboStep += 1;
           cpu.comboPressedFor = cpu.myMoveId;
           const down = cpu.comboFrom.startsWith("crouch") ? BUTTON.DOWN : 0;
-          if (next === "crouchSpecial") cpu.queue.push(BUTTON.DOWN, BUTTON.DOWN | BUTTON.SPECIAL);
+          if (next === "super") cpu.queue.push(down, down | SUPER);
+          else if (next === "crouchSpecial") cpu.queue.push(BUTTON.DOWN, BUTTON.DOWN | BUTTON.SPECIAL);
+          else if (next === "crouchLight") cpu.queue.push(BUTTON.DOWN, BUTTON.DOWN | BUTTON.LIGHT);
           else cpu.queue.push(down, down | buttonFor(next));
           return finish(cpu, cpu.queue.shift());
         }
@@ -278,6 +304,15 @@
       if (cpu.guardKey !== t.key) {
         cpu.guardKey = t.key;
         cpu.guardOk = chance(cpu, lv.guard);
+        // 切り返し：ゲージが満タンで、出だしが無敵のゲージ技があれば、相手の技（飛び道具でないもの）にゲージ技を合わせるかを決める
+        const sup = CHARACTERS[me.charId].moves.super;
+        cpu.reversalOk = !!(sup && sup.invincible) && t.key[0] === "m" && SF.game.gaugeFull(me) && chance(cpu, lv.superUse / 2);
+      }
+      if (cpu.reversalOk && isFree(me) && me.onGround && me.landingTimer === 0) {
+        cpu.reversalOk = false;
+        cpu.hold = 0;
+        cpu.thinkTimer = 0;
+        return finish(cpu, SUPER);
       }
       if (cpu.guardOk && me.onGround) {
         cpu.hold = 0;
@@ -360,6 +395,11 @@
     const plans = PLANS[me.charId] || PLANS.kagetsu;
     const band = dist <= reachOf(me, opp, "standLight") ? "near" : dist <= reachOf(me, opp, "standHeavy") ? "mid" : "far";
     let plan;
+    // ゲージが満タンなら、場面に合えばゲージ技を使う（学習AIも同じ決まりで使う。学習した表には入っていない）
+    const sp = SUPER_PLAN[me.charId];
+    if (sp && SF.game.gaugeFull(me) && sp.bands.includes(band) && dist <= sp.maxDist && chance(cpu, lv.superUse / sp.rate)) {
+      return finish(cpu, SUPER);
+    }
     if (cpu.learner) {
       // 学習AI：表を見て選ぶ（届かない技を選んでも直さない。空振りして損をしたら、それも学習する）
       plan = SF.learn.decide(cpu.learner, cpu.rng, state, index, o);

@@ -56,6 +56,8 @@
 
   // 通常技（地上のU・I）か。必殺技キャンセル・連続技ができるのはこれだけ
   const GROUND_NORMALS = ["standLight", "standHeavy", "crouchLight", "crouchHeavy"];
+  // I＋Oを少しずらして押したとき、先に出かけた技をゲージ技に変えられるもの
+  const SUPER_FROM = ["standHeavy", "crouchHeavy", "special", "crouchSpecial"];
   const isLightMove = (name) => name === "standLight" || name === "crouchLight";
   // 空中で出す技（1回のジャンプで1回だけ）
   const isAirMove = (name) => name === "airLight" || name === "airHeavy" || name === "airSpecial";
@@ -114,6 +116,10 @@
       holdDown: false, // このフレームで下を押しているか
       pinned: false, // 影縫い中か（相手の技の影縫い範囲に体が入っている）
       prevInput: 0,
+      gauge: 0, // ゲージ（100倍の整数。満タンは BATTLE.gauge.max × 100）。次のラウンドに持ち越す
+      specialAge: 99, // Oを押してから何フレームたったか（I＋Oの同時押し判定用）
+      buffTimer: 0, // ゲージ技で強くなっている残りフレーム（リンの練気：すべての攻撃がキャンセルできる）
+      superGuardable: true, // 今出しているゲージ技を、相手がガードできるか（暗転する前からガードを押していたか）
     };
   }
 
@@ -128,6 +134,8 @@
       chars: chars.slice(),
       fighters: [],
       hitstop: 0, // 当たった瞬間に止まっている残りフレーム
+      superFreeze: 0, // ゲージ技を出した瞬間の、画面が止まっている（暗転）残りフレーム
+      superOwner: -1, // 暗転させたのはどちらか（0か1。描画用）
       effects: [], // 当たった火花など（描画用）
       projectiles: [], // 飛んでいる飛び道具
       comboInfo: [null, null], // 連続技の表示（描画用）。[左のキャラが当てている連続技, 右]
@@ -154,11 +162,15 @@
   }
 
   function resetFighters(state) {
+    const gauges = state.fighters.map((f) => f.gauge); // ゲージは次のラウンドに持ち越す
     state.fighters = [
       createFighter(state.chars[0], START_X[0], 1),
       createFighter(state.chars[1], START_X[1], -1),
     ];
+    state.fighters.forEach((f, i) => (f.gauge = gauges[i] || 0));
     state.hitstop = 0;
+    state.superFreeze = 0;
+    state.superOwner = -1;
     state.effects = [];
     state.projectiles = [];
     state.comboInfo = [null, null];
@@ -217,6 +229,45 @@
     if (isLightMove(name)) f.chainLights += 1;
   }
 
+  // ゲージ：100倍の整数で持つ。満タンでゲージ技を出せる
+  const GAUGE_FULL = BATTLE.gauge.max * 100;
+  function gaugeFull(f) {
+    return f.gauge >= GAUGE_FULL;
+  }
+  function addGauge(f, amount) {
+    f.gauge = Math.min(GAUGE_FULL, f.gauge + Math.max(0, Math.floor(amount)));
+  }
+  // 体力が減ったときのゲージ。maxHealth はその体力の持ち主の最大体力（体力の割合で溜まるので、体力の少ないキャラも同じだけ溜まる）
+  function gaugeForDamage(state, att, def, dmg, name) {
+    const maxHealth = CHARACTERS[def.charId].health;
+    if (name !== "super") addGauge(att, (dmg * BATTLE.gauge.dealt * 100) / maxHealth);
+    addGauge(def, (dmg * BATTLE.gauge.taken * 100) / maxHealth);
+  }
+
+  // ゲージ技を出す：ゲージを全部使い、画面を少し止める（暗転）。相手の足元に出る技は、ここで場所を決める
+  function startSuper(state, f, chain = false) {
+    const i = state.fighters.indexOf(f);
+    const opp = state.fighters[1 - i];
+    f.gauge -= GAUGE_FULL;
+    f.crouching = false;
+    f.vx = 0;
+    startMove(state, f, "super", chain);
+    const m = CHARACTERS[f.charId].moves.super;
+    // 暗転する前からガード（後ろ）を押していないと、ガードできない技（カゲツの月影斬）
+    f.superGuardable = !m.guardBeforeFreeze || opp.holdBack;
+    if (m.buff) f.buffTimer = m.buff.frames;
+    state.superFreeze = BATTLE.superFreeze;
+    state.superOwner = i;
+    state.effects.push({ kind: "superName", owner: i, text: CHARACTERS[f.charId].moves.super.name, life: BATTLE.superFreeze + 30 });
+  }
+
+  // ゲージ技の出だしの無敵中か（攻撃も投げも飛び道具も当たらない）
+  function superInvincible(f) {
+    if (f.move !== "super") return false;
+    const m = moveData(f);
+    return !!m.invincible && f.moveFrame <= m.invincible;
+  }
+
   // 最大までためた技（リンの突進拳）を出しているか。ためている間に最大になったときから、技が終わるまで
   function fullCharge(f) {
     const m = moveData(f);
@@ -241,15 +292,34 @@
   //   ・U・I → 必殺技（O / S+O）
   //   ・U → I（リンは U → U → I も）
   function cancelTarget(state, f, down) {
+    if (cancelAllActive(f)) return buffCancelTarget(state, f, down);
     if (!f.moveHit || !GROUND_NORMALS.includes(f.move)) return null;
     if (moveData(f).noCancel) return null;
     const b = f.buffer;
+    if (b === "super" && CHARACTERS[f.charId].moves.super) return "super";
     if (b === "special") return specialName(state, f, down);
     if (!isLightMove(f.move)) return null;
     if (b === "heavy") return down ? "crouchHeavy" : "standHeavy";
     if (b === "light" && f.chainLights < CHARACTERS[f.charId].lightChainMax) {
       return down ? "crouchLight" : "standLight";
     }
+    return null;
+  }
+
+  // ゲージ技で強くなっている間（リンの練気）：すべての攻撃が、当たるかガードされたら別の攻撃でキャンセルできる
+  function cancelAllActive(f) {
+    if (f.buffTimer <= 0) return false;
+    const sup = CHARACTERS[f.charId].moves.super;
+    return !!(sup && sup.buff && sup.buff.cancelAll);
+  }
+  // 強くなっている間のキャンセル先。投げとゲージ技からはキャンセルしない
+  function buffCancelTarget(state, f, down) {
+    if (!f.moveHit || f.move === "throw" || f.move === "super") return null;
+    const b = f.buffer;
+    if (b === "super" && CHARACTERS[f.charId].moves.super) return "super";
+    if (b === "special") return specialName(state, f, down);
+    if (b === "heavy") return down ? "crouchHeavy" : "standHeavy";
+    if (b === "light") return down ? "crouchLight" : "standLight";
     return null;
   }
 
@@ -268,6 +338,7 @@
     if (f.bufferAge < 99) f.bufferAge += 1;
     const oldBuffer = f.buffer;
     if (f.heavyAge < 99) f.heavyAge += 1;
+    if (f.specialAge < 99) f.specialAge += 1;
     let dash = null;
     if (justPressed(input, f.prevInput, forwardBtn)) {
       if (f.tapForward > 0) dash = "dashForward";
@@ -281,8 +352,10 @@
     }
     const light = justPressed(input, f.prevInput, BUTTON.LIGHT);
     const heavy = justPressed(input, f.prevInput, BUTTON.HEAVY);
+    const special = justPressed(input, f.prevInput, BUTTON.SPECIAL);
     if (light) f.lightAge = 0;
     if (heavy) f.heavyAge = 0;
+    if (special) f.specialAge = 0;
     // UとIを（ほぼ）同時に押したら投げ。少しずれても THROW_INPUT_WINDOW フレーム以内なら同時押し
     // 攻撃ボタンのあとに左右の移動キーを押したら、覚えていた攻撃は取り消す（移動が最後の入力）。
     // ただし投げは取り消さない。ほぼ同時（THROW_INPUT_WINDOW フレーム以内）に押した方向キーでも取り消さない
@@ -290,12 +363,18 @@
     if (moved && ["light", "heavy", "special"].includes(f.buffer) && f.bufferAge > BATTLE.throwInputWindow) f.buffer = null;
     const win = BATTLE.throwInputWindow;
     const both = (light && f.heavyAge <= win) || (heavy && f.lightAge <= win);
-    if (both) {
+    // IとOを（ほぼ）同時に押したらゲージ技。ゲージが満タンでないときは、ふつうに強攻撃・必殺技として扱う
+    const superPress = gaugeFull(f) && CHARACTERS[f.charId].moves.super && ((heavy && f.specialAge <= win) || (special && f.heavyAge <= win));
+    if (superPress) {
+      f.buffer = "super";
+      f.heavyAge = 99;
+      f.specialAge = 99;
+    } else if (both) {
       f.buffer = "throw";
       f.throwPressAge = 0;
       f.lightAge = 99;
       f.heavyAge = 99;
-    } else if (justPressed(input, f.prevInput, BUTTON.SPECIAL)) f.buffer = "special";
+    } else if (special) f.buffer = "special";
     else if (heavy) f.buffer = "heavy";
     else if (light) f.buffer = "light";
     else if (justPressed(input, f.prevInput, BUTTON.JUMP)) f.buffer = "jump";
@@ -319,7 +398,8 @@
 
     // 攻撃・ジャンプ・2回押しは先行入力として覚える（動けるならこのフレームですぐ出る）
     registerPresses(f, input);
-    const wantAttack = ["light", "heavy", "special", "throw"].includes(f.buffer) ? f.buffer : null;
+    if (f.buffTimer > 0) f.buffTimer -= 1;
+    const wantAttack = ["light", "heavy", "special", "throw", "super"].includes(f.buffer) ? f.buffer : null;
     const wantJump = f.buffer === "jump";
     const doubleForward = f.buffer === "dashForward";
     const doubleBack = f.buffer === "dashBack";
@@ -351,6 +431,10 @@
       if (f.stun === 0) {
         f.pose = f.crouching ? POSE.CROUCH : POSE.STAND;
       }
+    } else if (f.onGround && f.buffer === "super" && SUPER_FROM.includes(f.move) && !f.moveHit && f.moveFrame <= BATTLE.throwInputWindow + 1) {
+      // IかOを押した直後にもう片方を押したら、出かけた技をゲージ技に変える（出かけた技は出なかったことにする）
+      record(state, f, f.move, "uses", -1);
+      startSuper(state, f);
     } else if (f.onGround && f.move && f.charging && isDown(input, BUTTON.SPECIAL) && f.chargeFrames < moveData(f).charge.max) {
       // ためる技：ボタンを押している間は、出る前の構えのまま止まってためる（離したら出る）
       f.chargeFrames += 1;
@@ -362,7 +446,9 @@
       const m = moveData(f);
       f.vx = 0;
       const next = cancelTarget(state, f, down);
-      if (next) {
+      if (next === "super") {
+        startSuper(state, f, true);
+      } else if (next) {
         f.crouching = next === "crouchLight" || next === "crouchHeavy";
         startMove(state, f, next, true);
       } else if (
@@ -398,6 +484,9 @@
       updateAction(f, st, { forward, down, jump: wantJump });
     } else if (f.onGround) {
       groundControl();
+    } else if (f.move && cancelAllActive(f) && f.moveHit && (f.buffer === "light" || f.buffer === "heavy") && f.move !== "airSpecial") {
+      // 強くなっている間（リンの練気）は、空中攻撃も当たるかガードされたら別の空中攻撃でキャンセルできる
+      startMove(state, f, f.buffer === "light" ? "airLight" : "airHeavy", true);
     } else if (f.move) {
       // 空中攻撃の最中。着地するまで何もできない
       f.moveFrame += 1;
@@ -449,6 +538,8 @@
         f.vx = forward ? f.facing * st.jumpForward : back ? -f.facing * st.jumpForward : 0;
         f.pose = POSE.JUMP;
         f.floatLeft = st.float ? st.float.frames : 0;
+      } else if (wantAttack === "super") {
+        startSuper(state, f);
       } else if (wantAttack === "throw") {
         f.vx = 0;
         f.crouching = false;
@@ -662,7 +753,7 @@
 
   function hurtbox(f) {
     if (f.pose === POSE.DOWN || f.pose === POSE.LAUNCH || f.pose === POSE.THROWN) return null;
-    if (backstepInvincible(f) || f.action === POSE.WARP) return null;
+    if (backstepInvincible(f) || f.action === POSE.WARP || superInvincible(f)) return null;
     const w = CHARACTERS[f.charId].width;
     const x = f.x / S;
     const y = f.y / S;
@@ -738,6 +829,10 @@
       move: f.move,
       x: f.x + f.facing * pr.spawnX * S,
       y: f.y - pr.y * S,
+      // 何回も当たる飛び道具（冥府球）：残りの当たる回数と、次に当たれるまでのフレーム。相手の飛び道具とぶつかっても消えない
+      hitsLeft: pr.multi ? pr.multi.hits : 1,
+      cooldown: 0,
+      strong: !!pr.multi,
       vx: f.facing * pr.speed * S,
       vy: (pr.fall || 0) * S, // 斜め下に飛ぶ飛び道具（空中の異空間弾）は下へも進む
       homing: pr.homing ? { turn: Math.round(pr.homing.turn * S), max: Math.round(pr.homing.max * S) } : null,
@@ -774,6 +869,7 @@
         p.y += p.vy;
       }
       p.age += 1;
+      if (p.cooldown > 0) p.cooldown -= 1;
       // 地面に着いたら消える
       if (p.y - (p.h / 2) * S > C.GROUND_Y * S) {
         p.dead = true;
@@ -786,7 +882,9 @@
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
         if (list[i].owner !== list[j].owner && !list[i].dead && !list[j].dead && overlap(projectileBox(list[i]), projectileBox(list[j]))) {
-          list[i].dead = list[j].dead = true;
+          // 何回も当たる飛び道具（冥府球）は相手の飛び道具を消して、自分は残る
+          list[i].dead = !list[i].strong || list[j].strong;
+          list[j].dead = !list[j].strong || list[i].strong;
           state.effects.push({ kind: "block", x: (list[i].x + list[j].x) / 2 / S, y: list[i].y / S, life: 12 });
         }
       }
@@ -816,7 +914,9 @@
   }
 
   // 守る側がこの技をガードできるか
-  function canBlock(def, m) {
+  function canBlock(def, m, att = null, proj = null) {
+    // 暗転する前からガードを押していないとガードできないゲージ技
+    if (!proj && att && m.guardBeforeFreeze && att.move === "super" && !att.superGuardable) return false;
     // 自分で動ける地上の状態か、すでにガード中でないとガードできない
     const ready = def.onGround && ((isFree(def) && def.landingTimer === 0) || def.pose === POSE.BLOCK);
     if (!ready || !def.holdBack) return false;
@@ -850,7 +950,7 @@
   }
 
   // コンボ補正をかけたダメージを与える。n発目は 100% − 10%×(n−1)（最低10%）
-  function dealDamage(state, att, def, amount, punish = false) {
+  function dealDamage(state, att, def, amount, punish = false, name = null) {
     if (punish && def.combo === 0) {
       amount = Math.floor((amount * BATTLE.backstepPunishRate) / 100);
       state.effects.push({ kind: "text", text: "隙狩り！", x: def.x / S, y: def.y / S - 190, life: 45 });
@@ -861,6 +961,7 @@
     const before = def.health;
     def.health = Math.max(0, def.health - dmg);
     def.comboDamage += dmg;
+    gaugeForDamage(state, att, def, before - def.health, name);
     state.comboInfo[state.fighters.indexOf(att)] = { hits: def.combo, damage: def.comboDamage, timer: 90 };
     return before - def.health; // 実際に減った体力（記録用。体力が0より下には減らない）
   }
@@ -878,10 +979,18 @@
   // name＝当たった技の名前（記録用。相打ちで先に処理した当たりが技を止めても、正しい名前で数える）
   function applyHit(state, att, def, m, box, body, proj = null, name = proj ? proj.move : att.move) {
     const air = m.recovery === null;
-    const blocked = canBlock(def, m);
+    const blocked = canBlock(def, m, att, proj);
     const moveName = name;
-    record(state, att, moveName, blocked ? "blocks" : "hits");
+    const multi = proj && m.projectile.multi;
+    // 何回も当たる飛び道具は、1つの飛び道具で1回だけ数える（命中率が100%を超えないように）
+    if (!multi || proj.hitsLeft === multi.hits) record(state, att, moveName, blocked ? "blocks" : "hits");
     if (!proj) att.moveHit = true;
+    if (proj) proj.hitsLeft -= 1;
+    if (multi) proj.cooldown = multi.interval;
+    // 何回も当たる飛び道具は、最後の1発より前はダウンさせず、押す距離も小さい
+    const midMulti = multi && proj.hitsLeft > 0;
+    const hitAdv = midMulti ? multi.hitAdv : m.hitAdv;
+    const pushPx = midMulti ? multi.push : m.push;
     // のけぞり・ガード硬直の長さは、硬直差がそのとおりになるように決める。
     // 空中攻撃は「着地して着地硬直が終わるまで」を数え、低い所で当てたときに表どおりになる
     const base = proj
@@ -906,6 +1015,8 @@
       const blockAdv = !proj && fullCharge(att) && m.charge.full.blockAdv !== undefined ? m.charge.full.blockAdv : m.blockAdv;
       def.stun = Math.max(1, base + blockAdv);
       def.vx = 0;
+      // ガードさせた側もゲージが少し溜まる（ゲージ技では溜まらない）
+      if (moveName !== "super") addGauge(att, (m.damage * BATTLE.gauge.blocked * 100) / CHARACTERS[def.charId].health);
       // 必殺技はガードされても少しだけ体力が減る（削り）
       if (m.kind === "special") {
         const chip = Math.min(def.health, Math.floor((m.damage * BATTLE.chipRate) / 100));
@@ -915,7 +1026,7 @@
       state.hitstop = Math.max(state.hitstop, BATTLE.hitstopBlock);
       state.effects.push({ kind: "block", x: fx, y: fy, life: 12 });
     } else {
-      record(state, att, moveName, "damage", dealDamage(state, att, def, m.damage, backstepPunishable(def)));
+      record(state, att, moveName, "damage", dealDamage(state, att, def, m.damage, backstepPunishable(def), moveName));
       releaseGrab(state, def);
       def.move = null;
       def.action = null;
@@ -930,21 +1041,23 @@
         def.crouching = false;
         def.vy = -5 * S;
         def.vx = dir * 2 * S;
-      } else if (m.hitAdv === "down" || def.health === 0) {
+      } else if (hitAdv === "down" || def.health === 0) {
         knockDown(def);
       } else {
         def.pose = POSE.HIT;
-        def.stun = Math.max(1, base + m.hitAdv);
+        def.stun = Math.max(1, base + hitAdv);
         def.vx = 0;
       }
     }
 
     // 押し返し。ガードされたときは守った側はその場に踏みとどまり、攻めた側が下がる（影縫い）
     if (blocked) {
-      if (!proj) att.pushVx = (-dir * m.push * S) / 5;
+      if (!proj) att.pushVx = (-dir * pushPx * S) / 5;
+      // 何回も当たる飛び道具は、ガードしている相手を押し出していく
+      else if (multi) def.pushVx = (Math.sign(proj.vx) * pushPx * S) / 5;
     } else if (def.onGround) {
       // 当たったときは相手を押す。相手が画面端なら、押せなかった分だけ自分が下がる
-      const push = m.push * S;
+      const push = pushPx * S;
       const limits = stageLimits(def);
       const room = dir === 1 ? limits.max - def.x : def.x - limits.min;
       const defPush = Math.min(push, Math.max(0, room));
@@ -979,6 +1092,7 @@
       const def = state.fighters[1 - p.owner];
       // 最大までためた突進拳は、飛び道具をすり抜ける（飛び道具は消えずにそのまま飛ぶ）
       if (fullCharge(def) && moveData(def).charge.full.projectileInvincible) continue;
+      if (p.cooldown > 0) continue; // 何回も当たる飛び道具の、次に当たれるまで
       const box = projectileBox(p);
       const body = touching(box, def);
       if (body) hits.push({ att, def, m: CHARACTERS[att.charId].moves[p.move], box, body, p, rank: hitRank(p.move), name: p.move });
@@ -990,8 +1104,8 @@
       return other < 0 || h.rank >= other;
     });
     for (const h of win) {
-      if (h.p) h.p.dead = true;
       applyHit(state, h.att, h.def, h.m, h.box, h.body, h.p, h.name);
+      if (h.p && h.p.hitsLeft <= 0) h.p.dead = true;
     }
     state.projectiles = state.projectiles.filter((p) => !p.dead);
     checkThrows(state);
@@ -1082,7 +1196,7 @@
         att.stun = BATTLE.throwFinish;
         def.techInput = false;
         record(state, att, "throw", "hits");
-        record(state, att, "throw", "damage", dealDamage(state, att, def, m.damage, def.punishedGrab));
+        record(state, att, "throw", "damage", dealDamage(state, att, def, m.damage, def.punishedGrab, "throw"));
         def.punishedGrab = false;
         knockDown(def);
         def.pushVx = (att.facing * 60 * S) / 5;
@@ -1216,6 +1330,17 @@
       return state;
     }
 
+    // ゲージ技を出した瞬間は画面が止まる（暗転）。止まっている間に押したボタンも先行入力として覚える
+    if (state.superFreeze > 0) {
+      state.superFreeze -= 1;
+      state.fighters.forEach((f, i) => {
+        const input = inputs[i] | 0;
+        registerPresses(f, input);
+        f.prevInput = input;
+      });
+      return state;
+    }
+
     // 戦っている間だけ操作できる
     const fighting = r.phase === PHASE.FIGHT;
     const [a, b] = state.fighters;
@@ -1283,6 +1408,10 @@
     shadowStitchBox,
     isFree,
     moveData,
+    gaugeFull,
+    GAUGE_FULL,
+    superInvincible,
+    cancelAllActive,
     fullCharge,
     comboRate,
     toStats,
