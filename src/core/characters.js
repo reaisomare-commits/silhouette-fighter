@@ -53,6 +53,12 @@
       //   hurtExtend: 技を出している間に伸びるやられる範囲（書かなければ hitbox と同じ）。
       //     当たる時間はこの範囲まで、発生前と硬直中はその半分の長さまで伸びる
       //   投げの hitbox は掴める範囲。recovery は空振りしたときの硬直
+      //   ゲージ技（super）：ゲージが満タンのとき 強＋必殺技の同時押し（I＋O）で出る。出すとゲージを全部使い、画面が一瞬止まる（暗転）
+      //     invincible: 出してから何フレーム目まで攻撃も投げも飛び道具も当たらないか（無敵）
+      //     guardBeforeFreeze: true なら、暗転する前からガード（後ろ）を押していた相手しかガードできない
+      //     buff: 当たる技ではなく、出すと buff.frames フレームの間、強くなる（cancelAll: すべての攻撃が、当たるかガードされたら別の攻撃でキャンセルできる）
+      //     projectile.multi: 何回も当たる飛び道具（hits 回まで、interval フレームごと）。最後の1発より前は hitAdv をこちらの値にする。
+      //       当たってもガードされても消えずに進み、相手を push ピクセルずつ押していく（ガードしている相手も押し出す）
       // 1回の連続技で弱攻撃（U）を何回までつなげられるか（そのあと I や必殺技につなげられる）
       lightChainMax: 1,
       moves: {
@@ -69,6 +75,9 @@
         crouchSpecial: { name: "昇り斬り", kind: "special", startup: 8, active: 5, recovery: 35, hitAdv: "down", blockAdv: -25, damage: 100, guard: "mid", hitbox: { x1: 0, x2: 85, y1: 40, y2: 240 }, hurtExtend: { x1: 0, x2: 70, y1: 40, y2: 170 }, push: 20 },
         // 投げ：空振りすると、同じくらいの発生の柄打ち（硬直10F）よりずっと長く動けない
         throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 22, damage: 100, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 } },
+        // ゲージ技「月影斬」：画面の半分くらいを一瞬で駆け抜けて斬る。出だしは無敵（当たる時間の始めまで）なので切り返しにも使える。
+        //   暗転する前からガードを押していないとガードできない。ガードされても −2 だけ
+        super: { name: "月影斬", kind: "special", startup: 6, active: 12, recovery: 30, hitAdv: "down", blockAdv: -2, damage: 250, guard: "mid", hitbox: { x1: 0, x2: 105, y1: 30, y2: 150 }, push: 30, lunge: { from: 4, to: 17, speed: 17 }, invincible: 10, guardBeforeFreeze: true },
       },
     },
     rin: {
@@ -110,6 +119,9 @@
         crouchSpecial: { name: "跳び蹴り上げ", kind: "special", startup: 6, active: 4, recovery: 36, hitAdv: "down", blockAdv: -28, damage: 85, guard: "mid", hitbox: { x1: -20, x2: 90, y1: 50, y2: 210 }, hurtExtend: { x1: -5, x2: 55, y1: 50, y2: 135 }, push: 8 },
         // 投げ：掴める範囲がカゲツより少し広い。空振りすると、同じくらいの発生のジャブ（硬直8F）よりずっと長く動けない
         throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 21, damage: 130, hitbox: { x1: 0, x2: 65, y1: 0, y2: 130 } },
+        // ゲージ技「練気」：気をためて、6秒（360F）の間、すべての攻撃（足払いや必殺技も）が当たるかガードされたら別の攻撃でキャンセルできる
+        //   出すときの構えは当たる技ではない（攻撃を受けると構えは止まるが、強くなるのは出した瞬間から）
+        super: { name: "練気", kind: "special", startup: 1, active: 0, recovery: 20, hitAdv: 0, blockAdv: 0, damage: 0, guard: "mid", hitbox: null, push: 0, buff: { frames: 360, cancelAll: true } },
       },
     },
     // ゲンマ（幻魔）：体力が少ない悪役。ワープで消えて間合いを変え、空中で浮いて止まり、異空間の門から飛び道具を出す
@@ -154,6 +166,10 @@
         // 闇柱：対空。少し前の地面の門から、頭の上まで太い闇の柱が立つ（自分の少し後ろから前へ130pxまで）。柱は門から出るので、伸びるやられる範囲は小さい
         crouchSpecial: { name: "闇柱", kind: "special", startup: 9, active: 6, recovery: 22, hitAdv: "down", blockAdv: -14, damage: 120, guard: "mid", hitbox: { x1: -10, x2: 130, y1: 0, y2: 230 }, hurtExtend: { x1: 0, x2: 30, y1: 40, y2: 160 }, push: 16 },
         throw: { name: "闇引き", kind: "throw", startup: 5, active: 2, recovery: 22, damage: 135, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 } },
+        // ゲージ技「冥府球」：目の前に大きな闇の球を出し、ゆっくり進ませる。当たると8回まで連続で当たり（最後の1発でダウン）、
+        //   ガードされても消えずに、相手を押し出しながら連続でガードさせる。相手の飛び道具は消して進む
+        //   1発40ダメージ（コンボ補正で 40＋36＋32＋28＋24＋20＋16＋12＝合計約210）
+        super: { name: "冥府球", kind: "special", startup: 18, active: 1, recovery: 26, hitAdv: "down", blockAdv: -4, damage: 40, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 50, y1: 70, y2: 140 }, push: 40, projectile: { speed: 2.5, width: 120, height: 120, spawnX: 90, y: 85, portal: true, multi: { hits: 8, interval: 8, hitAdv: 0, push: 20 } } },
       },
     },
   };
@@ -185,6 +201,15 @@
     downFrames: 50, // ダウンしてから起き上がるまで（F、この間は攻撃が当たらない）
     introFrames: 100, // ラウンド開始の表示の時間（F）
     roundEndFrames: 150, // KO・時間切れの表示の時間（F）
+    // ゲージ：満タン（max）でゲージ技を1回出せる。次のラウンドに持ち越す。
+    //   溜まる量は「相手（自分）の体力をぜんぶ減らしたら」の値。1割減らせばその1割だけ溜まる
+    gauge: {
+      max: 100,
+      dealt: 50, // 相手の体力を減らしたとき（攻めた側）
+      taken: 40, // 自分の体力を減らされたとき（守った側）
+      blocked: 15, // 技をガードさせたとき（攻めた側。技のダメージで数える）
+    },
+    superFreeze: 40, // ゲージ技を出した瞬間に、画面が止まる時間（F。暗転）
   };
 
   const IDS = Object.keys(CHARACTERS);
