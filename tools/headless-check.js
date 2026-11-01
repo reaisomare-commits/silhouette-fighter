@@ -1966,6 +1966,16 @@ require("../src/core/autobattle.js");
     }
     return canceled;
   }
+  // 練気は構えがなく、暗転が終わったらすぐ動ける
+  const quick = superGame(["rin", "kagetsu"], 300);
+  SF.game.step(quick, [I | O, 0]);
+  assert.ok(SF.game.isFree(quick.fighters[0]), "練気のあとすぐ動けない");
+  let freeAt = -1;
+  for (let i = 1; i < 80 && freeAt < 0; i++) {
+    SF.game.step(quick, [i % 2 ? U : 0, 0]);
+    if (quick.fighters[0].move === "standLight") freeAt = i;
+  }
+  assert.strictEqual(freeAt, SF.characters.BATTLE.superFreeze + 1, "練気の暗転明けすぐに技が出ない");
   assert.ok(!sweepCancel(false), "練気なしで足払いからキャンセルできてしまう");
   assert.ok(sweepCancel(true), "練気中に足払いから跳び蹴り上げにキャンセルできない");
   const over = superGame(["rin", "kagetsu"], 300);
@@ -1982,6 +1992,15 @@ require("../src/core/autobattle.js");
   assert.strictEqual(maxCombo, 8, "冥府球が8回つながらない");
   const dmg = [1, 2, 3, 4, 5, 6, 7, 8].reduce((t, n) => t + Math.floor((40 * SF.game.comboRate(n)) / 100), 0);
   assert.strictEqual(1000 - hit.fighters[1].health, dmg);
+  // 空中の相手に当たっても、浮かせたまま運んで最後まで連続で当たる
+  const air = superGame(["genma", "kagetsu"], 250);
+  let airCombo = 0;
+  for (let i = 0; i < 250; i++) {
+    SF.game.step(air, [i === 0 ? I | O : 0, i === 40 ? BUTTON.JUMP : 0]);
+    airCombo = Math.max(airCombo, air.fighters[1].combo);
+  }
+  assert.strictEqual(airCombo, 8, `空中の相手に冥府球が8回つながらない（${airCombo}回）`);
+  assert.strictEqual(1000 - air.fighters[1].health, dmg, "空中で受けた冥府球のダメージ");
   const blk = superGame(["genma", "kagetsu"], 250);
   const x0 = blk.fighters[1].x;
   let blocks = 0;
@@ -1993,7 +2012,7 @@ require("../src/core/autobattle.js");
   assert.strictEqual(blocks, 8, "冥府球を8回ガードしていない");
   assert.strictEqual(1000 - blk.fighters[1].health, 8 * 4, "冥府球の削り");
   assert.ok(pushed > 120, `ガードしても押し出されない（${pushed}px）`);
-  console.log(`OK ゲージ技: ゲージの溜まり方・I＋O・暗転・持ち越し、月影斬は暗転前からガードしないと防げず（ガードで${tYes.adv}F）無敵で切り返せる、練気は6秒間すべてキャンセル可能、冥府球は8回連続ヒット（${dmg}）・ガードで${Math.round(pushed)}px押し出し`);
+  console.log(`OK ゲージ技: ゲージの溜まり方・I＋O・暗転・持ち越し、月影斬は暗転前からガードしないと防げず（ガードで${tYes.adv}F）無敵で切り返せる、練気は暗転明けすぐ動けて6秒間すべてキャンセル可能、冥府球は地上でも空中でも8回連続ヒット（${dmg}）・ガードで${Math.round(pushed)}px押し出し`);
 }
 
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める

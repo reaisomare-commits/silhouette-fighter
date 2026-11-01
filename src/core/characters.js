@@ -58,7 +58,8 @@
       //     guardBeforeFreeze: true なら、暗転する前からガード（後ろ）を押していた相手しかガードできない
       //     buff: 当たる技ではなく、出すと buff.frames フレームの間、強くなる（cancelAll: すべての攻撃が、当たるかガードされたら別の攻撃でキャンセルできる）
       //     projectile.multi: 何回も当たる飛び道具（hits 回まで、interval フレームごと）。最後の1発より前は hitAdv をこちらの値にする。
-      //       当たってもガードされても消えずに進み、相手を push ピクセルずつ押していく（ガードしている相手も押し出す）
+      //       当たってもガードされても消えずに進み、相手を push ピクセルずつ押していく（ガードしている相手も押し出す）。
+      //       空中の相手に当たったら、上向きに airLift（1フレームのピクセル）だけ浮かせて球と同じ速さで運ぶので、空中でも最後まで当たり続ける
       // 1回の連続技で弱攻撃（U）を何回までつなげられるか（そのあと I や必殺技につなげられる）
       lightChainMax: 1,
       moves: {
@@ -119,8 +120,8 @@
         crouchSpecial: { name: "跳び蹴り上げ", kind: "special", startup: 6, active: 4, recovery: 36, hitAdv: "down", blockAdv: -28, damage: 85, guard: "mid", hitbox: { x1: -20, x2: 90, y1: 50, y2: 210 }, hurtExtend: { x1: -5, x2: 55, y1: 50, y2: 135 }, push: 8 },
         // 投げ：掴める範囲がカゲツより少し広い。空振りすると、同じくらいの発生のジャブ（硬直8F）よりずっと長く動けない
         throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 21, damage: 130, hitbox: { x1: 0, x2: 65, y1: 0, y2: 130 } },
-        // ゲージ技「練気」：気をためて、6秒（360F）の間、すべての攻撃（足払いや必殺技も）が当たるかガードされたら別の攻撃でキャンセルできる
-        //   出すときの構えは当たる技ではない（攻撃を受けると構えは止まるが、強くなるのは出した瞬間から）
+        // ゲージ技「練気」：6秒（360F）の間、すべての攻撃（足払いや必殺技も）が当たるかガードされたら別の攻撃でキャンセルできる
+        //   構えはなく、暗転が終わったらすぐ動ける（出しかけの技やためは取り消す。startup などの数字は使わない）
         super: { name: "練気", kind: "special", startup: 1, active: 0, recovery: 20, hitAdv: 0, blockAdv: 0, damage: 0, guard: "mid", hitbox: null, push: 0, buff: { frames: 360, cancelAll: true } },
       },
     },
@@ -169,7 +170,7 @@
         // ゲージ技「冥府球」：目の前に大きな闇の球を出し、ゆっくり進ませる。当たると8回まで連続で当たり（最後の1発でダウン）、
         //   ガードされても消えずに、相手を押し出しながら連続でガードさせる。相手の飛び道具は消して進む
         //   1発40ダメージ（コンボ補正で 40＋36＋32＋28＋24＋20＋16＋12＝合計約210）
-        super: { name: "冥府球", kind: "special", startup: 18, active: 1, recovery: 26, hitAdv: "down", blockAdv: -4, damage: 40, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 50, y1: 70, y2: 140 }, push: 40, projectile: { speed: 2.5, width: 120, height: 120, spawnX: 90, y: 85, portal: true, multi: { hits: 8, interval: 8, hitAdv: 0, push: 20 } } },
+        super: { name: "冥府球", kind: "special", startup: 18, active: 1, recovery: 26, hitAdv: "down", blockAdv: -4, damage: 40, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 50, y1: 70, y2: 140 }, push: 40, projectile: { speed: 2.5, width: 120, height: 120, spawnX: 90, y: 85, portal: true, multi: { hits: 8, interval: 8, hitAdv: 0, push: 20, airLift: 3 } } },
       },
     },
   };
