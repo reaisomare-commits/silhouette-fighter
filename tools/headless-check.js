@@ -1567,7 +1567,10 @@ require("../src/core/learned-data.js");
   const M = SF.menu;
   const go = (menu, ...actions) => actions.map((a) => M.press(menu, a)).pop();
 
-  // プレイヤー VS CPU：自分をリン、相手をカゲツ、CPUをつよいに
+  // モードは「対戦・トレーニング・資料」の3つ
+  assert.deepStrictEqual(M.MODES.map((x) => x.id), ["versus", "training", "library"], "モードが3つになっていない");
+
+  // 対戦（あなた VS CPU）：自分をリン、相手をカゲツ、CPUを学習AIに
   const m = M.createMenu();
   assert.strictEqual(m.screen, M.SCREEN.TITLE);
   go(m, "back"); // タイトルでもどるを押しても何も起きない
@@ -1576,32 +1579,55 @@ require("../src/core/learned-data.js");
   assert.strictEqual(m.screen, M.SCREEN.MODE);
   go(m, "ok");
   assert.strictEqual(m.screen, M.SCREEN.SELECT);
-  let r = go(m, "right", "down", "left", "down", "right", "right", "right");
+  let r = go(m, "down", "right", "down", "left", "down", "right", "right", "right");
   assert.strictEqual(r, null);
-  // 学習AIのときは「あなたとの対戦から学ぶ」（はじめは「する」）が設定に入る
-  r = go(m, "down", "down", "ok");
-  assert.deepStrictEqual(r.start, { mode: "pvc", chars: ["rin", "kagetsu"], levels: [null, SF.cpu.LEARN_LEVEL], learnFromYou: true }, "プレイヤー VS CPU の設定がちがう");
-  go(m, "up", "right");
-  assert.strictEqual(M.matchConfig(m).learnFromYou, false, "あなたとの対戦から学ぶを「しない」にできない");
-  go(m, "left", "up");
+  r = go(m, "down", "ok");
+  assert.deepStrictEqual(r.start, { mode: "pvc", chars: ["rin", "kagetsu"], levels: [null, SF.cpu.LEARN_LEVEL] }, "あなた VS CPU の設定がちがう");
+  assert.ok(M.rows(m).every((row) => row.kind !== "learnYou"), "学習するかどうかを選ぶ行が残っている");
 
   // 強さは端で止まる（学習AIの右は学習AI、よわいの左はよわい）
-  go(m, "left", "left", "left", "left");
+  go(m, "up", "right", "left", "left", "left", "left", "left");
   assert.strictEqual(M.matchConfig(m).levels[1], 0, "よわいより下にいってしまう");
 
-  // もどる → モード選択 → CPU VS CPU。左右で別の強さを選べる
+  // 対戦のしかたを CPU VS CPU に変えると、左右で別の強さを選べる
+  m.cursor = 0;
+  go(m, "right");
+  assert.strictEqual(M.rows(m).length, 6, "CPU VS CPU の行がちがう");
+  // 左：リン→カゲツ・よわい　右：カゲツ・つよい。Enterを続けて押すと次の行へ進み、最後に始まる
+  r = go(m, "ok", "left", "ok", "left", "ok", "ok", "right", "right", "ok", "ok");
+  assert.deepStrictEqual(r.start, { mode: "cvc", chars: ["kagetsu", "kagetsu"], levels: [0, 2] }, "CPU VS CPU の設定がちがう");
+
+  // もどる → トレーニング：練習相手（はじめは「何もしない」）か、CPUを選べる
   go(m, "back");
   assert.strictEqual(m.screen, M.SCREEN.MODE);
   go(m, "down", "ok");
   assert.strictEqual(m.screen, M.SCREEN.SELECT);
   assert.strictEqual(m.cursor, 0, "モードを変えたら一番上から選ぶ");
-  // 左：カゲツ・よわい　右：カゲツ・つよい。Enterを続けて押すと次の行へ進み、最後に始まる
-  r = go(m, "ok", "left", "ok", "left", "ok", "right", "ok", "ok");
-  assert.deepStrictEqual(r.start, { mode: "cvc", chars: ["kagetsu", "kagetsu"], levels: [0, 2], learnFromYou: false }, "CPU VS CPU の設定がちがう");
+  assert.deepStrictEqual(M.matchConfig(m), { mode: "training", chars: ["kagetsu", "rin"], levels: [null, null], dummy: 0 }, "トレーニングの設定がちがう");
+  go(m, "down", "down");
+  for (let i = 0; i < 20; i++) go(m, "right");
+  r = go(m, "ok", "ok");
+  assert.deepStrictEqual(r.start, { mode: "training", chars: ["kagetsu", "rin"], levels: [null, SF.cpu.LEARN_LEVEL], dummy: null }, "トレーニングでCPUを選べない");
 
-  // モードごとに前に選んだものを覚えている
-  go(m, "back", "up", "ok");
-  assert.deepStrictEqual(M.matchConfig(m), { mode: "pvc", chars: ["rin", "kagetsu"], levels: [null, 0], learnFromYou: false }, "前に選んだものを忘れている");
+  // 資料は別の画面を開く合図が返る
+  go(m, "back", "down");
+  assert.deepStrictEqual(go(m, "ok"), { library: true }, "資料が選べない");
+
+  // 対戦にもどると、前に選んだものを覚えている
+  go(m, "down", "ok");
+  assert.deepStrictEqual(M.matchConfig(m), { mode: "cvc", chars: ["kagetsu", "kagetsu"], levels: [0, 2] }, "前に選んだものを忘れている");
+
+  // トレーニング：時間が減らず、KOにならず、連続技が途切れると体力が戻る
+  {
+    const tg = SF.game.createGame(3, ["kagetsu", "rin"], { training: true, intro: false });
+    const full = SF.characters.CHARACTERS.rin.health;
+    tg.fighters[1].health = 5;
+    for (let i = 0; i < 60 * 70; i++) SF.game.step(tg, [i % 20 === 0 ? SF.input.BUTTON.HEAVY : 0, 0]);
+    assert.strictEqual(tg.round.phase, SF.game.PHASE.FIGHT, "トレーニングで試合が終わってしまう");
+    assert.strictEqual(tg.round.timer, SF.characters.BATTLE.roundSeconds * 60, "トレーニングで時間が減る");
+    for (let i = 0; i < 120; i++) SF.game.step(tg, [0, 0]);
+    assert.strictEqual(tg.fighters[1].health, full, "トレーニングで体力が戻らない");
+  }
 
   // 作った設定で試合とCPUが動く（CPU VS CPU を最後まで）
   const cfg = { mode: "cvc", chars: ["rin", "kagetsu"], levels: [0, 2] };
@@ -1611,7 +1637,7 @@ require("../src/core/learned-data.js");
     SF.game.step(st, [SF.cpu.input(cpus[0], st, 0), SF.cpu.input(cpus[1], st, 1)]);
   }
   assert.strictEqual(st.round.phase, SF.game.PHASE.MATCH_END, "CPU VS CPU が終わらない");
-  console.log("OK メニュー: モード選択、キャラと強さの選択（左右別の強さ・同キャラ・端で止まる・選んだものを覚える）から試合の設定ができる");
+  console.log("OK メニュー: 対戦・トレーニング・資料の3モード、キャラと強さの選択（左右別の強さ・同キャラ・端で止まる・選んだものを覚える）から試合の設定ができる。トレーニングは時間無制限・KOなし・体力が戻る");
 }
 
 // キーコンフィグ：キーの割り当てを変える・入れ替える・保存から読む・初期値にもどす
@@ -1621,11 +1647,8 @@ require("../src/core/learned-data.js");
   const KC = SF.keyconfig;
   const B = SF.input.BUTTON;
 
-  // モード選択の最後「キーコンフィグ」で、キーコンフィグの画面を開く合図が返る
-  const mm = SF.menu.createMenu();
-  SF.menu.press(mm, "ok");
-  SF.menu.press(mm, "up");
-  assert.deepStrictEqual(SF.menu.press(mm, "ok"), { keys: true }, "キーコンフィグが選べない");
+  // キーコンフィグは「資料」の最後のページから開く（ブラウザの main.js）
+  assert.ok(require("fs").readFileSync(require("path").join(__dirname, "../src/browser/main.js"), "utf8").includes("openKeyConfig()"), "キーコンフィグを開く所がない");
 
   // 画面：強攻撃を K にする → 次の行（必殺技）へ進む
   const b = KC.defaults();
@@ -1702,14 +1725,7 @@ require("../src/core/learned-data.js");
 require("../src/core/autobattle.js");
 {
   const AB = SF.autobattle;
-  const M = SF.menu;
-  // メニューの3つ目「自動対戦と記録」で、記録の画面を開く合図が返る
-  const mm = M.createMenu();
-  M.press(mm, "ok");
-  M.press(mm, "down");
-  M.press(mm, "down");
-  assert.deepStrictEqual(M.press(mm, "ok"), { auto: true }, "自動対戦と記録が選べない");
-  assert.strictEqual(mm.screen, M.SCREEN.MODE, "自動対戦はキャラ選択画面に進まない");
+  // 自動対戦と記録はメニューから外した（tools/auto-battle.js から使う）
 
   // 記録をとっても試合の中身は変わらない（記録なしと同じ結果）
   const chars = ["kagetsu", "rin"];
@@ -1788,7 +1804,6 @@ require("../src/core/autobattle.js");
   const AB = SF.autobattle;
   const LEARN = SF.cpu.LEARN_LEVEL;
   assert.ok(SF.cpu.LEVELS[LEARN].learned, "学習AIの強さがない");
-  assert.ok(SF.menu.MODES.some((m) => m.id === "learn"), "モード選択に学習AIの画面がない");
 
   // 状況番号は表の大きさの中におさまる
   const st0 = SF.game.createGame(1, ["kagetsu", "rin"], { intro: false });

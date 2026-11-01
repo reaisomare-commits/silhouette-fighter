@@ -2,7 +2,7 @@
 // 計算は「1/60秒ぶん時間がたまったら1回」進め、描画はモニターの速さで行う。
 // こうするとモニターが60Hzでも144Hzでも、ゲームの動きの速さは変わらない。
 //
-// 画面は「メニュー（タイトル・モード選択・キャラ選択）」と「試合」の2つ。
+// 画面は「メニュー（タイトル・モード選択・キャラ選択）」「試合」「資料」「キーコンフィグ」。
 // 試合中は Esc で一時停止メニュー、試合が終わると「もう一度・キャラ選択・タイトル」のメニューが出る。
 (function (root) {
   const SF = root.SF;
@@ -35,7 +35,10 @@
   const bindings = loadBindings();
   let keyScreen = KC.createScreen();
 
-  let scene = "menu"; // "menu"（メニュー）、"battle"（試合）、"keys"（キーコンフィグ）、"records"（自動対戦と記録・学習AIをきたえる）
+  let scene = "menu"; // "menu"（メニュー）、"battle"（試合・トレーニング）、"library"（資料）、"keys"（キーコンフィグ）
+  // 資料の画面：見ているページと、閉じたらどこへもどるか（"menu" か、一時停止中の "battle"）
+  const library = { page: 0, from: "menu" };
+  let fullGauge = false; // トレーニング：G キーでゲージをずっと満タンにする
   let config = null; // 試合の設定（モード、キャラ、強さ）。メニューで決まる
   let state = null;
   let cpus = [null, null]; // CPUが動かす側だけ入る
@@ -46,19 +49,29 @@
   // 試合の上に出す小さなメニュー（一時停止・試合終了）。出ていないときは null
   let overlay = null;
 
-  const PAUSE_ITEMS = ["つづける", "キャラ選択にもどる", "タイトルにもどる"];
+  const PAUSE_ITEMS = ["つづける", "資料を見る", "キャラ選択にもどる", "タイトルにもどる"];
   const END_ITEMS = ["もう一度", "キャラ選択にもどる", "タイトルにもどる"];
 
   let matchCount = 0;
-  let counted = false; // この試合を「あなたと戦った試合数」に数えたか
+  let counted = false; // この試合を学習AIの「学んだ試合数」に数えたか
+  // 学習AIが出ている試合か。学習AIは、出ている試合（対戦・観戦・トレーニング）すべてから学ぶ
+  const learning = () => !!config && config.levels.some((lv) => lv !== null && SF.cpu.LEVELS[lv].learned);
   function newMatch() {
     matchCount += 1;
-    state = SF.game.createGame(seed + matchCount, config.chars);
-    // CPUは試合ごとに作り直す（左右で別の種）
-    cpus = config.levels.map((lv, i) => {
+    const training = config.mode === "training";
+    state = SF.game.createGame(seed + matchCount, config.chars, training ? { training: true, intro: false } : {});
+    // トレーニングで練習相手を選んだときは、右を練習相手が動かす（3キーで動きを切り替え、4キーでCPUに）
+    useDummy = training && config.dummy !== null;
+    if (useDummy) {
+      dummy.mode = config.dummy;
+      dummy.t = 0;
+    }
+    // CPUは試合ごとに作り直す（左右で別の種）。練習相手のときも、4キーで切り替えられるよう「ふつう」のCPUを用意しておく
+    const levels = useDummy ? [config.levels[0], 1] : config.levels;
+    cpus = levels.map((lv, i) => {
       if (lv === null) return null;
-      // 学習AIが「あなたとの対戦から学ぶ」ときは、あなた用に育てている頭脳を使い、試合をしながら表を直す
-      if (config.learnFromYou && i === 1) {
+      // 学習AIは、育てている頭脳を使い、試合をしながら表を直す（左右どちらでも同じ頭脳）
+      if (SF.cpu.LEVELS[lv].learned) {
         return SF.cpu.createCpu(lv, seed + matchCount * 2 + i, {
           brain: SF.learnPage.playerBrain(),
           train: true,
@@ -75,26 +88,32 @@
 
   function startBattle(cfg) {
     config = cfg;
-    useDummy = false;
+    fullGauge = false;
+    showBoxes = cfg.mode === "training"; // トレーニングは当たり判定を見せて始める（H で消せる）
     scene = "battle";
     newMatch();
   }
 
-  // 自動対戦と記録の画面を開く。閉じたらタイトルにもどる
-  function openRecords() {
-    scene = "records";
-    SF.recordsPage.open(() => backToMenu(SF.menu.SCREEN.TITLE));
+  // 資料の画面を開く。from は閉じたあとにもどる所
+  function openLibrary(from) {
+    scene = "library";
+    library.from = from;
   }
-
-  // 学習AIの画面を開く。閉じたらタイトルにもどる
-  function openLearn() {
-    scene = "records";
-    SF.learnPage.open(() => backToMenu(SF.menu.SCREEN.TITLE));
+  function closeLibrary() {
+    if (library.from === "battle") scene = "battle"; // 一時停止のメニューにもどる
+    else backToMenu(SF.menu.SCREEN.MODE);
+  }
+  function pressLibrary(action) {
+    const n = renderer.LIBRARY_PAGE_COUNT;
+    if (action === "left" || action === "up") library.page = (library.page + n - 1) % n;
+    else if (action === "right" || action === "down") library.page = (library.page + 1) % n;
+    else if (action === "back") closeLibrary();
+    else if (action === "ok" && library.page === n - 1) openKeyConfig(); // 最後のページ「キーの変更」
   }
 
   function backToMenu(screen) {
     // 試合の途中でやめても、終わったラウンドで学んだぶんは残す
-    if (scene === "battle" && config && config.learnFromYou) SF.learnPage.savePlayerBrain();
+    if (scene === "battle" && learning()) SF.learnPage.savePlayerBrain();
     scene = "menu";
     overlay = null;
     menu.screen = screen;
@@ -157,7 +176,7 @@
       saveBindings();
       applyBindings();
     }
-    if (r && r.close) backToMenu(SF.menu.SCREEN.MODE);
+    if (r && r.close) scene = "library"; // 資料のページにもどる
   }
 
   function pressOverlay(action) {
@@ -168,6 +187,7 @@
     else if (action === "ok") {
       const pick = overlay.items[overlay.cursor];
       if (pick === "つづける") overlay = null;
+      else if (pick === "資料を見る") openLibrary("battle");
       else if (pick === "もう一度") newMatch();
       else if (pick === "キャラ選択にもどる") backToMenu(SF.menu.SCREEN.SELECT);
       else if (pick === "タイトルにもどる") backToMenu(SF.menu.SCREEN.TITLE);
@@ -175,11 +195,14 @@
   }
 
   root.addEventListener("keydown", (e) => {
-    if (scene === "records") return; // 自動対戦の画面はボタンとマウスで操作する（キーはふつうに入力欄で使う）
     const action = MENU_KEYS[e.code];
     if (e.code.startsWith("Arrow") || e.code === "Space" || e.code === "Backspace") e.preventDefault(); // 画面がスクロールしないように
     if (scene === "keys") {
       onKeyConfigKey(e);
+      return;
+    }
+    if (scene === "library") {
+      if (action && !(e.repeat && (action === "ok" || action === "back"))) pressLibrary(action);
       return;
     }
 
@@ -187,9 +210,7 @@
       if (!action || (e.repeat && (action === "ok" || action === "back"))) return;
       const result = SF.menu.press(menu, action);
       if (result && result.start) startBattle(result.start);
-      if (result && result.auto) openRecords();
-      if (result && result.learn) openLearn();
-      if (result && result.keys) openKeyConfig();
+      if (result && result.library) openLibrary("menu");
       return;
     }
 
@@ -205,7 +226,8 @@
     // 確認用のキー（H・3・4）は、試合の操作に割り当てたときは使わない
     if (keyboard.isBound(e.code)) return;
     if (e.code === "KeyH") showBoxes = !showBoxes;
-    if (config.mode === "pvc") {
+    if (config.mode === "training" && e.code === "KeyG") fullGauge = !fullGauge;
+    if (config.mode === "pvc" || config.mode === "training") {
       if (e.code === "Digit3" || e.code === "Numpad3") {
         // CPUから練習相手に切り替えたときは、今の動きのまま。練習相手のときは次の動きへ
         if (useDummy) SF.dummy.nextMode(dummy);
@@ -240,11 +262,12 @@
       return input;
     });
     if (config.mode === "cvc") input = inputs[0];
+    if (fullGauge) state.fighters[0].gauge = SF.game.GAUGE_FULL;
     SF.game.step(state, inputs);
 
     if (state.round.phase === SF.game.PHASE.MATCH_END) {
-      // あなたとの対戦から学んだ頭脳を、試合が終わったら保存する
-      if (config.learnFromYou && !counted) {
+      // 学習AIが学んだ頭脳を、試合が終わったら保存する
+      if (learning() && !counted) {
         counted = true;
         SF.learnPage.playerBrain().played += 1;
         SF.learnPage.savePlayerBrain();
@@ -280,23 +303,26 @@
       counterStart = now;
     }
 
-    if (scene === "records") {
-      // 自動対戦の画面では何も描かない（計算の邪魔をしない）
-    } else if (scene === "menu") {
+    if (scene === "menu") {
       renderer.drawMenu(menu, tick);
     } else if (scene === "keys") {
       renderer.drawKeyConfig(keyScreen, tick);
+    } else if (scene === "library") {
+      renderer.drawLibrary(library.page, tick);
     } else {
       const label = (i) => {
         if (!cpus[i]) return "あなた";
         if (i === 1 && useDummy) return `練習相手 ${SF.dummy.MODES[dummy.mode].label}`;
-        if (i === 1 && config.learnFromYou) return `CPU 学習AI（あなたから学習中・${SF.learnPage.playerBrain().played + (counted ? 0 : 1)}試合目）`;
-        return `CPU ${SF.cpu.LEVELS[config.levels[i]].label}`;
+        const lv = SF.cpu.LEVELS[cpus[i].level];
+        if (lv.learned) return `CPU 学習AI（学習中・${SF.learnPage.playerBrain().played + (counted ? 0 : 1)}試合目）`;
+        return `CPU ${lv.label}`;
       };
       info.input = input;
       info.sideLabels = [label(0), label(1)];
       info.mode = config.mode;
+      info.training = config.mode === "training";
       info.showBoxes = showBoxes;
+      info.fullGauge = fullGauge;
       info.overlay = overlay;
       renderer.draw(state, info);
     }
