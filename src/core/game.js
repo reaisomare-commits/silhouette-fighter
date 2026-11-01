@@ -119,6 +119,7 @@
       buffTimer: 0, // ゲージ技で強くなっている残りフレーム（リンの練気：すべての攻撃がキャンセルできる）
       passive: 0, // 消極的な動き（前に出ない・飛び道具しか撃たない）が続いているフレーム数
       superGuardable: true, // 今出しているゲージ技を、相手がガードできるか（暗転する前からガードを押していたか）
+      superCatch: false, // 今出しているゲージ技（ゴウの大地落とし）が、暗転のあとで跳んだりよけたりした相手も掴むか（暗転したとき地上にいたか）
       armorUsed: false, // 今の技の踏ん張り（ゴウの大張り手）で、もう攻撃を受け止めたか（1回の技で1発だけ）
     };
   }
@@ -275,6 +276,8 @@
     startMove(state, f, "super", chain);
     // 暗転する前からガード（後ろ）を押していないと、ガードできない技（カゲツの月影斬）
     f.superGuardable = !m.guardBeforeFreeze || opp.holdBack;
+    // 暗転したときに地上にいた相手は、そのあと跳んでもよけても掴む技（ゴウの大地落とし）。暗転する前から跳んでいれば避けられる
+    f.superCatch = !!m.catchAfterFreeze && opp.onGround && opp.action !== POSE.BACKSTEP && opp.action !== POSE.WARP;
   }
 
   // 消極的な動きのペナルティ。前に出る動きや飛び道具でない攻撃で数え直し、攻撃を受けている間などは止める
@@ -1224,15 +1227,22 @@
     return !f.onGround && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN && !f.grab;
   }
 
+  // 大地落とし（暗転のあとで跳んだりよけたりしても掴む）で掴める状態か：のけぞり・ガード硬直・ダウン中でない
+  function lockGrabbable(f) {
+    return f.stun === 0 && f.pose !== POSE.DOWN && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN && !f.grab;
+  }
+
   function checkThrows(state) {
     const grabs = [];
     for (let i = 0; i < 2; i++) {
       const att = state.fighters[i];
       const def = state.fighters[1 - i];
       const box = grabBox(att);
-      const body = hurtbox(def);
+      // 暗転を見てから跳んだりよけたりした相手も掴むゲージ技（ゴウの大地落とし）は、体の範囲そのものを見る
+      const lock = box && att.move === "super" && att.superCatch;
+      const body = lock ? launchBox(def) : hurtbox(def);
       const antiAir = box && moveData(att).antiAir;
-      const can = antiAir ? airGrabbable(def) : throwable(def);
+      const can = antiAir ? airGrabbable(def) : lock ? lockGrabbable(def) : throwable(def);
       if (box && body && can && overlap(box, body)) grabs.push([att, def]);
     }
     if (grabs.length === 2) {

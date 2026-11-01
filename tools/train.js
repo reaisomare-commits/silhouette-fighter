@@ -3,7 +3,7 @@
 //   例: node tools/train.js 4000 4
 //   --watch をつけると、回ごとに学習AI同士の勝率を表示する（学習が落ち着いているかを見る）
 //   --matrix をつけると、最後に最近の6世代どうしを、ちがうキャラの組み合わせごとに総当たりで戦わせ、平均の勝率を出す（バランス調整はこの平均を見る）
-//   今の学習データの続きから学ぶ。--fresh をつけると、何も覚えていない状態から学び直す。
+//   今の学習データの続きから学ぶ。回ごとに保存するので、途中で止めてもそれまでの回の学習は残る。--fresh をつけると、何も覚えていない状態から学び直す。
 //   「1回」の中で、組み合わせ（カゲツ対リン、リン対カゲツ、同キャラ同士）ごとに指定の試合数だけ学ぶ。
 //   相手は半分が「つよい」CPU、半分が「これまでの回の始めの学習AIのコピー」（学習しない）の中からでたらめに1つ。左右も入れ替える。
 //   コピーは最近の POOL 回分を取っておく。直前のコピーだけを相手にすると、その弱点だけをつく戦い方を覚えては
@@ -47,6 +47,7 @@ for (let round = 1; round <= rounds; round++) {
     }
   }
   const watch = process.argv.includes("--watch") ? `、学習AI同士 ${ids[0]} の勝率 ${winRate(ids[0], ids[1], SF.cpu.LEARN_LEVEL)}` : "";
+  save(true); // 途中で止めても、ここまでの学習は残る
   console.log(`${round}回目：${matchups.length}つの組み合わせを ${perBlock} 試合ずつ学習（${((Date.now() - t0) / 1000).toFixed(0)}秒）${watch}`);
 }
 
@@ -101,11 +102,16 @@ for (const me of ids) for (const opp of ids) console.log(`  ${me} 学習AI 対 $
 for (let i = 0; i < ids.length; i++)
   for (let j = i + 1; j < ids.length; j++) console.log(`  学習AI同士 ${ids[i]} 対 ${ids[j]}: ${ids[i]} の勝率 ${winRate(ids[i], ids[j], SF.cpu.LEARN_LEVEL)}`);
 
-const json = JSON.stringify(L.serialize(brain));
-fs.writeFileSync(
-  dataFile,
-  "// 学習AIの学習データ（tools/train.js が作るファイル。手で書きかえない）\n" +
-    "// 状況ごと・行動ごとの数字（Q値）と、経験した回数が入っている\n" +
-    `globalThis.SF = globalThis.SF || {};\nglobalThis.SF.learnedData = ${json};\n`,
-);
-console.log(`\n学習データを保存しました: ${path.relative(process.cwd(), dataFile)}（${(json.length / 1024).toFixed(0)}KB）`);
+save();
+
+// 学習データを保存する。回ごとにも保存するので、途中で止めてもそこまでの学習は残る
+function save(quiet = false) {
+  const json = JSON.stringify(L.serialize(brain));
+  fs.writeFileSync(
+    dataFile,
+    "// 学習AIの学習データ（tools/train.js が作るファイル。手で書きかえない）\n" +
+      "// 状況ごと・行動ごとの数字（Q値）と、経験した回数が入っている\n" +
+      `globalThis.SF = globalThis.SF || {};\nglobalThis.SF.learnedData = ${json};\n`,
+  );
+  if (!quiet) console.log(`\n学習データを保存しました: ${path.relative(process.cwd(), dataFile)}（${(json.length / 1024).toFixed(0)}KB）`);
+}

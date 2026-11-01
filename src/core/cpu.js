@@ -31,7 +31,7 @@
   const COMBOS = {
     kagetsu: {
       standLight: ["heavy", "special"], // 柄打ち → 大振り斬り → 飛刃
-      standHeavy: ["crouchSpecial"], // 大振り斬り → 昇り斬り
+      standHeavy: ["special"], // 大振り斬り → 飛刃（隙が少ないので、ガードされても出す）
       crouchLight: ["special"], // 足元突き → 飛刃
     },
     rin: {
@@ -44,11 +44,15 @@
       standHeavy: ["crouchSpecial"], // 影の鎌 → 闇柱
       crouchLight: ["heavy"], // 影這い → 闇溜まり
     },
-    // ゴウ：連続技は短い（のけぞり中の相手は掴めないので、投げは連続技に入れない）
+    // ゴウ：張り手やすね蹴りから四股踏み（のけぞり中の相手は掴めないので、投げは連続技に入れない）
     gou: {
-      standLight: ["heavy"], // 張り手 → 大張り手
-      crouchLight: ["heavy"], // すね蹴り → 四股踏み
+      standLight: ["crouchHeavy"], // 張り手 → 四股踏み
+      crouchLight: ["crouchHeavy"], // すね蹴り → 四股踏み
     },
+  };
+  // ガードされても続ける連続技（隙の少ないキャンセル）。カゲツの大振り斬り → 飛刃
+  const BLOCK_COMBOS = {
+    kagetsu: { standHeavy: ["special"] },
   };
 
   // 様子見のときに選ぶ行動と、その選びやすさ（重み）。距離は「近い・中くらい・遠い」の3つ
@@ -88,19 +92,23 @@
   const SUPER = BUTTON.HEAVY | BUTTON.SPECIAL; // ゲージ技（I＋O の同時押し）
   // ゲージ技を様子見のときに使う場面。band＝距離（近い・中くらい・遠い）、rate＝superUse の何分の1の確率で使うか
   //   カゲツの月影斬は突進するので中くらい〜少し遠い所から、リンの練気は近づく前に、ゲンマの冥府球は離れた所から
+  //   confirm: 様子見で使わず、相手が技（牽制など）を出したのを見て、届く距離なら撃つ（技1つごとに superUse の確率）
+  //   カゲツの月影斬・ゴウの大地落としは「攻められているときの切り返し」と「相手が動いたのを見て」。リンの練気は近づいて攻めている最中に。
+  //   ゲンマの冥府球は離れた所から（ガードさせたら、後ろからついて行って上りの空中攻撃と下段で崩す）
   const SUPER_PLAN = {
-    kagetsu: { bands: ["mid", "far"], maxDist: 300, rate: 4 },
-    rin: { bands: ["mid", "far"], maxDist: 999, rate: 3 },
+    kagetsu: { confirm: true, maxDist: 300 },
+    rin: { bands: ["near"], maxDist: 999, rate: 2 },
     genma: { bands: ["mid", "far"], maxDist: 999, rate: 3 },
-    // ゴウの大地落としは掴む技なので、地上にいる相手に、届く距離（約250px）から
-    gou: { bands: ["near", "mid", "far"], maxDist: 240, rate: 2, grab: true },
+    gou: { confirm: true, maxDist: 240, grab: true },
   };
   // リンの練気で強くなっている間の連続技（すべての攻撃がキャンセルできるので長くつなぐ）
+  //   回し蹴り・小足・足払いと突進拳を交互にキャンセルし続けて、ガードされても攻めを続ける
   const BUFF_COMBOS = {
     rin: {
-      standLight: ["light", "heavy", "crouchLight", "heavy", "special"], // ジャブ → ジャブ → 回し蹴り → 小足 → 回し蹴り → 突進拳
-      standHeavy: ["crouchLight", "heavy", "special"], // 回し蹴り → 小足 → 回し蹴り → 突進拳
-      crouchLight: ["light", "special"], // 小足 → 小足 → 跳び蹴り上げ
+      standLight: ["heavy", "special", "crouchLight", "special", "heavy", "special"], // ジャブ → 回し蹴り → 突進拳 → 小足 → 突進拳 → 回し蹴り → 突進拳
+      standHeavy: ["special", "crouchLight", "special", "crouchHeavy", "special"], // 回し蹴り → 突進拳 → 小足 → 突進拳 → 足払い → 突進拳
+      crouchLight: ["special", "heavy", "special", "crouchHeavy", "special"], // 小足 → 突進拳 → 回し蹴り → 突進拳 → 足払い → 突進拳
+      crouchHeavy: ["special", "heavy", "special", "crouchLight", "special"], // 足払い → 突進拳 → 回し蹴り → 突進拳 → 小足 → 突進拳
     },
   }; // 相手の様子を何フレーム前まで覚えておくか（反応の速さより長く）
 
@@ -113,6 +121,7 @@
       rng: SF.rng.createRng(seed ^ 0x5bd1e995),
       history: [], // 相手の様子（古い順）
       prev: 0, // 前のフレームに出した入力
+      noGuard: 0, // このフレームで押さない方向キー（ガードしないと決めた技の間の「後ろ」）
       queue: [], // これから出す入力（1フレームに1つずつ）
       hold: 0, // 考え直すまで押し続ける方向キー
       thinkTimer: 0, // 次に様子見の行動を考え直すまでのフレーム
@@ -138,6 +147,11 @@
       comboStop: null, // 今の連続技で何回つないだら止めるか
       comboPressedFor: -1, // どの技のときにつなぎのボタンを押したか
       comboSuper: false, // 今の連続技の締めをゲージ技にするか
+      confirmKey: null, // 相手の技を見てゲージ技を撃つかを決めた、相手の技の番号
+      chargeLeft: 0, // ためる技（リンの突進拳）で、あと何フレーム O を押し続けるか
+      rising: false, // このジャンプで、跳んですぐ（上りで）空中攻撃を出すか
+      okiPlan: null, // ゴウの起き攻め：相手が倒れている間に決める（"grab"＝起き上がりに重ねて岩落とし、"watch"＝様子を見て対応）
+      okiWatch: 0, // 起き上がりを見ている残りフレーム
       reversalOk: false, // 今の相手の技に、ゲージ技で切り返すか（無敵のあるゲージ技だけ）
       techAt: -1, // 投げ抜けのU＋Iを押すフレーム
       grabbed: 0, // 掴まれたフレーム（掴まれていなければ0）
@@ -216,7 +230,8 @@
     if (!o.move || o.moveHit) return null;
     const m = CHARACTERS[opp.charId].moves[o.move];
     // ガードできない投げの技（ゴウの岩落とし・大地落とし）：掴まれる前なら、弱攻撃で止めるか跳んで避ける（guard: "grab"）
-    if (m && m.kind === "throw" && o.move !== "throw" && !m.antiAir && o.moveFrame < m.startup) {
+    // （暗転のあとでは避けられない大地落としは除く）
+    if (m && m.kind === "throw" && o.move !== "throw" && !m.antiAir && !m.catchAfterFreeze && o.moveFrame < m.startup) {
       let grabReach = m.hitbox.x2 + CHARACTERS[me.charId].width / 2 + 10;
       if (m.lunge) grabReach += (m.lunge.to - m.lunge.from + 1) * m.lunge.speed;
       return dist <= grabReach ? { key: "m" + o.moveId, guard: "grab", lunge: !!m.lunge } : null;
@@ -252,6 +267,7 @@
     const back = me.facing === 1 ? BUTTON.LEFT : BUTTON.RIGHT;
 
     let out = 0;
+    cpu.noGuard = 0; // このフレームで押さない方向キー（ガードしないと決めた技の間の「後ろ」）
     if (state.round.phase !== PHASE.FIGHT) {
       if (cpu.learner) SF.learn.endRound(cpu.learner, state, index); // ラウンドの勝ち負けを学習に伝える
       cpu.queue = [];
@@ -285,20 +301,33 @@
     }
     cpu.grabbed = 0;
 
+    // ためる技（リンの突進拳）：決めたフレーム数だけ O を押し続けてから離す
+    if (cpu.chargeLeft > 0) {
+      cpu.chargeLeft -= 1;
+      if (me.move === "special" || (isFree(me) && cpu.chargeLeft > 0)) {
+        cpu.prev = BUTTON.SPECIAL | cpu.hold;
+        return cpu.prev;
+      }
+      cpu.chargeLeft = 0;
+    }
+
     // 決めてある入力があればそれを出す（ボタンを押す・離す、しゃがんでからOなど）
     if (cpu.queue.length) return finish(cpu, cpu.queue.shift());
 
     // 連続技：自分の技が当たったら、決めた確率で次のボタンを押す
-    if (me.move && me.moveHit && opp.pose === POSE.HIT && cpu.comboPressedFor !== cpu.myMoveId) {
+    //   ガードされたときは、ガードされても続ける連続技（BLOCK_COMBOS、リンの練気の間は BUFF_COMBOS）だけ
+    const blocked = opp.pose === POSE.BLOCK;
+    if (me.move && me.moveHit && (opp.pose === POSE.HIT || blocked) && cpu.comboPressedFor !== cpu.myMoveId) {
       const buffed = SF.game.cancelAllActive(me);
-      const route = ((buffed && BUFF_COMBOS[me.charId]) || COMBOS[me.charId] || {})[cpu.comboFrom];
+      const routes = buffed && BUFF_COMBOS[me.charId] ? BUFF_COMBOS[me.charId] : blocked ? BLOCK_COMBOS[me.charId] : COMBOS[me.charId];
+      const route = (routes || {})[cpu.comboFrom];
       if (route && cpu.comboStep < route.length) {
         // 最後までつなぐかを1回だけ決める。失敗するときは途中のどこかで止める（1回もつながないこともある）
         if (cpu.comboStop === null) {
           cpu.comboStop = chance(cpu, lv.combo) ? route.length : SF.rng.nextInt(cpu.rng, route.length);
           // ゲージが満タンなら、最後のつなぎをゲージ技にするかを決める（当たる技で、そのまま連続技になるカゲツの月影斬だけ）
           const sup = CHARACTERS[me.charId].moves.super;
-          cpu.comboSuper = !!(sup && sup.hitbox) && SF.game.gaugeFull(me) && chance(cpu, lv.superUse);
+          cpu.comboSuper = !!(sup && sup.hitbox) && !(SUPER_PLAN[me.charId] || {}).confirm && SF.game.gaugeFull(me) && chance(cpu, lv.superUse);
         }
         if (cpu.comboStep < cpu.comboStop) {
           const last = cpu.comboStep === route.length - 1;
@@ -309,7 +338,9 @@
           if (next === "super") cpu.queue.push(down, down | SUPER);
           else if (next === "crouchSpecial") cpu.queue.push(BUTTON.DOWN, BUTTON.DOWN | BUTTON.SPECIAL);
           else if (next === "crouchLight") cpu.queue.push(BUTTON.DOWN, BUTTON.DOWN | BUTTON.LIGHT);
-          else cpu.queue.push(down, down | buttonFor(next));
+          else if (next === "crouchHeavy") cpu.queue.push(BUTTON.DOWN, BUTTON.DOWN | BUTTON.HEAVY);
+          else if (next === "special") cpu.queue.push(0, BUTTON.SPECIAL); // O は S を離して（S＋O の対空技にならないように）
+          else cpu.queue.push(0, buttonFor(next));
           return finish(cpu, cpu.queue.shift());
         }
         cpu.comboPressedFor = cpu.myMoveId;
@@ -351,10 +382,15 @@
         cpu.hold = 0;
         cpu.thinkTimer = 0;
         return finish(cpu, back | (t.guard === "low" ? BUTTON.DOWN : 0));
+      } else {
+        // ガードしないと決めた技の間は、何をしていても後ろを押さない（構えない）。
+        // 学習AIが「下がる」「しゃがみガード」を選ぶと、決めた確率より多くガードできてしまうため
+        cpu.noGuard = back;
+        cpu.hold &= ~back;
       }
     }
     // ガード硬直の間は構えを続ける（次の技にも備える）
-    if (me.pose === POSE.BLOCK) return finish(cpu, back | (me.crouching ? BUTTON.DOWN : 0));
+    if (me.pose === POSE.BLOCK && !cpu.noGuard) return finish(cpu, back | (me.crouching ? BUTTON.DOWN : 0));
 
     const free = isFree(me) && me.onGround && me.landingTimer === 0;
     const dist = Math.abs(me.x - o.x) / S;
@@ -402,6 +438,12 @@
       return finish(cpu, out, true);
     }
 
+    if (me.onGround) cpu.rising = false;
+    // 上りの空中攻撃（ゲンマの冥府球をガードさせたあと）：跳んですぐ出す
+    if (!me.onGround && cpu.rising && !me.move && !me.airAttackUsed) {
+      cpu.rising = false;
+      return finish(cpu, BUTTON.HEAVY | cpu.hold);
+    }
     // 空中：落ちてきて相手に届きそうなら空中攻撃
     if (!me.onGround && !me.move && !me.airAttackUsed && me.vy > 0) {
       const realDist = Math.abs(me.x - o.x) / S;
@@ -411,6 +453,74 @@
     }
 
     if (!free) return finish(cpu, cpu.hold & ~(BUTTON.LIGHT | BUTTON.HEAVY | BUTTON.SPECIAL));
+
+    // ゲージ技を「相手が動いたのを見て」撃つ（カゲツの月影斬・ゴウの大地落とし）。飛び道具だけの技には撃たない
+    const sp = SUPER_PLAN[me.charId];
+    if (sp && sp.confirm && SF.game.gaugeFull(me) && o.move && o.onGround && cpu.confirmKey !== o.moveId) {
+      const om = CHARACTERS[opp.charId].moves[o.move];
+      if (om && !om.projectile && om.recovery !== null && dist <= sp.maxDist) {
+        cpu.confirmKey = o.moveId;
+        if (chance(cpu, lv.superUse)) {
+          cpu.hold = 0;
+          cpu.thinkTimer = 0;
+          return finish(cpu, SUPER);
+        }
+      }
+    }
+
+    // ゴウの起き攻め：相手が倒れている間に、起き上がりに岩落としを重ねるか、様子を見て対応するかを決める
+    //   様子を見るとき：跳んだらつかみ上げ、バックステップしたら止まり際を張り手で叩き、何もしなければ岩落とし
+    if (me.charId === "gou" && opp.pose === POSE.DOWN && opp.health > 0) {
+      if (!cpu.okiPlan) cpu.okiPlan = chance(cpu, lv.combo) ? (chance(cpu, 50) ? "grab" : "watch") : "none";
+      const grabReach = reachOf(me, opp, "special") - 6;
+      const realDist = Math.abs(me.x - opp.x) / S;
+      if (cpu.okiPlan !== "none") {
+        // 岩落としの発生に合わせて、起き上がりの瞬間に掴む所で押す
+        if (cpu.okiPlan === "grab" && realDist <= grabReach + 4 && opp.downTimer === st.moves.special.startup - 1) {
+          cpu.hold = 0;
+          return finish(cpu, BUTTON.SPECIAL);
+        }
+        cpu.hold = realDist > grabReach - 10 ? forward : 0;
+        if (cpu.okiPlan === "watch") cpu.okiWatch = 24;
+        return finish(cpu, cpu.hold);
+      }
+    } else if (me.charId === "gou" && cpu.okiPlan) {
+      cpu.okiPlan = null;
+    }
+    if (cpu.okiWatch > 0 && free) {
+      cpu.okiWatch -= 1;
+      cpu.hold = 0;
+      if (!o.onGround && o.pose === POSE.JUMP) {
+        cpu.okiWatch = 0;
+        cpu.queue.push(BUTTON.DOWN | BUTTON.SPECIAL);
+        return finish(cpu, BUTTON.DOWN);
+      }
+      if (o.pose === POSE.BACKSTEP || (o.pose === POSE.DASH_RECOVERY && dist > reachOf(me, opp, "special"))) {
+        cpu.okiWatch = 0;
+        return finish(cpu, BUTTON.LIGHT);
+      }
+      if (cpu.okiWatch === 0 && dist <= reachOf(me, opp, "special")) return finish(cpu, BUTTON.SPECIAL);
+      return finish(cpu, 0);
+    }
+
+    // ゲンマの冥府球をガードさせている間：球の後ろについて行き、近づいたら上りの空中攻撃か下段で崩す
+    const ball = state.projectiles.find((p) => p.owner === index && p.strong);
+    if (ball && me.charId === "genma" && !cpu.learner) {
+      if (opp.pose === POSE.BLOCK || dist < 200) {
+        if (dist > 150) {
+          cpu.hold = forward;
+          return finish(cpu, forward);
+        }
+        cpu.thinkTimer = 30;
+        if (chance(cpu, 50)) {
+          cpu.rising = true;
+          cpu.hold = forward;
+          return finish(cpu, BUTTON.JUMP | forward);
+        }
+        cpu.queue.push(BUTTON.DOWN | (chance(cpu, 50) ? BUTTON.LIGHT : BUTTON.HEAVY), BUTTON.DOWN);
+        return finish(cpu, BUTTON.DOWN);
+      }
+    }
 
     // 相手が倒れている・投げられているときは、近づいて待つ
     if (o.pose === POSE.DOWN || o.pose === POSE.LAUNCH) {
@@ -429,9 +539,8 @@
     const band = dist <= reachOf(me, opp, "standLight") ? "near" : dist <= reachOf(me, opp, "standHeavy") ? "mid" : "far";
     let plan;
     // ゲージが満タンなら、場面に合えばゲージ技を使う（学習AIも同じ決まりで使う。学習した表には入っていない）
-    const sp = SUPER_PLAN[me.charId];
     const grabbable = !sp || !sp.grab || (o.onGround && o.pose !== POSE.HIT && o.pose !== POSE.BLOCK);
-    if (sp && grabbable && SF.game.gaugeFull(me) && sp.bands.includes(band) && dist <= sp.maxDist && chance(cpu, lv.superUse / sp.rate)) {
+    if (sp && !sp.confirm && grabbable && SF.game.gaugeFull(me) && sp.bands.includes(band) && dist <= sp.maxDist && chance(cpu, lv.superUse / sp.rate)) {
       return finish(cpu, SUPER);
     }
     if (cpu.learner) {
@@ -449,9 +558,17 @@
     }
 
     switch (plan) {
+      case "special":
+        // ためる技（リンの突進拳）は、ためながら近づく：15〜30フレーム押し続けてから離す
+        if (st.moves.special.charge) {
+          cpu.chargeLeft = 14 + SF.rng.nextInt(cpu.rng, 16);
+          cpu.thinkTimer = Math.max(cpu.thinkTimer, cpu.chargeLeft + 10);
+          cpu.prev = BUTTON.SPECIAL;
+          return BUTTON.SPECIAL;
+        }
+        return finish(cpu, buttonFor(plan));
       case "light":
       case "heavy":
-      case "special":
         return finish(cpu, buttonFor(plan));
       case "crouchLight":
         cpu.queue.push(BUTTON.DOWN | BUTTON.LIGHT, BUTTON.DOWN);
@@ -504,6 +621,7 @@
   // 方向キーは押しっぱなしでよいが、攻撃ボタンとジャンプは押しっぱなしにしない
   // holdJump＝浮くために、ジャンプのキーを押しっぱなしにしてよい
   function finish(cpu, out, holdJump = false) {
+    out &= ~(cpu.noGuard || 0);
     const taps = BUTTON.LIGHT | BUTTON.HEAVY | BUTTON.SPECIAL | (holdJump ? 0 : BUTTON.JUMP);
     if (out & cpu.prev & taps) {
       // 押しっぱなしになってしまうので、このフレームは離して次のフレームで押し直す
