@@ -8,13 +8,15 @@
     { id: "idle", label: "何もしない" },
     { id: "guardStand", label: "立ちガード" },
     { id: "guardCrouch", label: "しゃがみガード" },
+    { id: "guardTech", label: "立ちガード＋投げ抜け" },
     { id: "attack", label: "攻撃をくり返す" },
   ];
 
   // 攻撃をくり返すときの順番
-  const PATTERN = ["light", "heavy", "crouchLight", "crouchHeavy", "jumpLight", "jumpHeavy"];
+  const PATTERN = ["light", "heavy", "crouchLight", "crouchHeavy", "jumpLight", "jumpHeavy", "special", "crouchSpecial", "throw"];
   const CYCLE = 75; // 1つの技を出してから次の技までのフレーム
   const NEAR = 120; // これより離れていたら歩いて近づく（ピクセル）
+  const THROW_NEAR = 70; // 投げのときはここまで近づく
 
   function createDummy() {
     return { mode: 0, t: 0 };
@@ -36,15 +38,20 @@
     const threatened = opp.move !== null || me.pose === SF.game.POSE.BLOCK;
 
     if (mode === "guardStand") return threatened ? back : 0;
+    if (mode === "guardTech") {
+      // 掴まれたらすぐU＋Iを押す（押しっぱなしでは出ないので、1フレームおきに押す）
+      if (me.pose === SF.game.POSE.THROWN) return state.frame % 2 === 0 ? BUTTON.LIGHT | BUTTON.HEAVY : 0;
+      return threatened ? back : 0;
+    }
     if (mode === "guardCrouch") return BUTTON.DOWN | (threatened ? back : 0);
     if (mode !== "attack") return 0;
 
     const dist = Math.abs(me.x - opp.x) / SF.constants.SCALE;
     const k = d.t % CYCLE;
-    // 次の技を出す前に、離れていたら歩いて近づく
-    if (k === 0 && dist > NEAR) return forward;
-
     const kind = PATTERN[Math.floor(d.t / CYCLE)];
+    // 次の技を出す前に、離れていたら歩いて近づく
+    if (k === 0 && dist > (kind === "throw" ? THROW_NEAR : NEAR)) return forward;
+
     d.t = (d.t + 1) % (CYCLE * PATTERN.length);
 
     switch (kind) {
@@ -56,6 +63,12 @@
         return BUTTON.DOWN | (k >= 2 && k < 4 ? BUTTON.LIGHT : 0);
       case "crouchHeavy":
         return BUTTON.DOWN | (k >= 2 && k < 4 ? BUTTON.HEAVY : 0);
+      case "special":
+        return k < 2 ? BUTTON.SPECIAL : 0;
+      case "crouchSpecial":
+        return k < 4 ? BUTTON.DOWN | (k >= 2 ? BUTTON.SPECIAL : 0) : 0;
+      case "throw":
+        return k < 2 ? BUTTON.LIGHT | BUTTON.HEAVY : 0;
       case "jumpLight":
       case "jumpHeavy": {
         // 前ジャンプして、落ちてくるところで攻撃
