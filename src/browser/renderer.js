@@ -978,6 +978,8 @@
       text("S I L H O U E T T E   F I G H T E R", C.STAGE_WIDTH / 2, 172, 18, "#ffd8a0");
       // 点滅する「スタート」
       if (Math.floor(tick / 30) % 2 === 0) outlined("Enterキーでスタート", C.STAGE_WIDTH / 2, 236, 28, "#ffd24d");
+      // バージョン（右下）
+      text(`ver ${C.VERSION}`, C.STAGE_WIDTH - 16, C.STAGE_HEIGHT - 24, 15, "rgba(255, 255, 255, 0.8)", "right", "normal");
       hint("（画面をクリックしてから操作してください）");
     }
 

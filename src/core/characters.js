@@ -39,7 +39,7 @@
       //     空中攻撃は「攻めた側が着地して着地硬直が終わったとき」から数え、下りの低い所（着地の airHitLow フレーム前より下）で
       //     当てたときの値。それより高い所で当てると、そのフレーム数だけ有利が減る（ジャンプして最速で出しても連続技にならない）
       //   damage: ダメージ
-      //   guard: "mid"＝立ち・しゃがみどちらでも防げる、"low"＝しゃがみガードだけ、"air"＝立ちガードだけ
+      //   guard: "mid"＝立ち・しゃがみどちらでも防げる、"low"＝しゃがみガードだけ、"high"＝立ちガードだけ（地上の中段技）、"air"＝立ちガードだけ（空中攻撃）
       //   hitbox: 当たる範囲（ピクセル）。x は体の中心から前へ、y は足元から上へ（マイナスは足元より下）
       //   push: 当たったときに相手を押し返す距離（ピクセル）。ガードされたときは自分がこの距離だけ下がる
       //   kind: "normal"＝通常技、"special"＝必殺技（ガードされても削りダメージ）、"throw"＝投げ（ガードできない）
@@ -96,7 +96,7 @@
       lightChainMax: 2, // リンはUを2回つないでからIにもつなげられる
       moves: {
         standLight: { name: "ジャブ", startup: 4, active: 2, recovery: 8, hitAdv: 4, blockAdv: 2, damage: 30, guard: "mid", hitbox: { x1: 15, x2: 68, y1: 70, y2: 112 }, push: 16 },
-        standHeavy: { name: "回し蹴り", startup: 9, active: 3, recovery: 16, hitAdv: 3, blockAdv: -2, damage: 80, guard: "mid", hitbox: { x1: 15, x2: 98, y1: 60, y2: 125 }, push: 26 },
+        standHeavy: { name: "回し蹴り", startup: 9, active: 3, recovery: 16, hitAdv: 3, blockAdv: -2, damage: 80, guard: "high", hitbox: { x1: 15, x2: 98, y1: 60, y2: 125 }, push: 26 },
         crouchLight: { name: "小足", startup: 4, active: 2, recovery: 9, hitAdv: 3, blockAdv: 1, damage: 25, guard: "low", hitbox: { x1: 15, x2: 78, y1: 0, y2: 30 }, push: 16 },
         crouchHeavy: { name: "足払い", startup: 10, active: 3, recovery: 20, hitAdv: "down", blockAdv: -8, damage: 70, guard: "low", hitbox: { x1: 15, x2: 98, y1: 0, y2: 30 }, push: 22, noCancel: true },
         airLight: { name: "空中攻撃（弱）", startup: 5, active: 6, recovery: null, hitAdv: 9, blockAdv: 2, damage: 25, guard: "air", hitbox: { x1: 0, x2: 58, y1: -15, y2: 50 }, push: 10 },
@@ -176,7 +176,7 @@
     backstepPunishRate: 125, // バックステップの止まり際に攻撃・投げを受けたときのダメージ（%。連続技の1発目だけ）
     throwInputWindow: 2, // UとIをこのフレーム数以内のずれで押せば「同時押し」とみなす
     throwTechWindow: 8, // 投げが決まってから何フレーム以内にU＋Iを押せば投げ抜けできるか
-    throwFinish: 20, // 投げきったあと、投げた側が動けるまで（F）
+    throwFinish: 30, // 投げきったあと、投げた側が動けるまで（F）
     throwTechStun: 14, // 投げ抜けしたあと、両方が動けるまで（F）
     throwTechPush: 40, // 投げ抜けで離れる距離（ピクセル、それぞれ）
     airHitLow: 12, // 空中攻撃が表どおりの有利になる高さ（着地の何フレーム前より下で当てたか）

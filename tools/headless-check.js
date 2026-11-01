@@ -343,6 +343,39 @@ for (const att of ["kagetsu", "rin", "genma"]) {
   assert.notStrictEqual(lowVs(BUTTON.RIGHT).health, CH.kagetsu.health, "下段は立ちガードで防げないはず");
   assert.strictEqual(lowVs(BUTTON.RIGHT | D).health, CH.kagetsu.health, "下段はしゃがみガードで防げるはず");
   console.log("OK 下段: 立ちガードでは当たり、しゃがみガードで防げる");
+  // リンの回し蹴りは中段（立ちガードだけ）：しゃがみガードでは当たる
+  function highVs(guardInput) {
+    const st = closeGame("rin", "kagetsu");
+    for (let i = 0; i < 30; i++) SF.game.step(st, [i === 0 ? I : 0, guardInput]);
+    return st.fighters[1];
+  }
+  assert.strictEqual(CH.rin.moves.standHeavy.guard, "high");
+  assert.notStrictEqual(highVs(BUTTON.RIGHT | D).health, CH.kagetsu.health, "回し蹴りはしゃがみガードで防げないはず");
+  assert.strictEqual(highVs(BUTTON.RIGHT).health, CH.kagetsu.health, "回し蹴りは立ちガードで防げるはず");
+  console.log("OK 中段: リンの回し蹴りはしゃがみガードでは当たり、立ちガードで防げる");
+}
+
+// バージョン：タイトルに出すバージョンは package.json と同じ
+assert.strictEqual(SF.constants.VERSION, require("../package.json").version, "バージョンが package.json と違う");
+console.log(`OK バージョン: ${SF.constants.VERSION}`);
+
+// 投げの後隙：投げきったあと、投げた側は throwFinish フレーム動けない（相手が起き上がるまでの有利は downFrames − throwFinish）
+{
+  const st = closeGame("kagetsu", "rin", 60);
+  const [a, b] = st.fighters;
+  let thrownAt = -1;
+  let freeA = -1;
+  let freeB = -1;
+  for (let i = 0; i < 150; i++) {
+    SF.game.step(st, [i === 0 ? U | I : 0, 0]);
+    if (thrownAt < 0 && b.pose === POSE.DOWN) thrownAt = i;
+    if (thrownAt >= 0 && freeA < 0 && SF.game.isFree(a)) freeA = i;
+    if (thrownAt >= 0 && freeB < 0 && b.pose === POSE.STAND) freeB = i;
+  }
+  const BTL = SF.characters.BATTLE;
+  // 投げきった瞬間のヒットストップ（hitstopHit）のあとから数える
+  assert.strictEqual(freeA - thrownAt - BTL.hitstopHit, BTL.throwFinish, `投げた側の後隙が違う（${freeA - thrownAt - BTL.hitstopHit}F）`);
+  console.log(`OK 投げの後隙: 投げた側は${BTL.throwFinish}F動けない（起き上がりまで約+${freeB - freeA}）`);
 }
 
 // 空中攻撃：立ちガードで防げる。しゃがみガードでは防げない。1回のジャンプで1回だけ
