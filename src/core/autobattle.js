@@ -9,7 +9,7 @@
   const FPS = SF.constants.FPS;
 
   // 技の並び順（表の上から）
-  const MOVE_ORDER = ["standLight", "standHeavy", "crouchLight", "crouchHeavy", "airLight", "airHeavy", "special", "crouchSpecial", "throw"];
+  const MOVE_ORDER = ["standLight", "standHeavy", "crouchLight", "crouchHeavy", "airLight", "airHeavy", "special", "airSpecial", "crouchSpecial", "throw"];
   const MOVE_INPUT = {
     standLight: "U",
     standHeavy: "I",
@@ -18,6 +18,7 @@
     airLight: "ジャンプ中U",
     airHeavy: "ジャンプ中I",
     special: "O",
+    airSpecial: "ジャンプ中O",
     crouchSpecial: "S+O",
     throw: "U+I",
   };

@@ -48,7 +48,7 @@
     try {
       const text = root.localStorage.getItem(STORE_KEY);
       const brain = text && L.deserialize(JSON.parse(text));
-      if (brain) L.setCurrentBrain(brain);
+      if (brain) L.setCurrentBrain(L.fillMissing(brain));
     } catch (e) {
       // 保存できない・読めないときは、ゲームに入っている学習データを使う
     }
@@ -63,6 +63,7 @@
     try {
       const text = root.localStorage.getItem(PLAYER_KEY);
       player = text && L.deserialize(JSON.parse(text));
+      if (player) L.fillMissing(player);
     } catch (e) {
       player = null;
     }
@@ -332,7 +333,7 @@
         els.status.textContent = "このファイルは学習データとして読めませんでした（形がちがうか、古い版のデータです）";
         return;
       }
-      L.setCurrentBrain(brain);
+      L.setCurrentBrain(L.fillMissing(brain));
       storeBrain();
       els.status.textContent = "学習データを読み込みました";
       showInfo();

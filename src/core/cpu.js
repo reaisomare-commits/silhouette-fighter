@@ -38,6 +38,11 @@
       standHeavy: ["special"], // 回し蹴り → 突進拳
       crouchLight: ["light", "heavy"], // 小足 → 小足 → 足払い
     },
+    genma: {
+      standLight: ["heavy", "crouchSpecial"], // 闇爪 → 影の鎌 → 闇柱
+      standHeavy: ["crouchSpecial"], // 影の鎌 → 闇柱
+      crouchLight: ["heavy"], // 影這い → 闇溜まり
+    },
   };
 
   // 様子見のときに選ぶ行動と、その選びやすさ（重み）。距離は「近い・中くらい・遠い」の3つ
@@ -53,7 +58,17 @@
       mid: { heavy: 25, forward: 30, dash: 15, jump: 15, wait: 10, crouchHeavy: 5 },
       far: { forward: 40, dash: 25, jump: 20, wait: 15 },
     },
+    // ゲンマ：近づかれたらワープで離れ、遠くから異空間弾。垂直ジャンプで浮いて空中からも撃つ
+    genma: {
+      near: { light: 25, crouchLight: 20, throw: 20, backdash: 15, crouchHeavy: 10, wait: 10 },
+      mid: { heavy: 30, backdash: 20, crouchHeavy: 10, jumpUp: 10, back: 10, wait: 20 },
+      far: { special: 40, jumpUp: 20, dash: 15, wait: 15, forward: 10 },
+    },
   };
+
+  // 浮遊できるキャラ（ゲンマ）が、1回のジャンプで浮くか・空中の飛び道具を撃つかを決める確率（%）
+  const FLOAT_CHANCE = 60;
+  const AIR_SHOT_CHANCE = 60;
 
   const PROJECTILE_ALERT = 260; // 飛び道具がこれより近づいたらガードを考える（ピクセル）
   const ANTI_AIR_RANGE = 130; // 跳んできた相手がこれより近づいたら対空技を出す（ピクセル、横の距離）
@@ -94,6 +109,9 @@
       comboPressedFor: -1, // どの技のときにつなぎのボタンを押したか
       techAt: -1, // 投げ抜けのU＋Iを押すフレーム
       grabbed: 0, // 掴まれたフレーム（掴まれていなければ0）
+      myAir: false, // 前のフレームで自分が空中にいたか（ジャンプ1回ごとに浮くかを決める）
+      floatPlan: false, // このジャンプで浮くか
+      airShotPlan: false, // このジャンプで空中の飛び道具を撃つか
     };
   }
 
@@ -288,6 +306,34 @@
       }
     }
 
+    // 浮遊できるキャラ：ジャンプ1回ごとに浮くか・空中の飛び道具を撃つかを決める
+    const st = CHARACTERS[me.charId];
+    if (!me.onGround && !cpu.myAir) {
+      cpu.floatPlan = !!st.float && chance(cpu, FLOAT_CHANCE);
+      cpu.airShotPlan = !!st.moves.airSpecial && chance(cpu, AIR_SHOT_CHANCE);
+    }
+    cpu.myAir = !me.onGround;
+    if (!me.onGround && st.moves.airSpecial && cpu.airShotPlan && !me.move && !me.airAttackUsed && me.vy >= 0) {
+      // 斜め下に飛ぶ（相手の高さへ少し曲がる）ので、相手の体に届く横の距離のときに撃つ
+      const pr = st.moves.airSpecial.projectile;
+      const above = (SF.constants.GROUND_Y * S - me.y) / S + pr.y;
+      const realDist = Math.abs(me.x - o.x) / S;
+      const land = pr.spawnX + above; // 地面に着く所までの横の距離
+      if (o.onGround && realDist > land - 150 && realDist < land + 60 && !state.projectiles.some((p) => p.owner === index)) {
+        cpu.airShotPlan = false;
+        return finish(cpu, BUTTON.SPECIAL | (cpu.floatPlan ? BUTTON.JUMP : 0) | cpu.hold, true);
+      }
+    }
+    if (!me.onGround && cpu.floatPlan && (me.floating || me.floatLeft > 0)) {
+      // 浮く：頂上からジャンプのキーを押し続ける（押しっぱなしでよい）
+      const out = BUTTON.JUMP | cpu.hold;
+      const realDist = Math.abs(me.x - o.x) / S;
+      if (!me.move && !me.airAttackUsed && !cpu.airShotPlan && me.vy >= 0 && realDist < reachOf(me, opp, "airHeavy") + 20 && o.onGround) {
+        return finish(cpu, out | (cpu.prev & BUTTON.HEAVY ? 0 : BUTTON.HEAVY), true);
+      }
+      return finish(cpu, out, true);
+    }
+
     // 空中：落ちてきて相手に届きそうなら空中攻撃
     if (!me.onGround && !me.move && !me.airAttackUsed && me.vy > 0) {
       const realDist = Math.abs(me.x - o.x) / S;
@@ -379,8 +425,9 @@
 
   // 前のフレームから押しっぱなしのボタンは、いったん離さないと「押した」にならない。
   // 方向キーは押しっぱなしでよいが、攻撃ボタンとジャンプは押しっぱなしにしない
-  function finish(cpu, out) {
-    const taps = BUTTON.LIGHT | BUTTON.HEAVY | BUTTON.SPECIAL | BUTTON.JUMP;
+  // holdJump＝浮くために、ジャンプのキーを押しっぱなしにしてよい
+  function finish(cpu, out, holdJump = false) {
+    const taps = BUTTON.LIGHT | BUTTON.HEAVY | BUTTON.SPECIAL | (holdJump ? 0 : BUTTON.JUMP);
     if (out & cpu.prev & taps) {
       // 押しっぱなしになってしまうので、このフレームは離して次のフレームで押し直す
       cpu.queue.unshift(out);
