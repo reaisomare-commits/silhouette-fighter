@@ -217,6 +217,12 @@
     if (isLightMove(name)) f.chainLights += 1;
   }
 
+  // 最大までためた技（リンの突進拳）を出しているか。ためている間に最大になったときから、技が終わるまで
+  function fullCharge(f) {
+    const m = moveData(f);
+    return !!(m && m.charge && m.charge.full && f.chargeFrames >= m.charge.max);
+  }
+
   // 自分の飛び道具がまだ画面にあるか（飛刃は画面に1つまで）
   function hasProjectile(state, f) {
     return state.projectiles.some((p) => p.owner === state.fighters.indexOf(f));
@@ -896,7 +902,9 @@
     if (blocked) {
       def.pose = POSE.BLOCK;
       def.crouching = def.holdDown;
-      def.stun = Math.max(1, base + m.blockAdv);
+      // 最大までためた技は、ガードされたときの硬直差が変わる
+      const blockAdv = !proj && fullCharge(att) && m.charge.full.blockAdv !== undefined ? m.charge.full.blockAdv : m.blockAdv;
+      def.stun = Math.max(1, base + blockAdv);
       def.vx = 0;
       // 必殺技はガードされても少しだけ体力が減る（削り）
       if (m.kind === "special") {
@@ -969,6 +977,8 @@
     for (const p of state.projectiles) {
       const att = state.fighters[p.owner];
       const def = state.fighters[1 - p.owner];
+      // 最大までためた突進拳は、飛び道具をすり抜ける（飛び道具は消えずにそのまま飛ぶ）
+      if (fullCharge(def) && moveData(def).charge.full.projectileInvincible) continue;
       const box = projectileBox(p);
       const body = touching(box, def);
       if (body) hits.push({ att, def, m: CHARACTERS[att.charId].moves[p.move], box, body, p, rank: hitRank(p.move), name: p.move });
@@ -1124,9 +1134,15 @@
     clampToStage(left);
   }
 
-  // 地上で自由に動けるときだけお互いの方を向く（空中や技の最中は向きを変えない）
+  // お互いの方を向く（空中や技の最中は向きを変えない）
+  // 向き直れるのは、地上で自由に動けるとき・着地硬直・ステップやワープの止まり際・のけぞりやガード硬直・投げ抜けのあと
+  // （相手に裏に回られても、動けるようになる前に向き直っておく）。技の最中・空中・ダウン中は向きを変えない
   function canTurn(f) {
-    return f.onGround && isFree(f);
+    if (!f.onGround) return false;
+    if (isFree(f)) return true;
+    if (f.move || f.grab) return false;
+    if (f.action === POSE.DASH_RECOVERY) return true;
+    return f.stun > 0 && (f.pose === POSE.HIT || f.pose === POSE.BLOCK || f.pose === POSE.TECH);
   }
   function updateFacing(a, b) {
     if (a.x === b.x) return;
@@ -1267,6 +1283,7 @@
     shadowStitchBox,
     isFree,
     moveData,
+    fullCharge,
     comboRate,
     toStats,
     hashState,

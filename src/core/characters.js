@@ -48,7 +48,8 @@
       //     homing があれば、相手の体の真ん中の高さに向かって上下の速さを1フレームに turn ずつ変える（上下の速さは max まで）
       //   lunge: 技の途中で前に進む（from〜to フレーム目に、1フレーム speed ピクセル）
       //   noCancel: true なら当たっても必殺技キャンセルできない
-      //   charge: ボタンを押している間ためて、離すと出る技（max フレームまで。ためた分 lunge の速さが speedPerFrame ずつ増える）
+      //   charge: ボタンを押している間ためて、離すと出る技（max フレームまで。ためた分 lunge の速さが speedPerFrame ずつ増える）。
+      //     full は最大までためたときだけの性質（projectileInvincible: 飛び道具をすり抜ける、blockAdv: ガードされたときの硬直差）
       //   hurtExtend: 技を出している間に伸びるやられる範囲（書かなければ hitbox と同じ）。
       //     当たる時間はこの範囲まで、発生前と硬直中はその半分の長さまで伸びる
       //   投げの hitbox は掴める範囲。recovery は空振りしたときの硬直
@@ -103,7 +104,8 @@
         // 突進拳：素早く前に突っ込む。当たるとダウン。ガードされても少し不利なだけ
         //   ためる技：O を押している間は構えてため、離すと出る（発生は離してから数える）。
         //   ためたフレーム数×speedPerFrame だけ進む速さが増える（最大 max フレーム。ためなし約99px、最大約198px）
-        special: { name: "突進拳", kind: "special", startup: 10, active: 3, recovery: 24, hitAdv: "down", blockAdv: -2, damage: 80, guard: "mid", hitbox: { x1: 15, x2: 75, y1: 65, y2: 115 }, push: 24, lunge: { from: 2, to: 12, speed: 9 }, charge: { max: 30, speedPerFrame: 0.3 } },
+        //   最大までためると（full）：技が終わるまで飛び道具をすり抜ける（ふつうの攻撃は当たる）、ガードされたときの硬直差が blockAdv になる
+        special: { name: "突進拳", kind: "special", startup: 10, active: 3, recovery: 24, hitAdv: "down", blockAdv: -2, damage: 80, guard: "mid", hitbox: { x1: 15, x2: 75, y1: 65, y2: 115 }, push: 24, lunge: { from: 2, to: 12, speed: 9 }, charge: { max: 30, speedPerFrame: 0.3, full: { projectileInvincible: true, blockAdv: 1 } } },
         // 跳び蹴り上げ：対空。ガードされたときに下がる距離（push）は小さい
         crouchSpecial: { name: "跳び蹴り上げ", kind: "special", startup: 6, active: 4, recovery: 36, hitAdv: "down", blockAdv: -28, damage: 85, guard: "mid", hitbox: { x1: -20, x2: 90, y1: 50, y2: 210 }, hurtExtend: { x1: -5, x2: 55, y1: 50, y2: 135 }, push: 8 },
         // 投げ：掴める範囲がカゲツより少し広い。空振りすると、同じくらいの発生のジャブ（硬直8F）よりずっと長く動けない
@@ -131,21 +133,21 @@
       float: { frames: 40, speed: 2.5, hurtCut: 50 },
       // 前を素早く2回：ワープ（消えて、distance ピクセル先に現れる）。消えている frames の間は攻撃も投げも当たらない。
       // 相手をすり抜けて裏に回れる。recovery は現れてから動けるまで
-      forwardDash: { type: "warp", frames: 12, distance: 170, recovery: 12 },
+      forwardDash: { type: "warp", frames: 12, distance: 170, recovery: 18 },
       // 後ろを素早く2回：後ろへワープ。現れたあとの recovery に攻撃や投げを受けると隙狩り（バックステップと同じ）
-      backDash: { type: "warp", frames: 12, distance: 170, recovery: 14, invincible: 12 },
+      backDash: { type: "warp", frames: 12, distance: 170, recovery: 20, invincible: 12 },
       health: 500,
       lightChainMax: 1,
       moves: {
         standLight: { name: "闇爪", startup: 5, active: 2, recovery: 10, hitAdv: 3, blockAdv: 1, damage: 50, guard: "mid", hitbox: { x1: 15, x2: 75, y1: 80, y2: 140 }, push: 16 },
-        standHeavy: { name: "影の鎌", startup: 11, active: 4, recovery: 20, hitAdv: 2, blockAdv: -5, damage: 125, guard: "mid", hitbox: { x1: 20, x2: 130, y1: 60, y2: 150 }, push: 26 },
+        standHeavy: { name: "影の鎌", startup: 11, active: 4, recovery: 20, hitAdv: 2, blockAdv: -5, damage: 125, guard: "mid", hitbox: { x1: 20, x2: 130, y1: 60, y2: 120 }, push: 26 },
         crouchLight: { name: "影這い", startup: 6, active: 2, recovery: 10, hitAdv: 2, blockAdv: 0, damage: 45, guard: "low", hitbox: { x1: 15, x2: 90, y1: 0, y2: 35 }, push: 16 },
         crouchHeavy: { name: "闇溜まり", startup: 13, active: 4, recovery: 22, hitAdv: "down", blockAdv: -10, damage: 115, guard: "low", hitbox: { x1: 20, x2: 125, y1: 0, y2: 30 }, push: 22, noCancel: true },
         airLight: { name: "空中攻撃（弱）", startup: 6, active: 6, recovery: null, hitAdv: 9, blockAdv: 2, damage: 45, guard: "air", hitbox: { x1: 0, x2: 60, y1: -15, y2: 50 }, push: 10 },
         airHeavy: { name: "空中攻撃（強）", startup: 10, active: 6, recovery: null, hitAdv: 12, blockAdv: 3, damage: 110, guard: "air", hitbox: { x1: -5, x2: 85, y1: -20, y2: 45 }, push: 14 },
         // 異空間弾：少し先（spawnX）に開いた門から飛び道具が出て、相手の高さへ曲がっていく（ホーミング）。目の前の相手には当たらない。画面に1つまで（空中のものと合わせて）。
         // 硬直差は門の目の前で当てたときの値
-        special: { name: "異空間弾", kind: "special", startup: 20, active: 1, recovery: 22, hitAdv: 4, blockAdv: -6, damage: 105, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 45, y1: 80, y2: 130 }, push: 14, projectile: { speed: 5, width: 36, height: 36, spawnX: 150, y: 90, portal: true, homing: { turn: 0.25, max: 4 } } },
+        special: { name: "異空間弾", kind: "special", startup: 20, active: 1, recovery: 22, hitAdv: 4, blockAdv: -6, damage: 105, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 45, y1: 80, y2: 130 }, push: 14, projectile: { speed: 5, width: 36, height: 36, spawnX: 220, y: 90, portal: true, homing: { turn: 0.25, max: 4 } } },
         // 異空間弾（空中）：空中で O。前の門から斜め下へ飛び、相手の高さへ曲がっていく（fall＝はじめに1フレームに下へ進むピクセル）。1回のジャンプで空中攻撃とどちらか1回。
         // 硬直差は「自分が低い所で出して、すぐ着地したとき」の値
         airSpecial: { name: "異空間弾（空中）", kind: "special", startup: 12, active: 1, recovery: null, hitAdv: 6, blockAdv: 1, damage: 90, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 40, y1: 40, y2: 100 }, push: 10, projectile: { speed: 5, fall: 5, width: 32, height: 32, spawnX: 60, y: 40, portal: true, homing: { turn: 0.25, max: 5 } } },

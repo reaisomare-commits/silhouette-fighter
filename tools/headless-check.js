@@ -747,6 +747,110 @@ for (const att of ["kagetsu", "rin", "genma"]) {
   console.log(`OK 突進拳のため: ためなし${tap.dist}px・15F${mid.dist}px・最大${full.dist}px`);
 }
 
+// 最大までためた突進拳：飛び道具をすり抜け（ふつうの攻撃は当たる）、ガードされても有利
+{
+  const full = CH.rin.moves.special.charge;
+  // 飛刃に向かって最大ためで突っ込むと、飛刃をすり抜ける。ためが足りないと飛刃に当たる
+  function vsProjectile(hold) {
+    const st = newGame(1, ["rin", "kagetsu"]);
+    const [r, k] = st.fighters;
+    r.x = 300 * S;
+    k.x = 700 * S;
+    // カゲツが先に飛刃を撃ち、リンがためて離す
+    const hp0 = r.health;
+    let passed = false;
+    for (let i = 0; i < 120; i++) {
+      SF.game.step(st, [i < hold ? O : 0, i === 0 ? O : 0]);
+      if (SF.game.fullCharge(r) && st.projectiles.some((p) => Math.abs(p.x - r.x) < 30 * S)) passed = true;
+    }
+    return { damage: hp0 - r.health, passed };
+  }
+  const maxed = vsProjectile(full.max + 1);
+  const short = vsProjectile(10);
+  assert.ok(maxed.passed, "最大ためでは飛刃と重なってもすり抜けるはず");
+  assert.strictEqual(maxed.damage, 0, "最大ための突進拳は飛刃をすり抜けるはず");
+  assert.ok(short.damage > 0, "ためが足りない突進拳は飛刃に当たるはず");
+  // ふつうの攻撃は当たる：最大ためで突っ込んだところにカゲツの大振り斬り
+  {
+    const st = newGame(1, ["rin", "kagetsu"]);
+    const [r, k] = st.fighters;
+    r.x = 300 * S;
+    k.x = 400 * S;
+    const hp0 = r.health;
+    let hitWhileFull = false;
+    for (let i = 0; i < 80; i++) {
+      const before = r.health;
+      const wasFull = SF.game.fullCharge(r);
+      SF.game.step(st, [i <= full.max ? O : 0, i === full.max - 10 ? I : 0]);
+      if (wasFull && r.health < before) hitWhileFull = true;
+    }
+    assert.ok(hitWhileFull && r.health < hp0, "最大ための突進拳でも、ふつうの攻撃は当たるはず");
+  }
+  // ガードされたときの硬直差：最大ためは +1、ためなしは表どおり
+  function blockAdvOf(hold) {
+    const st = newGame(1, ["rin", "kagetsu"]);
+    const [a, b] = st.fighters;
+    a.x = 300 * S;
+    b.x = 420 * S;
+    let hitAt = -1;
+    let sa = -1;
+    let sb = -1;
+    for (let i = 0; i < 200; i++) {
+      const after = hitAt >= 0;
+      if (after) {
+        a.prevInput &= ~BUTTON.JUMP;
+        b.prevInput &= ~BUTTON.JUMP;
+      }
+      const inA = after ? BUTTON.JUMP : i <= hold ? O : 0;
+      const inB = after ? BUTTON.JUMP | (b.pose === POSE.BLOCK ? BUTTON.RIGHT : 0) : a.move && !a.charging ? BUTTON.RIGHT : 0;
+      SF.game.step(st, [inA, inB]);
+      if (!after && b.pose === POSE.BLOCK) {
+        hitAt = i;
+        a.buffer = null;
+        b.buffer = null;
+      } else if (after) {
+        if (sa < 0 && !a.onGround) sa = i;
+        if (sb < 0 && !b.onGround) sb = i;
+      }
+    }
+    assert.ok(hitAt >= 0, "突進拳がガードされない");
+    return sb - sa;
+  }
+  const maxAdv = blockAdvOf(full.max + 1);
+  assert.strictEqual(maxAdv, full.full.blockAdv, `最大ための突進拳のガード時の硬直差が違う（${maxAdv}）`);
+  console.log(`OK 最大ための突進拳: 飛び道具をすり抜ける・ふつうの攻撃は当たる・ガードされて${maxAdv > 0 ? "+" : ""}${maxAdv}`);
+}
+
+// 向き直り：ガード硬直・ステップやワープの止まり際でも、相手の方へ向き直る（動けるようになる前に）
+{
+  // ゲンマが前ワープでカゲツの裏に出る。ゲンマは止まり際のうちに向き直る
+  const st = newGame(1, ["genma", "kagetsu"]);
+  const [g, k] = st.fighters;
+  g.x = 300 * S;
+  k.x = 380 * S;
+  const seq = [BUTTON.RIGHT, 0, BUTTON.RIGHT];
+  let turnedInRecovery = false;
+  for (let i = 0; i < 40; i++) {
+    SF.game.step(st, [seq[i] || 0, 0]);
+    if (g.action === POSE.DASH_RECOVERY && g.facing === -1) turnedInRecovery = true;
+  }
+  assert.ok(turnedInRecovery, "ワープの止まり際のうちに向き直るはず");
+  // ガード硬直中に相手が裏に回ったら、ガード硬直のうちに向き直る
+  const st2 = closeGame("kagetsu", "rin", 60);
+  const [a, b] = st2.fighters;
+  let turnedInBlock = false;
+  for (let i = 0; i < 40; i++) {
+    SF.game.step(st2, [i === 0 ? I : 0, BUTTON.RIGHT]);
+    if (b.pose === POSE.BLOCK && b.stun > 2 && !turnedInBlock) {
+      a.x = b.x + 80 * S; // 守っている間に攻めた側が裏へ（確認用に動かす）
+      turnedInBlock = null;
+    }
+    if (turnedInBlock === null && b.pose === POSE.BLOCK && b.facing === 1) turnedInBlock = true;
+  }
+  assert.strictEqual(turnedInBlock, true, "ガード硬直のうちに向き直るはず");
+  console.log("OK 向き直り: ワープ・ステップの止まり際、のけぞり・ガード硬直のうちに相手の方を向く");
+}
+
 // 飛刃：離れて当てるほど有利。画面に1つまで
 {
   const near = measureSpecial("kagetsu", "rin", "special", true);
