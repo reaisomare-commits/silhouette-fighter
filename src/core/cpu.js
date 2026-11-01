@@ -314,12 +314,12 @@
     }
     cpu.myAir = !me.onGround;
     if (!me.onGround && st.moves.airSpecial && cpu.airShotPlan && !me.move && !me.airAttackUsed && me.vy >= 0) {
-      // 斜め下に飛ぶので、相手の体に届く横の距離のときに撃つ
+      // 斜め下に飛ぶ（相手の高さへ少し曲がる）ので、相手の体に届く横の距離のときに撃つ
       const pr = st.moves.airSpecial.projectile;
       const above = (SF.constants.GROUND_Y * S - me.y) / S + pr.y;
       const realDist = Math.abs(me.x - o.x) / S;
       const land = pr.spawnX + above; // 地面に着く所までの横の距離
-      if (o.onGround && realDist > land - 110 && realDist < land + 10 && !state.projectiles.some((p) => p.owner === index)) {
+      if (o.onGround && realDist > land - 150 && realDist < land + 60 && !state.projectiles.some((p) => p.owner === index)) {
         cpu.airShotPlan = false;
         return finish(cpu, BUTTON.SPECIAL | (cpu.floatPlan ? BUTTON.JUMP : 0) | cpu.hold, true);
       }

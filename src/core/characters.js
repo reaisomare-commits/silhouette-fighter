@@ -44,7 +44,8 @@
       //   push: 当たったときに相手を押し返す距離（ピクセル）。ガードされたときは自分がこの距離だけ下がる
       //   kind: "normal"＝通常技、"special"＝必殺技（ガードされても削りダメージ）、"throw"＝投げ（ガードできない）
       //   projectile: 飛び道具の大きさと速さ（ピクセル）。spawnX は体の中心から前へ、y は足元から上へ（飛び道具の中心）。
-      //     fall は1フレームに下へ進む速さ（斜め下に飛ぶ）、portal: true なら出た所に門を描く
+      //     fall は1フレームに下へ進む速さ（斜め下に飛ぶ）、portal: true なら出た所に門を描く。
+      //     homing があれば、相手の体の真ん中の高さに向かって上下の速さを1フレームに turn ずつ変える（上下の速さは max まで）
       //   lunge: 技の途中で前に進む（from〜to フレーム目に、1フレーム speed ピクセル）
       //   noCancel: true なら当たっても必殺技キャンセルできない
       //   charge: ボタンを押している間ためて、離すと出る技（max フレームまで。ためた分 lunge の速さが speedPerFrame ずつ増える）
@@ -124,9 +125,9 @@
       // → 高さ約160ピクセル、滞空約53フレーム
       landingLag: 4,
       // 浮遊：ジャンプの頂上を過ぎてからジャンプのキーを押し続けると、落ちずに浮いて止まる（1回のジャンプで1回）。
-      //   frames: 浮いていられる最大のフレーム数、speedRate: 浮いている間の横の速さ（%。ジャンプの横の速さに対して）
-      //   離すとそこから落ち始め、もう浮けない
-      float: { frames: 40, speedRate: 50 },
+      //   frames: 浮いていられる最大のフレーム数、speed: 浮いている間に左右のキーで動く速さ（1フレームに何ピクセル）
+      //   離すとそこから（そのときの横の速さのまま）落ち始め、もう浮けない
+      float: { frames: 40, speed: 2.5 },
       // 前を素早く2回：ワープ（消えて、distance ピクセル先に現れる）。消えている frames の間は攻撃も投げも当たらない。
       // 相手をすり抜けて裏に回れる。recovery は現れてから動けるまで
       forwardDash: { type: "warp", frames: 12, distance: 170, recovery: 12 },
@@ -141,14 +142,14 @@
         crouchHeavy: { name: "闇溜まり", startup: 13, active: 4, recovery: 22, hitAdv: "down", blockAdv: -10, damage: 115, guard: "low", hitbox: { x1: 20, x2: 125, y1: 0, y2: 30 }, push: 22, noCancel: true },
         airLight: { name: "空中攻撃（弱）", startup: 6, active: 6, recovery: null, hitAdv: 9, blockAdv: 2, damage: 45, guard: "air", hitbox: { x1: 0, x2: 60, y1: -15, y2: 50 }, push: 10 },
         airHeavy: { name: "空中攻撃（強）", startup: 10, active: 6, recovery: null, hitAdv: 12, blockAdv: 3, damage: 110, guard: "air", hitbox: { x1: -5, x2: 85, y1: -20, y2: 45 }, push: 14 },
-        // 異空間弾：少し先（spawnX）に開いた門から飛び道具が出る。目の前の相手には当たらない。画面に1つまで（空中のものと合わせて）。
+        // 異空間弾：少し先（spawnX）に開いた門から飛び道具が出て、相手の高さへ曲がっていく（ホーミング）。目の前の相手には当たらない。画面に1つまで（空中のものと合わせて）。
         // 硬直差は門の目の前で当てたときの値
-        special: { name: "異空間弾", kind: "special", startup: 20, active: 1, recovery: 22, hitAdv: 4, blockAdv: -6, damage: 105, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 45, y1: 80, y2: 130 }, push: 14, projectile: { speed: 5, width: 36, height: 36, spawnX: 150, y: 90, portal: true } },
-        // 異空間弾（空中）：空中で O。前の門から斜め下へ飛ぶ（fall＝1フレームに下へ進むピクセル）。1回のジャンプで空中攻撃とどちらか1回。
+        special: { name: "異空間弾", kind: "special", startup: 20, active: 1, recovery: 22, hitAdv: 4, blockAdv: -6, damage: 105, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 45, y1: 80, y2: 130 }, push: 14, projectile: { speed: 5, width: 36, height: 36, spawnX: 150, y: 90, portal: true, homing: { turn: 0.25, max: 4 } } },
+        // 異空間弾（空中）：空中で O。前の門から斜め下へ飛び、相手の高さへ曲がっていく（fall＝はじめに1フレームに下へ進むピクセル）。1回のジャンプで空中攻撃とどちらか1回。
         // 硬直差は「自分が低い所で出して、すぐ着地したとき」の値
-        airSpecial: { name: "異空間弾（空中）", kind: "special", startup: 12, active: 1, recovery: null, hitAdv: 6, blockAdv: 1, damage: 90, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 40, y1: 40, y2: 100 }, push: 10, projectile: { speed: 5, fall: 5, width: 32, height: 32, spawnX: 60, y: 40, portal: true } },
+        airSpecial: { name: "異空間弾（空中）", kind: "special", startup: 12, active: 1, recovery: null, hitAdv: 6, blockAdv: 1, damage: 90, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 40, y1: 40, y2: 100 }, push: 10, projectile: { speed: 5, fall: 5, width: 32, height: 32, spawnX: 60, y: 40, portal: true, homing: { turn: 0.25, max: 5 } } },
         // 闇柱：対空。少し前の地面の門から、頭の上まで闇の柱が立つ。柱は門から出るので、伸びるやられる範囲は小さい
-        crouchSpecial: { name: "闇柱", kind: "special", startup: 9, active: 6, recovery: 32, hitAdv: "down", blockAdv: -24, damage: 120, guard: "mid", hitbox: { x1: 10, x2: 90, y1: 0, y2: 230 }, hurtExtend: { x1: 0, x2: 30, y1: 40, y2: 160 }, push: 16 },
+        crouchSpecial: { name: "闇柱", kind: "special", startup: 9, active: 6, recovery: 22, hitAdv: "down", blockAdv: -14, damage: 120, guard: "mid", hitbox: { x1: 10, x2: 90, y1: 0, y2: 230 }, hurtExtend: { x1: 0, x2: 30, y1: 40, y2: 160 }, push: 16 },
         throw: { name: "闇引き", kind: "throw", startup: 5, active: 2, recovery: 22, damage: 135, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 } },
       },
     },

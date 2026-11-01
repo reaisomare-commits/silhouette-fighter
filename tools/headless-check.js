@@ -834,6 +834,23 @@ for (const att of ["kagetsu", "rin", "genma"]) {
   const brief = airTime(40);
   assert.strictEqual(full - normal, G.float.frames, `浮遊で長くなる時間が違う（${normal}F → ${full}F）`);
   assert.ok(brief > normal && brief < full, "途中で離したら、そこから落ちるはず");
+  // 浮いている間は左右のキーで動ける（押さなければその場で止まる）
+  {
+    function floatMove(dir) {
+      const st = newGame(1, ["genma", "kagetsu"]);
+      const g = st.fighters[0];
+      st.fighters[1].x = 900 * S;
+      let x0 = null;
+      for (let i = 0; i < 60; i++) {
+        SF.game.step(st, [BUTTON.JUMP | (g.floating ? dir : 0), 0]);
+        if (g.floating && x0 === null) x0 = g.x;
+      }
+      return (g.x - x0) / S;
+    }
+    assert.ok(floatMove(R) > 40, "浮いている間に右へ動けるはず");
+    assert.ok(floatMove(L) < -40, "浮いている間に左へ動けるはず");
+    assert.strictEqual(floatMove(0), 0, "キーを押さなければ浮いたまま止まるはず");
+  }
   // カゲツは浮かない
   {
     const st = newGame(1, ["kagetsu", "genma"]);
@@ -852,6 +869,19 @@ for (const att of ["kagetsu", "rin", "genma"]) {
     for (let i = 0; i < 80; i++) SF.game.step(st, [i === 0 ? O : 0, 0]);
     assert.strictEqual(st.fighters[1].health, CH.kagetsu.health, "異空間弾は目の前の相手には当たらないはず");
     assert.ok(st.effects.length >= 0);
+  }
+  // 異空間弾はホーミング：跳んでいる相手の高さへ曲がって当たる
+  {
+    const st = newGame(1, ["genma", "kagetsu"]);
+    st.fighters[0].x = 200 * S;
+    st.fighters[1].x = 560 * S;
+    let rose = false;
+    for (let i = 0; i < 90; i++) {
+      SF.game.step(st, [i === 0 ? O : 0, i === 22 ? BUTTON.JUMP : 0]);
+      for (const p of st.projectiles) if (p.vy < 0) rose = true;
+    }
+    assert.ok(rose, "異空間弾は跳んだ相手の方へ上に曲がるはず");
+    assert.ok(st.fighters[1].health < CH.kagetsu.health, "ホーミングで跳んだ相手に当たるはず");
   }
   // 空中の異空間弾：斜め下へ飛ぶ。空中攻撃と合わせて1回のジャンプで1回
   {
@@ -891,7 +921,7 @@ for (const att of ["kagetsu", "rin", "genma"]) {
   }
   console.log(
     `OK ゲンマ: 体力${G.health}、ワープは${G.forwardDash.frames}F消えて${fw.dist}px先・${-bw.dist}px後ろに現れ、相手の裏にも出られる、` +
-      `浮遊で空中にいる時間 ${normal}F → 最大${full}F、異空間弾は目の前に当たらない、空中の異空間弾は斜め下へ1回のジャンプで1回`,
+      `浮遊で空中にいる時間 ${normal}F → 最大${full}F（浮いている間は左右に動ける）、異空間弾はホーミング、異空間弾は目の前に当たらない、空中の異空間弾は斜め下へ1回のジャンプで1回`,
   );
 }
 

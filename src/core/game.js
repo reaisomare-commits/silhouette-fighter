@@ -26,7 +26,7 @@
       landingLag: c.landingLag,
       forwardDash: { ...c.forwardDash, speed: px(c.forwardDash.speed || 0), distance: px(c.forwardDash.distance || 0) },
       backDash: { ...c.backDash, speed: px(c.backDash.speed || 0), distance: px(c.backDash.distance || 0) },
-      float: c.float || null,
+      float: c.float ? { ...c.float, speed: px(c.float.speed) } : null,
     };
   }
 
@@ -418,6 +418,8 @@
       }
       if (f.floating) {
         f.floatLeft -= 1;
+        // 浮いている間は左右のキーで自由に動ける（離すとその場で止まる）。浮遊をやめたら、そのときの横の速さのまま落ちる
+        f.vx = forward ? f.facing * st.float.speed : back ? -f.facing * st.float.speed : 0;
         if (f.buffer === "jump") f.buffer = null; // 浮くために押したジャンプは、着地後のジャンプにしない
       }
     } else {
@@ -505,7 +507,7 @@
       f.vy += st.gravity;
     }
 
-    f.x += (f.floating ? Math.trunc((f.vx * st.float.speedRate) / 100) : f.vx) + f.pushVx;
+    f.x += f.vx + f.pushVx;
     f.y += f.vy;
     // 押し返しは毎フレーム弱まる
     f.pushVx = Math.trunc((f.pushVx * 4) / 5);
@@ -730,6 +732,7 @@
       y: f.y - pr.y * S,
       vx: f.facing * pr.speed * S,
       vy: (pr.fall || 0) * S, // 斜め下に飛ぶ飛び道具（空中の異空間弾）は下へも進む
+      homing: pr.homing ? { turn: Math.round(pr.homing.turn * S), max: Math.round(pr.homing.max * S) } : null,
       facing: f.facing,
       w: pr.width,
       h: pr.height,
@@ -746,6 +749,17 @@
   // 飛び道具を進める。画面の外に出たら消える。飛び道具同士がぶつかったら両方消える
   function moveProjectiles(state) {
     for (const p of state.projectiles) {
+      if (p.homing && p.age > 0) {
+        // ホーミング：相手の体の真ん中の高さに向かって、上下の速さを少しずつ変える（相手を通り過ぎたら変えない）
+        const target = state.fighters[1 - p.owner];
+        const ahead = Math.sign(target.x - p.x) === Math.sign(p.vx);
+        if (ahead) {
+          const ty = target.y - (fighterHeight(target) / 2) * S;
+          const want = Math.max(-p.homing.max, Math.min(p.homing.max, ty - p.y));
+          if (p.vy < want) p.vy = Math.min(want, p.vy + p.homing.turn);
+          else if (p.vy > want) p.vy = Math.max(want, p.vy - p.homing.turn);
+        }
+      }
       if (p.age > 0) {
         // 出た瞬間のフレームは動かない（目の前の相手にはすぐ当たる）
         p.x += p.vx;
