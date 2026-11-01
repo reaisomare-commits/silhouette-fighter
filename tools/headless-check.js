@@ -935,7 +935,41 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
     assert.ok(t.recovery > s2.recovery, "投げの空振り硬直は同じくらいの発生の技より長いはず");
     lines.push(`${CH[id].name} 硬直${t.recovery}F（${s2.name}は${s2.recovery}F）`);
   }
-  console.log(`OK 投げ: ガードできずダウン、8F以内のU＋Iで投げ抜け（9Fは不可）、掴める距離 カゲツ${kr}px・リン${rr}px、空振り ${lines.join("・")}`);
+  // ガード硬直が終わる頃にU＋Iを押していたら（相手の投げが先に決まっても）投げ抜けになる。どの方向キーを押していても同じ
+  function guardThenTech(pressBefore, hold) {
+    const st = closeGame("kagetsu", "rin", 52);
+    const r = st.fighters[1];
+    r.pose = POSE.BLOCK;
+    r.stun = 10;
+    const throwAt = 6;
+    const grabAt = throwAt + CH.kagetsu.moves.throw.startup - 1;
+    for (let i = 0; i < 60; i++) {
+      SF.game.step(st, [i === throwAt ? U | I : 0, hold | (i === grabAt - pressBefore ? U | I : 0)]);
+      if (r.pose === POSE.TECH) return "tech";
+      if (r.pose === POSE.DOWN) return "thrown";
+    }
+    return "none";
+  }
+  for (const hold of [0, BUTTON.LEFT, BUTTON.RIGHT, BUTTON.DOWN, BUTTON.DOWN | BUTTON.RIGHT]) {
+    for (let k = 0; k <= BT.throwTechWindow; k++) assert.strictEqual(guardThenTech(k, hold), "tech", `掴まれる${k}F前のU＋Iで投げ抜けになるはず（方向${hold}）`);
+    assert.strictEqual(guardThenTech(BT.throwTechWindow + 1, hold), "thrown", "掴まれる9F前のU＋Iでは投げ抜けにならないはず");
+  }
+  // どの方向キーを押していても投げが出る。硬直中にU＋Iを押して、すぐ方向キーを押しても投げが出る
+  for (const dir of [0, BUTTON.LEFT, BUTTON.RIGHT, BUTTON.DOWN, BUTTON.DOWN | BUTTON.LEFT, BUTTON.DOWN | BUTTON.RIGHT]) {
+    const st = closeGame("kagetsu", "rin", 60);
+    SF.game.step(st, [dir | U | I, 0]);
+    assert.strictEqual(st.fighters[0].move, "throw", `方向キー${dir}を押しながらでも投げが出るはず`);
+    const st2 = closeGame("kagetsu", "rin", 60);
+    st2.fighters[0].stun = 5;
+    st2.fighters[0].pose = POSE.BLOCK;
+    let thrown = false;
+    for (let i = 0; i < 10; i++) {
+      SF.game.step(st2, [i === 0 ? U | I : dir, 0]);
+      if (st2.fighters[0].move === "throw") thrown = true;
+    }
+    assert.ok(thrown, `硬直中のU＋Iのあとに方向キー${dir}を押しても投げが出るはず`);
+  }
+  console.log(`OK 投げ: ガードできずダウン、8F以内のU＋Iで投げ抜け（9Fは不可。掴まれる8F前までに押していても投げ抜け）、どの方向キーでも投げが出る、掴める距離 カゲツ${kr}px・リン${rr}px、空振り ${lines.join("・")}`);
 }
 
 // 練習相手：投げ抜けの設定なら投げ抜けする

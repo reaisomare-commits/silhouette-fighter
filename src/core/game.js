@@ -80,7 +80,9 @@
       landingTimer: 0, // 着地硬直の残りフレーム
       action: null, // ステップなど、途中で止められない動きの最中ならその種類（POSE と同じ名前）
       backstepRecovery: false, // 止まり際がバックステップのものか（攻撃を受けるとダメージが増える）
-      punishedGrab: false, // バックステップの止まり際に掴まれたか（投げのダメージが増える）
+      punishedGrab: false,
+      throwPressAge: 99, // U＋Iを押してから何フレームたったか（掴まれる少し前に押していても投げ抜けになる）
+      bufferAge: 0, // 先行入力を覚えてから何フレームたったか // バックステップの止まり際に掴まれたか（投げのダメージが増える）
       actionTimer: 0, // その動きの残りフレーム（ダッシュは走ったフレーム数）
       move: null, // 出している技の名前（moves の中の名前）
       moveFrame: 0, // 技を出してから何フレーム目か（押したフレームが1）
@@ -245,6 +247,9 @@
     if (f.tapForward > 0) f.tapForward -= 1;
     if (f.tapBack > 0) f.tapBack -= 1;
     if (f.lightAge < 99) f.lightAge += 1;
+    if (f.throwPressAge < 99) f.throwPressAge += 1;
+    if (f.bufferAge < 99) f.bufferAge += 1;
+    const oldBuffer = f.buffer;
     if (f.heavyAge < 99) f.heavyAge += 1;
     let dash = null;
     if (justPressed(input, f.prevInput, forwardBtn)) {
@@ -262,13 +267,15 @@
     if (light) f.lightAge = 0;
     if (heavy) f.heavyAge = 0;
     // UとIを（ほぼ）同時に押したら投げ。少しずれても THROW_INPUT_WINDOW フレーム以内なら同時押し
-    // 攻撃ボタンのあとに左右の移動キーを押したら、覚えていた攻撃は取り消す（移動が最後の入力）
+    // 攻撃ボタンのあとに左右の移動キーを押したら、覚えていた攻撃は取り消す（移動が最後の入力）。
+    // ただし投げは取り消さない。ほぼ同時（THROW_INPUT_WINDOW フレーム以内）に押した方向キーでも取り消さない
     const moved = justPressed(input, f.prevInput, forwardBtn) || justPressed(input, f.prevInput, backBtn);
-    if (moved && ["light", "heavy", "special", "throw"].includes(f.buffer)) f.buffer = null;
+    if (moved && ["light", "heavy", "special"].includes(f.buffer) && f.bufferAge > BATTLE.throwInputWindow) f.buffer = null;
     const win = BATTLE.throwInputWindow;
     const both = (light && f.heavyAge <= win) || (heavy && f.lightAge <= win);
     if (both) {
       f.buffer = "throw";
+      f.throwPressAge = 0;
       f.lightAge = 99;
       f.heavyAge = 99;
     } else if (justPressed(input, f.prevInput, BUTTON.SPECIAL)) f.buffer = "special";
@@ -276,6 +283,7 @@
     else if (light) f.buffer = "light";
     else if (justPressed(input, f.prevInput, BUTTON.JUMP)) f.buffer = "jump";
     else if (dash) f.buffer = dash;
+    if (f.buffer !== oldBuffer) f.bufferAge = 0;
   }
 
   function updateFighter(state, f, input) {
@@ -906,8 +914,10 @@
       def.landingTimer = 0;
       def.crouching = false;
       def.vx = 0;
-      def.buffer = null; // 掴まれる前に押していたものは投げ抜けにならない
-      def.techInput = false;
+      def.buffer = null;
+      // 掴まれる少し前（投げ抜けの受付と同じフレーム数以内）にU＋Iを押していたら、投げ抜けになる
+      // （ガード硬直が終わる頃に投げ返そうとしたら、相手の投げのほうが早かったとき）
+      def.techInput = def.throwPressAge <= BATTLE.throwTechWindow;
       // 相手を自分の目の前に引き寄せる
       const near = ((CHARACTERS[att.charId].width + CHARACTERS[def.charId].width) / 2 + 4) * S;
       def.x = att.x + att.facing * near;
