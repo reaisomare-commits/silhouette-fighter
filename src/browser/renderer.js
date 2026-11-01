@@ -633,7 +633,7 @@
         C.GROUND_Y + 14,
       );
       ctx.fillText(
-        `自分: ${CHARACTERS[me.charId].name}（1:カゲツ / 2:リン）　練習相手（3キー）: ${info.dummyLabel}　当たり判定の表示（Hキー）: ${info.showBoxes ? "あり" : "なし"}　種: ${info.seed}`,
+        `自分: ${CHARACTERS[me.charId].name}（1:カゲツ / 2:リン）　相手: ${info.opponentLabel}（3:練習相手 4:CPUの強さ 5:観戦）　当たり判定（H）: ${info.showBoxes ? "あり" : "なし"}`,
         16,
         C.GROUND_Y + 36,
       );

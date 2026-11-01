@@ -946,6 +946,160 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
   console.log(`OK 技のやられる範囲: 発生前・硬直中は${(m.hitbox.x1 + m.hitbox.x2) / 2}px、当たる時間は${m.hitbox.x2}pxまで伸び、伸ばした腕や刀にも当たる。対空技は上側が小さい`);
 }
 
+// 6. CPU（よわい・ふつう・つよい）
+require("../src/core/cpu.js");
+{
+  const LV = SF.cpu.LEVELS;
+  // CPU同士の試合。同じ種なら同じ結果になり、出す入力はボタンのビットだけ
+  function cpuMatch(seed, chars, levels, maxFrames = 60 * 60 * 6) {
+    const st = SF.game.createGame(seed, chars);
+    const cpus = levels.map((lv, i) => SF.cpu.createCpu(lv, seed * 31 + i));
+    for (let n = 0; n < maxFrames && st.round.phase !== SF.game.PHASE.MATCH_END; n++) {
+      const ins = [SF.cpu.input(cpus[0], st, 0), SF.cpu.input(cpus[1], st, 1)];
+      for (const x of ins) assert.ok(Number.isInteger(x) && x >= 0 && x < 128, "CPUの入力はボタンのビットだけのはず");
+      SF.game.step(st, ins);
+    }
+    return st;
+  }
+  const m1 = cpuMatch(3, ["kagetsu", "rin"], [1, 1]);
+  const m2 = cpuMatch(3, ["kagetsu", "rin"], [1, 1]);
+  assert.strictEqual(SF.game.hashState(m1), SF.game.hashState(m2), "同じ種のCPU同士の試合は同じ結果になるはず");
+  assert.strictEqual(m1.round.phase, SF.game.PHASE.MATCH_END, "CPU同士の試合が終わらない");
+
+  // 強いCPUは弱いCPUにほとんど勝つ（同じキャラ同士、左右も入れ替える）
+  const wins = {};
+  for (const [hi, lo] of [[1, 0], [2, 1], [2, 0]]) {
+    let w = 0;
+    let n = 0;
+    for (const id of ["kagetsu", "rin"]) {
+      for (let s = 1; s <= 5; s++) {
+        w += cpuMatch(s, [id, id], [hi, lo]).round.matchWinner === 0 ? 1 : 0;
+        w += cpuMatch(s, [id, id], [lo, hi]).round.matchWinner === 1 ? 1 : 0;
+        n += 2;
+      }
+    }
+    wins[`${LV[hi].label}対${LV[lo].label}`] = Math.round((100 * w) / n);
+    assert.ok(w / n >= 0.8, `${LV[hi].label}が${LV[lo].label}に勝てていない（${w}/${n}）`);
+  }
+
+  // 近づいてきて弱攻撃（下段も）をくり返す相手に、CPUがどれだけガードできるか。
+  // CPUが自分の技などで動けないときに来た攻撃は数えない
+  function guardRate(lv, low) {
+    let hit = 0;
+    let block = 0;
+    for (let seed = 1; seed <= 8; seed++) {
+      const st = newGame(seed, ["rin", "kagetsu"]);
+      const cpu = SF.cpu.createCpu(lv, seed);
+      const [a, b] = st.fighters;
+      let wait = 0;
+      let counted = false;
+      for (let i = 0; i < 1800; i++) {
+        a.health = CH.rin.health;
+        b.health = CH.kagetsu.health;
+        let inp = low && a.move === "crouchLight" ? D : 0;
+        if (SF.game.isFree(a) && a.onGround) {
+          if (Math.abs(a.x - b.x) / S > 80) inp = a.facing === 1 ? BUTTON.RIGHT : BUTTON.LEFT;
+          else if (wait <= 0) {
+            inp = low ? D | U : U;
+            wait = 40;
+          }
+        }
+        wait--;
+        const before = b.pose;
+        const free = SF.game.isFree(b) && b.onGround && !b.move;
+        SF.game.step(st, [inp, SF.cpu.input(cpu, st, 1)]);
+        if (a.move && a.moveFrame === 1) counted = free;
+        if (counted && b.pose === POSE.HIT && before !== POSE.HIT) hit++;
+        if (counted && b.pose === POSE.BLOCK && before !== POSE.BLOCK) block++;
+      }
+    }
+    return Math.round((100 * block) / (hit + block));
+  }
+  const guards = LV.map((_, i) => [guardRate(i, false), guardRate(i, true)]);
+  guards.forEach(([mid, lowRate], i) => {
+    assert.ok(Math.abs(mid - LV[i].guard) <= 15, `${LV[i].label}のガード率（中段）が表とずれている: ${mid}%`);
+    assert.ok(Math.abs(lowRate - LV[i].guard) <= 15, `${LV[i].label}のガード率（下段）が表とずれている: ${lowRate}%`);
+  });
+
+  // 投げをくり返す相手に、CPUがどれだけ投げ抜けできるか
+  function techRate(lv) {
+    let grabs = 0;
+    let techs = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const st = newGame(seed, ["rin", "kagetsu"]);
+      st.fighters[0].x = 420 * S;
+      st.fighters[1].x = 470 * S;
+      const cpu = SF.cpu.createCpu(lv, seed);
+      let grabbed = false;
+      for (let i = 0; i < 60; i++) {
+        // 投げ抜け以外でCPUがU＋Iを押さないよう、掴まれている間の入力だけ使う
+        const cin = SF.cpu.input(cpu, st, 1);
+        SF.game.step(st, [i === 0 ? U | I : 0, st.fighters[1].pose === POSE.THROWN ? cin : 0]);
+        if (st.fighters[1].pose === POSE.THROWN) grabbed = true;
+        if (st.fighters[1].pose === POSE.TECH) {
+          techs++;
+          break;
+        }
+      }
+      if (grabbed) grabs++;
+    }
+    return Math.round((100 * techs) / grabs);
+  }
+  const techs = LV.map((_, i) => techRate(i));
+  techs.forEach((r, i) => assert.ok(Math.abs(r - LV[i].tech) <= 15, `${LV[i].label}の投げ抜け率が表とずれている: ${r}%`));
+  assert.strictEqual(techs[0], 0, "よわいCPUは投げ抜けしないはず");
+
+  // 前ジャンプで跳び込んでくる相手に、CPUがどれだけ対空技を出すか
+  function antiAirRate(lv) {
+    let jumps = 0;
+    let aa = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const st = newGame(seed, ["rin", "kagetsu"]);
+      st.fighters[0].x = 300 * S;
+      st.fighters[1].x = 480 * S;
+      const cpu = SF.cpu.createCpu(lv, seed);
+      jumps++;
+      for (let i = 0; i < 70; i++) {
+        SF.game.step(st, [i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0, SF.cpu.input(cpu, st, 1)]);
+        if (st.fighters[1].move === "crouchSpecial") {
+          aa++;
+          break;
+        }
+      }
+    }
+    return Math.round((100 * aa) / jumps);
+  }
+  const aas = LV.map((_, i) => antiAirRate(i));
+  aas.forEach((r, i) => assert.ok(Math.abs(r - LV[i].antiAir) <= 20, `${LV[i].label}の対空を出す率が表とずれている: ${r}%`));
+
+  // 連続技：ジャブが当たったあと、どれだけ最後（突進拳）までつなぐか
+  function comboRate(lv) {
+    let full = 0;
+    const N = 40;
+    for (let seed = 1; seed <= N; seed++) {
+      const st = newGame(seed, ["rin", "kagetsu"]);
+      st.fighters[0].x = 440 * S;
+      st.fighters[1].x = 500 * S;
+      const cpu = SF.cpu.createCpu(lv, seed);
+      // CPUを左に置いて、何もしない相手にジャブを当てさせる
+      let usedSpecial = false;
+      for (let i = 0; i < 120; i++) {
+        const cin = SF.cpu.input(cpu, st, 0);
+        SF.game.step(st, [i === 0 ? U : cin & ~(BUTTON.LEFT | BUTTON.RIGHT) & (i < 3 ? 0 : 127), 0]);
+        if (st.fighters[0].move === "special") usedSpecial = true;
+      }
+      if (usedSpecial) full++;
+    }
+    return Math.round((100 * full) / N);
+  }
+  const combos = LV.map((_, i) => comboRate(i));
+  combos.forEach((r, i) => assert.ok(Math.abs(r - LV[i].combo) <= 20, `${LV[i].label}の連続技を最後までつなぐ率が表とずれている: ${r}%`));
+
+  const show = (arr) => arr.map((r, i) => `${LV[i].label}${r}%`).join("・");
+  console.log(`OK CPU: 同じ種なら同じ試合、勝率 ${Object.entries(wins).map(([k, v]) => `${k} ${v}%`).join("・")}`);
+  console.log(`OK CPUの強さ: ガード（中段/下段） ${guards.map((g, i) => `${LV[i].label}${g[0]}/${g[1]}%`).join("・")}、投げ抜け ${show(techs)}、対空 ${show(aas)}、連続技を最後まで ${show(combos)}`);
+}
+
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める
 const t0 = process.hrtime.bigint();
 for (let i = 0; i < 100; i++) runMatch(i + 1, 3600);

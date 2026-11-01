@@ -11,13 +11,22 @@
   let state = SF.game.createGame(seed, chars);
   const keyboard = SF.keyboard.createKeyboard(root);
   const renderer = SF.renderer.createRenderer(document.getElementById("screen"));
-  // 右の相手は仮の練習相手が動かす（CPUは制作順5で作る）
+  // 右の相手はCPU（4キーで強さを切り替え）か、練習相手（3キーで動きを切り替え）
   const dummy = SF.dummy.createDummy();
+  let opponent = "cpu"; // "cpu" か "dummy"
+  let cpuLevel = 1; // 0:よわい 1:ふつう 2:つよい
+  let watch = false; // 5キー：左もCPUにして観戦する
+  let cpus = [];
   let showBoxes = false;
 
+  let matchCount = 0;
   function newMatch() {
-    state = SF.game.createGame(seed, chars);
+    matchCount += 1;
+    state = SF.game.createGame(seed + matchCount, chars);
+    // CPUは試合ごとに作り直す（左のCPUは右と別の種）
+    cpus = [SF.cpu.createCpu(cpuLevel, seed + matchCount * 2), SF.cpu.createCpu(cpuLevel, seed + matchCount * 2 + 1)];
   }
+  newMatch();
 
   root.addEventListener("keydown", (e) => {
     // キャラ選択画面ができるまでの仮の切り替え：1キーでカゲツ、2キーでリン。
@@ -27,7 +36,23 @@
       chars = [pick, pick === "kagetsu" ? "rin" : "kagetsu"];
       newMatch();
     }
-    if (e.code === "Digit3" || e.code === "Numpad3") SF.dummy.nextMode(dummy);
+    if (e.code === "Digit3" || e.code === "Numpad3") {
+      // CPUから練習相手に切り替えたときは、今の動きのまま。練習相手のときは次の動きへ
+      if (opponent === "dummy") SF.dummy.nextMode(dummy);
+      opponent = "dummy";
+      watch = false;
+    }
+    if (e.code === "Digit4" || e.code === "Numpad4") {
+      // 練習相手からCPUに切り替えたときは、今の強さのまま。CPUのときは次の強さへ
+      if (opponent === "cpu") cpuLevel = (cpuLevel + 1) % SF.cpu.LEVELS.length;
+      opponent = "cpu";
+      newMatch();
+    }
+    if (e.code === "Digit5" || e.code === "Numpad5") {
+      watch = !watch;
+      opponent = "cpu";
+      newMatch();
+    }
     if (e.code === "KeyH") showBoxes = !showBoxes;
     if (e.code === "Enter" && state.round.phase === SF.game.PHASE.MATCH_END) newMatch();
   });
@@ -40,7 +65,7 @@
   let updates = 0;
   let draws = 0;
   let counterStart = lastTime;
-  const info = { updatesPerSec: 0, drawsPerSec: 0, input: 0, seed, dummyLabel: "", showBoxes };
+  const info = { updatesPerSec: 0, drawsPerSec: 0, input: 0, seed, opponentLabel: "", showBoxes };
 
   function frame(now) {
     accumulator += now - lastTime;
@@ -49,7 +74,10 @@
     let steps = 0;
     while (accumulator >= STEP_MS && steps < MAX_STEPS_PER_DRAW) {
       input = keyboard.read();
-      SF.game.step(state, [input, SF.dummy.input(dummy, state, 1)]);
+      const left = watch ? SF.cpu.input(cpus[0], state, 0) : input;
+      const right = opponent === "cpu" ? SF.cpu.input(cpus[1], state, 1) : SF.dummy.input(dummy, state, 1);
+      if (watch) input = left;
+      SF.game.step(state, [left, right]);
       accumulator -= STEP_MS;
       steps++;
       updates++;
@@ -67,7 +95,9 @@
     }
 
     info.input = input;
-    info.dummyLabel = SF.dummy.MODES[dummy.mode].label;
+    const levelLabel = SF.cpu.LEVELS[cpuLevel].label;
+    info.opponentLabel =
+      opponent === "cpu" ? `CPU ${levelLabel}${watch ? "（観戦中：左もCPU）" : ""}` : `練習相手 ${SF.dummy.MODES[dummy.mode].label}`;
     info.showBoxes = showBoxes;
     renderer.draw(state, info);
     requestAnimationFrame(frame);
