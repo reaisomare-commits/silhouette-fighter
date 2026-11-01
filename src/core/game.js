@@ -207,6 +207,7 @@
   //   ・U → I（リンは U → U → I も）
   function cancelTarget(state, f, down) {
     if (!f.moveHit || !GROUND_NORMALS.includes(f.move)) return null;
+    if (moveData(f).noCancel) return null;
     const b = f.buffer;
     if (b === "special") return specialName(state, f, down);
     if (!isLightMove(f.move)) return null;
@@ -546,6 +547,32 @@
     return { left: x - w / 2, right: x + w / 2, top: y - fighterHeight(f), bottom: y };
   }
 
+  // 技を出している間の、伸ばした手足・刀のやられる範囲。当たり始めてから技が終わるまで、
+  // 技の当たる範囲と同じくらいの所までやられる範囲が伸びる（hurtExtend があればその範囲）
+  function limbHurtbox(f) {
+    const m = moveData(f);
+    if (!m || !m.hitbox || m.kind === "throw" || f.moveFrame < m.startup) return null;
+    if (!hurtbox(f)) return null;
+    return boxAt(f, m.hurtExtend || m.hitbox);
+  }
+
+  // やられる範囲をすべて（体と、伸ばした手足）
+  function hurtboxes(f) {
+    return [hurtbox(f), limbHurtbox(f)].filter(Boolean);
+  }
+
+  // box がどれかのやられる範囲に当たっていたら、その範囲を返す
+  function touching(box, f) {
+    return hurtboxes(f).find((b) => overlap(box, b)) || null;
+  }
+
+  // 同時に当たったときの強さ。強い方だけが当たり、同じなら相打ち（投げ＜弱＜強・必殺技）
+  function hitRank(name) {
+    if (name === "throw") return 0;
+    if (name === "standLight" || name === "crouchLight" || name === "airLight") return 1;
+    return 2;
+  }
+
   // 当たる範囲（技の先）。当たる時間でなければ null
   function boxAt(f, h) {
     const x = f.x / S;
@@ -758,29 +785,36 @@
     f.downFrame = 0;
   }
 
-  // 両方の技（と飛び道具）の当たりを調べる。同時に当たったら両方当たる（相打ち）。
-  // 打撃が先で、そのあと投げ。打撃を受けた側の投げは出ない
+  // 両方の技（と飛び道具）の当たりを調べる。
+  // 同時に当たったら強い方だけが当たる（弱と強なら強）。同じ強さなら両方当たる（相打ち）。
+  // 打撃が先で、そのあと投げ。打撃を受けた側の投げは出ない（投げと攻撃が同時なら攻撃が勝つ）
   function checkHits(state) {
     const hits = [];
     for (let i = 0; i < 2; i++) {
       const att = state.fighters[i];
       const def = state.fighters[1 - i];
       const box = hitbox(att);
-      const body = hurtbox(def);
-      if (box && body && overlap(box, body)) hits.push([att, def, moveData(att), box, body, null]);
+      const body = box && touching(box, def);
+      if (body) hits.push({ att, def, m: moveData(att), box, body, p: null, rank: hitRank(att.move) });
     }
     for (const p of state.projectiles) {
       const att = state.fighters[p.owner];
       const def = state.fighters[1 - p.owner];
       const box = projectileBox(p);
-      const body = hurtbox(def);
-      if (body && overlap(box, body)) {
-        p.dead = true;
-        hits.push([att, def, CHARACTERS[att.charId].moves[p.move], box, body, p]);
-      }
+      const body = touching(box, def);
+      if (body) hits.push({ att, def, m: CHARACTERS[att.charId].moves[p.move], box, body, p, rank: hitRank(p.move) });
+    }
+    // 両方が当てていたら、相手より弱い方の当たりは消す
+    const best = [0, 1].map((i) => Math.max(-1, ...hits.filter((h) => h.att === state.fighters[i]).map((h) => h.rank)));
+    const win = hits.filter((h) => {
+      const other = best[1 - state.fighters.indexOf(h.att)];
+      return other < 0 || h.rank >= other;
+    });
+    for (const h of win) {
+      if (h.p) h.p.dead = true;
+      applyHit(state, h.att, h.def, h.m, h.box, h.body, h.p);
     }
     state.projectiles = state.projectiles.filter((p) => !p.dead);
-    for (const [att, def, m, box, body, p] of hits) applyHit(state, att, def, m, box, body, p);
     checkThrows(state);
   }
 
@@ -1050,6 +1084,7 @@
     fighterHeight,
     hurtbox,
     hitbox,
+    limbHurtbox,
     grabBox,
     projectileBox,
     shadowStitchBox,

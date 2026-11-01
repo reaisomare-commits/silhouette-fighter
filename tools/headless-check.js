@@ -734,6 +734,8 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
   assert.ok(cancels("rin", U, U, "standLight", 55), "リンは U → U をつなげるはず");
   assert.ok(cancels("kagetsu", U, O, "standLight"), "当たった柄打ちから飛刃が出るはず");
   assert.ok(!cancels("kagetsu", U, O, "standLight", 400), "空振りした技からはキャンセルできないはず");
+  assert.ok(!cancels("kagetsu", D | I, O, "crouchHeavy"), "カゲツの S+I はキャンセルできないはず");
+  assert.ok(!cancels("rin", D | I, O, "crouchHeavy", 55), "リンの S+I はキャンセルできないはず");
   // リンの U → U → U は3回目が途中から出ない（2回目を最後まで出しきってから出る）
   {
     const st = closeGame("rin", "kagetsu", 55);
@@ -756,7 +758,7 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
     }
     assert.strictEqual(thirdCanceled, false, "リンの U → U → U の3回目はつながらないはず");
   }
-  console.log("OK キャンセルできない組み合わせ: カゲツ U→U、I→I、リン U→U→U、空振りから必殺技 はつながらない");
+  console.log("OK キャンセルできない組み合わせ: カゲツ U→U、I→I、リン U→U→U、S+I から必殺技、空振りから必殺技 はつながらない");
 }
 // コンボ補正の割合
 {
@@ -859,6 +861,50 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
   }
   assert.ok(teched, "投げ抜けの練習相手が投げ抜けしない");
   console.log("OK 練習相手: 投げ抜けする設定");
+}
+
+// 同時に当たったとき：弱と強なら強だけ、同じ強さなら相打ち、投げと攻撃なら攻撃
+{
+  // 左（カゲツ）が btnA を0F目に、右（リン）が btnB を delayF目に押す
+  function clash(btnA, btnB, delay, gap = 70) {
+    const st = closeGame("kagetsu", "rin", gap);
+    const [a, b] = st.fighters;
+    for (let i = 0; i < 30; i++) SF.game.step(st, [i === 0 ? btnA : 0, i === delay ? btnB : 0]);
+    return { a: CH.kagetsu.health - a.health, b: CH.rin.health - b.health, aPose: a.pose, bPose: b.pose };
+  }
+  const kh = CH.kagetsu.moves.standHeavy.startup;
+  const rl = CH.rin.moves.standLight.startup;
+  const lh = clash(I, U, kh - rl);
+  assert.strictEqual(lh.a, 0, "弱と強が同時なら弱は当たらないはず");
+  assert.strictEqual(lh.b, CH.kagetsu.moves.standHeavy.damage, "弱と強が同時なら強が当たるはず");
+  const kl = CH.kagetsu.moves.standLight.startup;
+  const ll = clash(U, U, kl - rl);
+  assert.ok(ll.a > 0 && ll.b > 0, "同じ強さなら相打ちのはず");
+  const kt = CH.kagetsu.moves.throw.startup;
+  const tl = clash(U | I, U, kt - rl);
+  assert.ok(tl.a > 0 && tl.b === 0, "投げと攻撃が同時なら攻撃が勝つはず");
+  console.log("OK 同時に当たったとき: 弱と強なら強、同じ強さなら相打ち、投げと攻撃なら攻撃");
+}
+
+// 技を出すと、当たる範囲のあたりまでやられる範囲が伸びる（空振りした刀を叩ける）
+{
+  const st = closeGame("kagetsu", "rin", 200); // 大振り斬りが届かない距離
+  const [a, b] = st.fighters;
+  const m = CH.kagetsu.moves.standHeavy;
+  let hpB = b.health;
+  for (let i = 0; i < 40; i++) {
+    // カゲツの大振り斬りが空振りした直後に、リンがジャブで刀を叩く
+    SF.game.step(st, [i === 0 ? I : 0, i === m.startup + m.active ? U : 0]);
+  }
+  assert.strictEqual(b.health, hpB, "大振り斬りは届かないはず");
+  assert.ok(a.health < CH.kagetsu.health, "空振りした刀にジャブが当たるはず");
+  // 対空技は上に伸びるやられる範囲が少ない
+  for (const id of ["kagetsu", "rin"]) {
+    const aa = CH[id].moves.crouchSpecial;
+    assert.ok(aa.hurtExtend.y2 < aa.hitbox.y2 - 50, "対空技の上側のやられる範囲は小さいはず");
+    assert.ok(aa.hurtExtend.y2 <= CH[id].height, "対空技のやられる範囲は頭の高さまで");
+  }
+  console.log("OK 技のやられる範囲: 空振りした技の先を叩ける。対空技は上側が小さい");
 }
 
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める

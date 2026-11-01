@@ -468,8 +468,8 @@
     // 当たり判定を見えるようにする（Hキー）。青＝やられる範囲、赤＝当たる範囲、緑＝投げの掴める範囲、黄色の点線＝影縫い範囲
     function drawBoxes(state) {
       for (const f of state.fighters) {
-        const body = SF.game.hurtbox(f);
-        if (body) {
+        for (const body of [SF.game.hurtbox(f), SF.game.limbHurtbox(f)]) {
+          if (!body) continue;
           ctx.fillStyle = "rgba(60, 140, 255, 0.25)";
           ctx.strokeStyle = "rgba(60, 140, 255, 0.9)";
           ctx.lineWidth = 1;
