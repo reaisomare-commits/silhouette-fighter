@@ -27,7 +27,9 @@
         recovery: 5, // 止まってから動けるまで（フレーム）
       },
       // 後ろを素早く2回：バックステップ
-      backDash: { frames: 14, speed: 4.5, recovery: 6 }, // 約63ピクセル下がる
+      // 後ろを素早く2回：バックステップ。下がっている間は投げられない。
+      // 初めの invincible フレームは攻撃も当たらない（無敵）。止まり際（recovery）に攻撃や投げを受けるとダメージが増える
+      backDash: { frames: 14, speed: 4.5, recovery: 12, invincible: 8 }, // 約63ピクセル下がる
       health: 1000, // 体力
       // 技の表。時間はフレーム（1F＝1/60秒）。
       //   startup: 発生（ボタンを押したフレームを1として、何F目に当たり始めるか）
@@ -61,8 +63,8 @@
         // 昇り斬り：対空。頭の上まで届く。外すと大きな隙
         // 上に伸びるやられる範囲は頭の高さまで（上から来る相手に負けにくい）
         crouchSpecial: { name: "昇り斬り", kind: "special", startup: 8, active: 5, recovery: 35, hitAdv: "down", blockAdv: -25, damage: 100, guard: "mid", hitbox: { x1: 0, x2: 85, y1: 40, y2: 240 }, hurtExtend: { x1: 0, x2: 70, y1: 40, y2: 170 }, push: 20 },
-        // 投げ：空振りすると、同じくらいの発生の柄打ち（硬直10F）より長く動けない
-        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 17, damage: 100, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 } },
+        // 投げ：空振りすると、同じくらいの発生の柄打ち（硬直10F）よりずっと長く動けない
+        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 22, damage: 100, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 } },
       },
     },
     rin: {
@@ -85,7 +87,7 @@
         minFrames: 8, // すぐ離しても最低これだけは走る
         recovery: 6, // 離してから止まるまでのブレーキ（フレーム）
       },
-      backDash: { frames: 12, speed: 5, recovery: 4 }, // 約60ピクセル下がる
+      backDash: { frames: 12, speed: 5, recovery: 10, invincible: 8 }, // 約60ピクセル下がる
       health: 900,
       lightChainMax: 2, // リンはUを2回つないでからIにもつなげられる
       moves: {
@@ -99,8 +101,8 @@
         special: { name: "突進拳", kind: "special", startup: 10, active: 3, recovery: 24, hitAdv: "down", blockAdv: -2, damage: 80, guard: "mid", hitbox: { x1: 15, x2: 75, y1: 65, y2: 115 }, push: 24, lunge: { from: 2, to: 12, speed: 9 } },
         // 跳び蹴り上げ：対空
         crouchSpecial: { name: "跳び蹴り上げ", kind: "special", startup: 6, active: 4, recovery: 30, hitAdv: "down", blockAdv: -22, damage: 85, guard: "mid", hitbox: { x1: -5, x2: 70, y1: 50, y2: 210 }, hurtExtend: { x1: -5, x2: 55, y1: 50, y2: 135 }, push: 20 },
-        // 投げ：掴める範囲がカゲツより少し広い。空振りすると、同じくらいの発生のジャブ（硬直8F）より長く動けない
-        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 16, damage: 130, hitbox: { x1: 0, x2: 65, y1: 0, y2: 130 } },
+        // 投げ：掴める範囲がカゲツより少し広い。空振りすると、同じくらいの発生のジャブ（硬直8F）よりずっと長く動けない
+        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 21, damage: 130, hitbox: { x1: 0, x2: 65, y1: 0, y2: 130 } },
       },
     },
   };
@@ -120,6 +122,7 @@
     comboScaleStep: 10,
     comboScaleMin: 10,
     chipRate: 10, // 必殺技をガードしたときに減る体力（ダメージの何%か）
+    backstepPunishRate: 125, // バックステップの止まり際に攻撃・投げを受けたときのダメージ（%。連続技の1発目だけ）
     throwInputWindow: 2, // UとIをこのフレーム数以内のずれで押せば「同時押し」とみなす
     throwTechWindow: 8, // 投げが決まってから何フレーム以内にU＋Iを押せば投げ抜けできるか
     throwFinish: 20, // 投げきったあと、投げた側が動けるまで（F）

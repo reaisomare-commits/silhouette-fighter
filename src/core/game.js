@@ -79,6 +79,8 @@
       health: CHARACTERS[charId].health,
       landingTimer: 0, // 着地硬直の残りフレーム
       action: null, // ステップなど、途中で止められない動きの最中ならその種類（POSE と同じ名前）
+      backstepRecovery: false, // 止まり際がバックステップのものか（攻撃を受けるとダメージが増える）
+      punishedGrab: false, // バックステップの止まり際に掴まれたか（投げのダメージが増える）
       actionTimer: 0, // その動きの残りフレーム（ダッシュは走ったフレーム数）
       move: null, // 出している技の名前（moves の中の名前）
       moveFrame: 0, // 技を出してから何フレーム目か（押したフレームが1）
@@ -489,7 +491,8 @@
   }
 
   // 止まり際（動けない時間）に入る
-  function startRecovery(f, frames, keepSpeed) {
+  function startRecovery(f, frames, keepSpeed, backstep = false) {
+    f.backstepRecovery = backstep;
     f.action = POSE.DASH_RECOVERY;
     f.pose = POSE.DASH_RECOVERY;
     f.actionTimer = frames;
@@ -502,8 +505,8 @@
     if (f.action === POSE.STEP || f.action === POSE.BACKSTEP) {
       f.actionTimer -= 1;
       if (f.actionTimer <= 0) {
-        const rec = f.action === POSE.STEP ? st.forwardDash.recovery : st.backDash.recovery;
-        startRecovery(f, rec, false);
+        const back = f.action === POSE.BACKSTEP;
+        startRecovery(f, back ? st.backDash.recovery : st.forwardDash.recovery, false, back);
       }
     } else if (f.action === POSE.RUN) {
       f.actionTimer += 1;
@@ -555,8 +558,20 @@
   }
 
   // やられる範囲（体）。ピクセルの四角 { left, right, top, bottom }。攻撃が当たらない状態なら null
+  // バックステップの初めの何フレームかは無敵（攻撃も投げも当たらない）
+  function backstepInvincible(f) {
+    const bd = CHARACTERS[f.charId].backDash;
+    return f.action === POSE.BACKSTEP && bd.frames - f.actionTimer < (bd.invincible || 0);
+  }
+
+  // バックステップの止まり際（隙）か。ここで攻撃や投げを受けるとダメージが増える
+  function backstepPunishable(f) {
+    return f.action === POSE.DASH_RECOVERY && f.backstepRecovery;
+  }
+
   function hurtbox(f) {
     if (f.pose === POSE.DOWN || f.pose === POSE.LAUNCH || f.pose === POSE.THROWN) return null;
+    if (backstepInvincible(f)) return null;
     const w = CHARACTERS[f.charId].width;
     const x = f.x / S;
     const y = f.y / S;
@@ -712,7 +727,11 @@
   }
 
   // コンボ補正をかけたダメージを与える。n発目は 100% − 10%×(n−1)（最低10%）
-  function dealDamage(state, att, def, amount) {
+  function dealDamage(state, att, def, amount, punish = false) {
+    if (punish && def.combo === 0) {
+      amount = Math.floor((amount * BATTLE.backstepPunishRate) / 100);
+      state.effects.push({ kind: "text", text: "隙狩り！", x: def.x / S, y: def.y / S - 190, life: 45 });
+    }
     def.combo += 1;
     const rate = comboRate(def.combo);
     const dmg = Math.floor((amount * rate) / 100);
@@ -768,7 +787,7 @@
       state.hitstop = Math.max(state.hitstop, BATTLE.hitstopBlock);
       state.effects.push({ kind: "block", x: fx, y: fy, life: 12 });
     } else {
-      record(state, att, moveName, "damage", dealDamage(state, att, def, m.damage));
+      record(state, att, moveName, "damage", dealDamage(state, att, def, m.damage, backstepPunishable(def)));
       releaseGrab(state, def);
       def.move = null;
       def.action = null;
@@ -848,9 +867,9 @@
     checkThrows(state);
   }
 
-  // 投げられる状態か：地上にいて、のけぞり・ガード硬直・ダウン中でない
+  // 投げられる状態か：地上にいて、のけぞり・ガード硬直・ダウン中・バックステップで下がっている最中・ジャンプの着地硬直中でない
   function throwable(f) {
-    return f.onGround && f.stun === 0 && !f.grab && f.pose !== POSE.DOWN && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN;
+    return f.onGround && f.stun === 0 && f.action !== POSE.BACKSTEP && f.pose !== POSE.LANDING && !f.grab && f.pose !== POSE.DOWN && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN;
   }
 
   function checkThrows(state) {
@@ -876,6 +895,7 @@
       att.grab = { timer: 0 };
       att.pose = POSE.THROW;
       att.vx = 0;
+      def.punishedGrab = backstepPunishable(def);
       def.pose = POSE.THROWN;
       def.move = null;
       def.action = null;
@@ -930,7 +950,8 @@
         att.stun = BATTLE.throwFinish;
         def.techInput = false;
         record(state, att, "throw", "hits");
-        record(state, att, "throw", "damage", dealDamage(state, att, def, m.damage));
+        record(state, att, "throw", "damage", dealDamage(state, att, def, m.damage, def.punishedGrab));
+        def.punishedGrab = false;
         knockDown(def);
         def.pushVx = (att.facing * 60 * S) / 5;
         state.hitstop = Math.max(state.hitstop, BATTLE.hitstopHit);

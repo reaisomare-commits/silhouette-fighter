@@ -186,6 +186,75 @@ console.log(`OK ジャンプ: カゲツ 高さ${kj.height}px/${kj.air}F、リン
   );
 }
 
+// バックステップ：初めは無敵、下がっている間は投げられない、止まり際に攻撃・投げを受けるとダメージが増える。
+// ジャンプの着地硬直中も投げられない
+{
+  const CHB = SF.characters.CHARACTERS;
+  const rate = SF.characters.BATTLE.backstepPunishRate;
+  // 右のキャラがバックステップし、左のキャラが t フレーム目にボタンを押す（当たるまで間合いを保つ）
+  function trial(att, def, btn, t, gap) {
+    const st = newGame(1, [att, def]);
+    st.fighters[0].x = 400 * S;
+    st.fighters[1].x = (400 + gap) * S;
+    const seq = [BUTTON.RIGHT, BUTTON.RIGHT, 0, 0, BUTTON.RIGHT];
+    for (let i = 0; i < 80; i++) {
+      const before = { hp: st.fighters[1].health, action: st.fighters[1].action, pose: st.fighters[1].pose };
+      if (i <= t + 20) st.fighters[0].x = st.fighters[1].x - gap * S;
+      SF.game.step(st, [i === t ? btn : 0, seq[i] ?? 0]);
+      if (st.fighters[1].health < before.hp) return { dmg: before.hp - st.fighters[1].health, when: before.action || before.pose };
+    }
+    return { dmg: 0 };
+  }
+  for (const [att, def] of [["kagetsu", "rin"], ["rin", "kagetsu"]]) {
+    const bd = CHB[def].backDash;
+    const start = 4; // 5フレーム目（3回目の入力）でバックステップが始まる
+    const light = CHB[att].moves.standLight;
+    const thr = CHB[att].moves.throw;
+    // 無敵：初めの invincible フレームに当たる時間が重なる弱攻撃は当たらない
+    const early = trial(att, def, BUTTON.LIGHT, start + bd.invincible - light.startup - 2, 50);
+    assert.strictEqual(early.dmg, 0, `${CHB[def].name}のバックステップの初めは無敵のはず`);
+    // 下がっている間は投げられない
+    for (let t = start - 4; t < start + bd.frames - thr.startup; t++) {
+      const r = trial(att, def, BUTTON.LIGHT | BUTTON.HEAVY, t, 50);
+      assert.ok(r.dmg === 0 || r.when === POSE.DASH_RECOVERY, `${CHB[def].name}のバックステップ中に投げられた（${t}F目）`);
+    }
+    // 止まり際（隙）に当てるとダメージが増える
+    const recT = start + bd.frames + 2 - light.startup;
+    const pun = trial(att, def, BUTTON.LIGHT, recT, 50);
+    assert.strictEqual(pun.when, POSE.DASH_RECOVERY);
+    assert.strictEqual(pun.dmg, Math.floor((light.damage * rate) / 100), `${CHB[def].name}のバックステップの隙に当てたらダメージが増えるはず`);
+    const thrPun = trial(att, def, BUTTON.LIGHT | BUTTON.HEAVY, start + bd.frames + 2 - thr.startup, 50);
+    assert.strictEqual(thrPun.dmg, Math.floor((thr.damage * rate) / 100), `${CHB[def].name}のバックステップの隙を投げたらダメージが増えるはず`);
+  }
+  // ジャンプの着地硬直中は投げられない：着地硬直の各フレームに、投げの掴める時間を重ねる
+  function landingThrow(lag) {
+    const run = (t) => {
+      const st = newGame(1, ["kagetsu", "rin"]);
+      st.fighters[0].x = 400 * S;
+      st.fighters[1].x = 450 * S;
+      let landF = -1;
+      for (let i = 0; i < 80; i++) {
+        st.fighters[0].x = st.fighters[1].x - 50 * S;
+        SF.game.step(st, [i === t ? BUTTON.LIGHT | BUTTON.HEAVY : 0, i === 0 ? BUTTON.JUMP : 0]);
+        if (landF < 0 && st.fighters[1].pose === POSE.LANDING) landF = i;
+        if (st.fighters[1].pose === POSE.THROWN) return { thrown: i, landF };
+      }
+      return { thrown: -1, landF };
+    };
+    const landF = run(-1).landF;
+    const startup = CHB.kagetsu.moves.throw.startup;
+    const res = [];
+    for (let k = 0; k < lag; k++) res.push(run(landF + k - startup + 1).thrown);
+    return { landF, res };
+  }
+  const lt = landingThrow(CHB.rin.landingLag);
+  assert.ok(lt.landF > 0);
+  assert.ok(lt.res.every((th) => th < 0 || th >= lt.landF + CHB.rin.landingLag), `ジャンプの着地硬直中は投げられないはず: ${lt.res}`);
+  console.log(
+    `OK バックステップ: 初めの${CHB.kagetsu.backDash.invincible}Fは無敵、下がっている間は投げられない、止まり際（カゲツ${CHB.kagetsu.backDash.recovery}F・リン${CHB.rin.backDash.recovery}F）に受けるとダメージ${rate}%。ジャンプの着地硬直中も投げられない`,
+  );
+}
+
 // 4. 戦い：攻撃・ガード・体力・ラウンド
 const CH = SF.characters.CHARACTERS;
 const U = BUTTON.LIGHT;
