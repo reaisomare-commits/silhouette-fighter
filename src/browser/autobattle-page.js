@@ -127,14 +127,25 @@
     finish(`途中で中止しました（${run.done}試合ぶんの結果）`);
   }
 
-  function saveCsv() {
+  // CSVを保存する。claude.ai の中で開いたときはそちらの保存のしくみを使い、ふつうのブラウザではそのままダウンロードする
+  async function saveCsv() {
     if (!last) return;
-    const csv = "﻿" + AB.toCsv(last.sum, last.settings); // 先頭の印（BOM）でExcelでも文字化けしない
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const a = doc.createElement("a");
+    const csv = "\ufeff" + AB.toCsv(last.sum, last.settings); // 先頭の印（BOM）でExcelでも文字化けしない
     const s = last.setup;
+    const filename = `auto-battle_${s.chars[0]}${s.levels[0]}_vs_${s.chars[1]}${s.levels[1]}_${last.sum.matches}.csv`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const host = root.claude && root.claude.use ? await root.claude.use("downloads").catch(() => null) : null;
+    if (host) {
+      try {
+        await host.save({ filename, data: blob });
+      } catch (e) {
+        if (e && e.code !== "declined") els.status.textContent = "CSVを保存できませんでした";
+      }
+      return;
+    }
+    const a = doc.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `auto-battle_${s.chars[0]}${s.levels[0]}_vs_${s.chars[1]}${s.levels[1]}_${last.sum.matches}.csv`;
+    a.download = filename;
     doc.body.appendChild(a);
     a.click();
     a.remove();
