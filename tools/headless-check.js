@@ -1302,6 +1302,90 @@ require("../src/core/learned-data.js");
   console.log("OK メニュー: モード選択、キャラと強さの選択（左右別の強さ・同キャラ・端で止まる・選んだものを覚える）から試合の設定ができる");
 }
 
+// キーコンフィグ：キーの割り当てを変える・入れ替える・保存から読む・初期値にもどす
+{
+  require("../src/core/keyconfig.js");
+  require("../src/browser/keyboard.js");
+  const KC = SF.keyconfig;
+  const B = SF.input.BUTTON;
+
+  // モード選択の最後「キーコンフィグ」で、キーコンフィグの画面を開く合図が返る
+  const mm = SF.menu.createMenu();
+  SF.menu.press(mm, "ok");
+  SF.menu.press(mm, "up");
+  assert.deepStrictEqual(SF.menu.press(mm, "ok"), { keys: true }, "キーコンフィグが選べない");
+
+  // 画面：強攻撃を K にする → 次の行（必殺技）へ進む
+  const b = KC.defaults();
+  const sc = KC.createScreen();
+  for (let i = 0; i < 5; i++) KC.press(sc, b, "down");
+  assert.strictEqual(KC.ROWS[sc.cursor].id, "HEAVY");
+  KC.press(sc, b, "ok");
+  assert.ok(sc.waiting, "Enterでキー待ちにならない");
+  assert.strictEqual(KC.pressKey(sc, b, "Tab"), null, "使えないキーが入ってしまう");
+  assert.ok(sc.waiting, "使えないキーでキー待ちが終わってしまう");
+  assert.deepStrictEqual(KC.pressKey(sc, b, "KeyK"), { changed: true });
+  assert.strictEqual(b.HEAVY, "KeyK");
+  assert.strictEqual(KC.ROWS[sc.cursor].id, "SPECIAL", "決めたら次の操作へ進まない");
+  // 必殺技を U（弱攻撃のキー）にすると、弱攻撃は O に入れ替わる
+  KC.press(sc, b, "ok");
+  KC.pressKey(sc, b, "KeyU");
+  assert.strictEqual(b.SPECIAL, "KeyU");
+  assert.strictEqual(b.LIGHT, "KeyO", "同じキーにしたとき入れ替わらない");
+  // Esc でキー待ちをやめると変わらない
+  KC.press(sc, b, "up");
+  KC.press(sc, b, "ok");
+  KC.pressKey(sc, b, "Escape");
+  assert.ok(!sc.waiting && b.SPECIAL === "KeyU", "Escでやめられない");
+  // 保存して読み込むと同じ。こわれたデータ（同じキーが2つ）は初期値にもどる
+  const saved = JSON.parse(JSON.stringify(KC.toSaved(b)));
+  assert.deepStrictEqual(KC.fromSaved(saved), b, "保存したものを読み込むと変わってしまう");
+  assert.deepStrictEqual(KC.fromSaved({ LEFT: "KeyD" }), KC.DEFAULTS, "同じキーが2つの操作に入ったデータを使ってしまう");
+  assert.deepStrictEqual(KC.fromSaved("こわれた"), KC.DEFAULTS);
+  // 初期値にもどす
+  while (KC.ROWS[sc.cursor].kind !== "reset") KC.press(sc, b, "down");
+  KC.press(sc, b, "ok");
+  assert.deepStrictEqual(b, KC.DEFAULTS, "初期値にもどらない");
+  KC.press(sc, b, "down");
+  assert.deepStrictEqual(KC.press(sc, b, "ok"), { close: true }, "もどるで閉じない");
+  assert.strictEqual(KC.keyLabel("Space"), "スペース");
+  assert.strictEqual(KC.keyLabel("KeyJ"), "J");
+
+  // キーボード：変えたキーで同じボタンのビットが入る（投げの U＋I 同時押しも、変えたキーでそのまま入る）
+  const target = new EventTarget();
+  const kb = SF.keyboard.createKeyboard(target);
+  const key = (type, code) => {
+    const e = new Event(type, { cancelable: true });
+    e.code = code;
+    target.dispatchEvent(e);
+  };
+  key("keydown", "KeyU");
+  key("keydown", "KeyI");
+  assert.strictEqual(kb.read(), B.LIGHT | B.HEAVY, "初期値のキーで投げが入らない");
+  key("keyup", "KeyU");
+  key("keyup", "KeyI");
+  kb.setBindings(Object.assign(KC.defaults(), { LIGHT: "KeyJ", HEAVY: "KeyK", SPECIAL: "KeyL" }));
+  key("keydown", "KeyJ");
+  key("keydown", "KeyK");
+  assert.strictEqual(kb.read(), B.LIGHT | B.HEAVY, "変えたキーで投げが入らない");
+  key("keyup", "KeyJ");
+  key("keyup", "KeyK");
+  key("keydown", "KeyU");
+  assert.strictEqual(kb.read(), 0, "前のキーがまだ効いている");
+  // ため攻撃：押している間はビットが立ち、離すと消える
+  key("keydown", "KeyL");
+  assert.strictEqual(kb.read(), B.SPECIAL);
+  assert.strictEqual(kb.read(), B.SPECIAL, "押しっぱなしが続かない");
+  key("keyup", "KeyL");
+  assert.strictEqual(kb.read(), 0, "離しても押したまま");
+  // 一瞬の押し（同じフレームの中で押して離す）も取りこぼさない
+  key("keydown", "KeyJ");
+  key("keyup", "KeyJ");
+  assert.strictEqual(kb.read(), B.LIGHT, "一瞬の押しを取りこぼす");
+  assert.ok(kb.isBound("KeyL") && !kb.isBound("KeyO"));
+  console.log("OK キーコンフィグ: キーを変える・入れ替え・Escでやめる・保存と読み込み・初期値にもどす、変えたキーで投げ・ため・一瞬の押しが入る");
+}
+
 // 7. 自動対戦と記録
 require("../src/core/autobattle.js");
 {

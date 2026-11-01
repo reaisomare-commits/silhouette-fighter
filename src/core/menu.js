@@ -15,6 +15,7 @@
     { id: "cvc", label: "CPU VS CPU", note: "CPU同士の対戦を観る" },
     { id: "auto", label: "自動対戦と記録", note: "CPU同士を画面なしで何試合も戦わせ、勝率や技の記録を見る" },
     { id: "learn", label: "学習AIをきたえる", note: "対戦をくり返して強くなるCPU（機械学習）を学習させる" },
+    { id: "keys", label: "キーコンフィグ", note: "移動や攻撃のキーを、好きなキーに変える" },
   ];
 
   // キャラ選択画面の行。kind: char＝キャラ、level＝CPUの強さ、start＝はじめる
@@ -71,7 +72,7 @@
   const wrap = (i, n) => (i + n) % n;
 
   // 操作を1つ受け取る。action は "up" "down" "left" "right" "ok" "back"
-  // 試合を始めるときだけ { start: 設定 }、自動対戦の画面を開くときは { auto: true }、学習AIの画面を開くときは { learn: true } を返す。それ以外は null
+  // 試合を始めるときだけ { start: 設定 }、自動対戦の画面を開くときは { auto: true }、学習AIの画面を開くときは { learn: true }、キーコンフィグを開くときは { keys: true } を返す。それ以外は null
   function press(menu, action) {
     if (menu.screen === SCREEN.TITLE) {
       if (action === "ok") menu.screen = SCREEN.MODE;
@@ -84,6 +85,7 @@
       else if (action === "ok") {
         if (modeId(menu) === "auto") return { auto: true }; // 自動対戦はキャラ選択画面を使わない（別の画面で選ぶ）
         if (modeId(menu) === "learn") return { learn: true }; // 学習AIも別の画面
+        if (modeId(menu) === "keys") return { keys: true }; // キーコンフィグも別の画面
         menu.screen = SCREEN.SELECT;
         menu.cursor = 0;
       } else if (action === "back") menu.screen = SCREEN.TITLE;

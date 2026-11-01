@@ -28,19 +28,11 @@
     [POSE.LAUNCH]: "空中でやられた",
     [POSE.DOWN]: "ダウン",
     [POSE.THROW]: "投げ",
-    [POSE.THROWN]: "投げられている（U＋Iで投げ抜け）",
+    [POSE.THROWN]: "投げられている（弱＋強で投げ抜け）",
     [POSE.TECH]: "投げ抜け",
   };
 
-  const BUTTON_LABELS = [
-    [BUTTON.LEFT, "A"],
-    [BUTTON.RIGHT, "D"],
-    [BUTTON.DOWN, "S"],
-    [BUTTON.JUMP, "スペース"],
-    [BUTTON.LIGHT, "U"],
-    [BUTTON.HEAVY, "I"],
-    [BUTTON.SPECIAL, "O"],
-  ];
+  const KC = SF.keyconfig;
 
   const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -58,6 +50,10 @@
 
   function createRenderer(canvas) {
     const ctx = canvas.getContext("2d");
+    // 今のキーの割り当て（押しているキーの表示と、キーコンフィグ画面で使う）
+    let bindings = KC.defaults();
+    const keyOf = (button) => KC.buttonLabel(bindings, button);
+    const poseLabel = (pose) => (pose === POSE.THROWN ? `投げられている（${keyOf(BUTTON.LIGHT)}＋${keyOf(BUTTON.HEAVY)}で投げ抜け）` : POSE_LABEL[pose]);
     canvas.width = C.STAGE_WIDTH;
     canvas.height = C.STAGE_HEIGHT;
 
@@ -630,9 +626,9 @@
       ctx.font = "13px sans-serif";
       ctx.textBaseline = "top";
       ctx.textAlign = "left";
-      const pressed = BUTTON_LABELS.filter(([b]) => isDown(info.input, b)).map(([, l]) => l);
+      const pressed = KC.ACTIONS.filter((a) => isDown(info.input, a.button)).map((a) => keyOf(a.button));
       const m = SF.game.moveData(me);
-      const now = POSE_LABEL[me.pose] + (m ? `（${m.name}）` : "");
+      const now = poseLabel(me.pose) + (m ? `（${m.name}）` : "");
       ctx.fillText(
         `計算 ${info.updatesPerSec}回/秒　描画 ${info.drawsPerSec}回/秒　押しているキー: ${pressed.length ? pressed.join(" ") : "なし"}　いまの動き: ${now}`,
         16,
@@ -650,8 +646,8 @@
 
     const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家" };
     const LEVEL_NOTE = ["はじめての人に", "慣れてきたら", "腕に自信がある人に", "対戦から学んだCPU"];
-    const HINT_MENU = "↑↓ / W S：えらぶ　Enter：決定　Esc：もどる";
-    const HINT_SELECT = "↑↓ / W S：項目をえらぶ　←→ / A D：変える　Enter：決定　Esc：もどる";
+    const HINT_MENU = "↑↓：えらぶ　Enter：決定　Esc：もどる";
+    const HINT_SELECT = "↑↓：項目をえらぶ　←→：変える　Enter：決定　Esc：もどる";
 
     // 見本のキャラは、試合と同じ描き方で描く。キャラの組み合わせごとに状態を作っておく
     const previews = {};
@@ -725,15 +721,15 @@
       dim(0.5);
       outlined("モードをえらぶ", C.STAGE_WIDTH / 2, 70, 36, "#fff");
       const w = 600;
-      const h = 82;
+      const h = 70;
       const x = (C.STAGE_WIDTH - w) / 2;
       SF.menu.MODES.forEach((m, i) => {
-        const y = 108 + i * 96;
+        const y = 104 + i * 80;
         const sel = i === menu.modeCursor;
         panel(x, y, w, h, sel);
         if (sel) text("▶", x + 34, y + h / 2, 26, "#ffd24d");
-        text(m.label, C.STAGE_WIDTH / 2, y + 32, 30, sel ? "#fff" : "rgba(255,255,255,0.55)");
-        text(m.note, C.STAGE_WIDTH / 2, y + 62, 16, sel ? "#ffd8a0" : "rgba(255,255,255,0.4)", "center", "normal");
+        text(m.label, C.STAGE_WIDTH / 2, y + 27, 28, sel ? "#fff" : "rgba(255,255,255,0.55)");
+        text(m.note, C.STAGE_WIDTH / 2, y + 54, 15, sel ? "#ffd8a0" : "rgba(255,255,255,0.4)", "center", "normal");
       });
       hint(HINT_MENU);
     }
@@ -822,6 +818,39 @@
       ctx.textAlign = "left";
     }
 
+    // キーコンフィグ画面。左に操作の名前、右に今のキー
+    function drawKeyConfig(screen, tick) {
+      drawBackground();
+      dim(0.6);
+      outlined("キーコンフィグ", C.STAGE_WIDTH / 2, 40, 32, "#fff");
+      text("操作をえらんで Enter を押し、使いたいキーを押してください（ほかの操作と同じキーなら入れ替わります）", C.STAGE_WIDTH / 2, 74, 14, "#ffd8a0", "center", "normal");
+      const w = 460;
+      const x = (C.STAGE_WIDTH - w) / 2;
+      const rowH = 38;
+      const top = 92;
+      KC.ROWS.forEach((row, r) => {
+        const y = top + r * (rowH + 4) + (row.kind === "action" ? 0 : 8);
+        const sel = r === screen.cursor;
+        panel(x, y, w, rowH, sel);
+        if (sel) text("▶", x + 22, y + rowH / 2, 16, "#ffd24d");
+        if (row.kind !== "action") {
+          text(row.label, C.STAGE_WIDTH / 2, y + rowH / 2, 20, sel ? "#fff" : "rgba(255,255,255,0.6)");
+          return;
+        }
+        text(row.label, x + 44, y + rowH / 2, 20, sel ? "#fff" : "rgba(255,255,255,0.7)", "left");
+        let key = KC.keyLabel(bindings[row.id]);
+        let color = sel ? "#ffd24d" : "rgba(255,255,255,0.85)";
+        if (sel && screen.waiting) {
+          key = Math.floor(tick / 20) % 2 === 0 ? "キーを押してください" : "";
+          color = "#ff8a4a";
+        }
+        text(key, x + w - 24, y + rowH / 2, 20, color, "right");
+      });
+      if (screen.message) text(screen.message, C.STAGE_WIDTH / 2, C.STAGE_HEIGHT - 52, 15, "#cfe3ff", "center", "normal");
+      hint(screen.waiting ? "使いたいキーを押す　Esc：やめる" : "↑↓：えらぶ　Enter：キーを変える　Esc：もどる");
+      ctx.textAlign = "left";
+    }
+
     // 試合の上に出す小さなメニュー（一時停止・試合終了）
     function drawOverlay(o) {
       const w = 300;
@@ -864,6 +893,10 @@
         if (info.overlay) drawOverlay(info.overlay);
       },
       drawMenu,
+      drawKeyConfig,
+      setBindings(b) {
+        bindings = Object.assign({}, b);
+      },
     };
   }
 

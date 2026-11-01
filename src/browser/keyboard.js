@@ -1,18 +1,10 @@
 // キーボードの状態を読んで、計算部分が使う入力（ビット）に変える。
+// 計算部分はボタンのビットしか見ないので、キーを変えても先行入力・投げ・ため攻撃などの動きはそのまま。
 // 日本語キーボードでも同じ位置のキーで動くよう、文字ではなくキーの場所（code）で判定する。
 (function (root) {
   const SF = (root.SF = root.SF || {});
-  const { BUTTON } = SF.input;
-
-  const KEY_TO_BUTTON = {
-    KeyA: BUTTON.LEFT,
-    KeyD: BUTTON.RIGHT,
-    KeyS: BUTTON.DOWN,
-    Space: BUTTON.JUMP,
-    KeyU: BUTTON.LIGHT,
-    KeyI: BUTTON.HEAVY,
-    KeyO: BUTTON.SPECIAL,
-  };
+  // どのキーがどのボタンか。キーコンフィグで変えられる（初期値は A D S スペース U I O）
+  let KEY_TO_BUTTON = SF.keyconfig.keyToButton(SF.keyconfig.DEFAULTS);
 
   function isFormField(t) {
     return !!t && /^(INPUT|SELECT|BUTTON|TEXTAREA)$/.test(t.tagName || "");
@@ -49,6 +41,16 @@
     target.addEventListener("blur", onBlur);
 
     return {
+      // キーの割り当てを変える。押しっぱなし扱いが残らないよう、いったん全部離す
+      setBindings(bindings) {
+        KEY_TO_BUTTON = SF.keyconfig.keyToButton(bindings);
+        held.clear();
+        tapped = 0;
+      },
+      // そのキーがゲームの操作に使われているか
+      isBound(code) {
+        return KEY_TO_BUTTON[code] !== undefined;
+      },
       // 今押されているボタンをまとめて返す
       read() {
         let input = tapped;
