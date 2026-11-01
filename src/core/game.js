@@ -595,9 +595,6 @@
   function hurtbox(f) {
     if (f.pose === POSE.DOWN || f.pose === POSE.LAUNCH || f.pose === POSE.THROWN) return null;
     if (backstepInvincible(f)) return null;
-    // 発生まで無敵の技（リンの跳び蹴り上げ）：当たり始めるまでは攻撃も投げも当たらない
-    const mv = moveData(f);
-    if (mv && mv.invincible && f.moveFrame < mv.startup) return null;
     const w = CHARACTERS[f.charId].width;
     const x = f.x / S;
     const y = f.y / S;
