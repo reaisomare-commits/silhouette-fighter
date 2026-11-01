@@ -7,8 +7,8 @@
   const { CHARACTERS, BATTLE } = SF.characters;
 
   // 差し色：カゲツは刃が青、リンは鉢巻が赤。同じキャラ同士のときは右側を別の色にする
-  const ACCENT = { kagetsu: "#4da6ff", rin: "#ff4d4d" };
-  const ACCENT_MIRROR = { kagetsu: "#5cff8a", rin: "#ffd24d" };
+  const ACCENT = { kagetsu: "#4da6ff", rin: "#ff4d4d", genma: "#b25cff" };
+  const ACCENT_MIRROR = { kagetsu: "#5cff8a", rin: "#ffd24d", genma: "#ff7ad9" };
 
   const POSE_LABEL = {
     [POSE.STAND]: "立ち",
@@ -21,6 +21,7 @@
     [POSE.STEP]: "ステップ",
     [POSE.RUN]: "ダッシュ",
     [POSE.BACKSTEP]: "バックステップ",
+    [POSE.WARP]: "ワープ（消えている）",
     [POSE.DASH_RECOVERY]: "止まり際（動けない）",
     [POSE.ATTACK]: "攻撃",
     [POSE.HIT]: "のけぞり",
@@ -105,6 +106,23 @@
 
     // 倒れている姿
     function drawDown(f, accent) {
+      if (f.charId === "genma") {
+        // ゲンマ：衣を広げて倒れる。角と光る目
+        const len = CHARACTERS.genma.height * 0.75;
+        ctx.beginPath();
+        ctx.moveTo(-len * 0.45, -24);
+        ctx.lineTo(len * 0.6, -26);
+        ctx.lineTo(len * 0.7, 0);
+        ctx.lineTo(-len * 0.4, 0);
+        ctx.closePath();
+        ctx.fill();
+        circle(-len * 0.45 - 12, -14, 13);
+        limb(-len * 0.45 - 16, -24, -len * 0.45 - 34, -36, 4);
+        ctx.fillStyle = accent;
+        ctx.fillRect(-len * 0.45 - 20, -18, 5, 2);
+        ctx.fillStyle = "#000";
+        return;
+      }
       const isKagetsu = f.charId === "kagetsu";
       const len = CHARACTERS[f.charId].height * 0.75;
       // 頭が後ろ（相手と反対側）に来るように寝る
@@ -118,6 +136,205 @@
         ctx.strokeStyle = accent;
         limb(-len * 0.45 - 14, -24, -len * 0.45 - 34, -20, 3);
         ctx.strokeStyle = "#000";
+      }
+    }
+
+    // 異空間の門：縦長の楕円。open は開き具合（0〜1）
+    function portal(x, y, rw, rh, open, accent) {
+      if (open <= 0) return;
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = "#12001f";
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(x, y, rw * open, rh * open, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ゲンマ（幻魔）：角のある頭巾と長い衣。足は衣に隠れ、地面から少し浮いている。差し色は目と爪と闇の術
+    function drawGenma(f, state, o) {
+      const { p, crouching, guarding, hurt, throwFollow, airborne, atk, move, accent } = o;
+      let h = o.h;
+      const frame = state.frame;
+      const warping = p === POSE.WARP;
+      const warpRec = p === POSE.DASH_RECOVERY && f.warpDir !== 0;
+      // ワープ：消える（薄くなって門に吸い込まれる）・現れる（門から出てくる）
+      if (warping || warpRec) {
+        const dash = f.warpDir < 0 ? CHARACTERS.genma.backDash : CHARACTERS.genma.forwardDash;
+        let alpha;
+        if (warping) {
+          const t = 1 - f.actionTimer / dash.frames; // 0〜1
+          alpha = Math.max(0, 1 - t * 3);
+          portal(0, -h * 0.5, 30, h * 0.55, Math.min(1, t * 3) * (1 - Math.max(0, t - 0.7) / 0.3), accent);
+          // 出る先にも門が開く（向きは消えたときのまま）
+          const dest = f.warpDir * dash.distance;
+          portal(dest, -h * 0.5, 30, h * 0.55, Math.max(0, (t - 0.4) / 0.6), accent);
+        } else {
+          const t = 1 - f.actionTimer / dash.recovery;
+          alpha = Math.min(1, 0.3 + t * 1.5);
+          portal(0, -h * 0.5, 30, h * 0.55, Math.max(0, 1 - t * 2), accent);
+        }
+        if (alpha <= 0) return;
+        ctx.globalAlpha = alpha;
+      }
+      if (f.floating) {
+        // 浮いている：足元に紫の光
+        ctx.save();
+        ctx.globalAlpha = 0.5 + 0.2 * Math.sin(frame * 0.4);
+        ctx.fillStyle = accent;
+        ctx.beginPath();
+        ctx.ellipse(0, 4, 26, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      if (hurt) h = h * 0.95;
+      const hover = airborne || crouching ? 0 : 4 + Math.sin(frame * 0.12) * 2; // 少し浮いて上下にゆれる
+      ctx.translate(0, -hover);
+      const headR = 13;
+      const headY = -h + headR;
+      const shoulderY = headY + headR + 4;
+      const hemY = airborne ? -h * 0.2 : 0;
+      let lean = { [POSE.GUARD_STAND]: -4, [POSE.GUARD_CROUCH]: -4, [POSE.BLOCK]: -6, [POSE.HIT]: -14, [POSE.LAUNCH]: -10, [POSE.THROWN]: -12, [POSE.TECH]: -12, [POSE.THROW]: 8, [POSE.WALK_FORWARD]: 3 }[p] || 0;
+      if (atk) lean = lerp(-3 * atk.wind, move === "crouchSpecial" ? -4 : 8, atk.ext);
+
+      // 後ろになびく衣のすそ
+      const wave = Math.sin(frame * 0.15) * 6;
+      ctx.beginPath();
+      ctx.moveTo(lean - 10, shoulderY);
+      ctx.quadraticCurveTo(-34, (shoulderY + hemY) / 2, -40 + wave, hemY - 2);
+      ctx.lineTo(-10, hemY);
+      ctx.closePath();
+      ctx.fill();
+      // 衣（肩から裾へ広がる）
+      ctx.beginPath();
+      ctx.moveTo(lean - 15, shoulderY);
+      ctx.lineTo(lean + 15, shoulderY);
+      ctx.lineTo(28, hemY);
+      ctx.lineTo(-28, hemY);
+      ctx.closePath();
+      ctx.fill();
+      // 頭巾と角
+      circle(lean, headY, headR);
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(lean - 4, headY - headR + 3);
+      ctx.quadraticCurveTo(lean - 14, headY - headR - 14, lean - 26, headY - headR - 10);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(lean + 4, headY - headR + 2);
+      ctx.quadraticCurveTo(lean + 2, headY - headR - 16, lean - 10, headY - headR - 20);
+      ctx.stroke();
+      // 光る目
+      ctx.fillStyle = accent;
+      ctx.fillRect(lean + 4, headY - 2, 7, 3);
+      ctx.fillStyle = "#000";
+
+      // 腕と爪。hand は手の位置、claw は爪の向き（ラジアン）
+      const armFrom = { x: lean + 4, y: shoulderY + 6 };
+      let hand = { x: lean + 22, y: shoulderY + 30 };
+      let back = { x: lean + 6, y: shoulderY + 36 };
+      let claw = 0.3;
+      if (guarding) {
+        hand = { x: lean + 22, y: shoulderY + 2 };
+        back = { x: lean + 20, y: shoulderY + 14 };
+        claw = -1.2;
+      } else if (hurt) {
+        hand = { x: lean - 14, y: shoulderY - 6 };
+        claw = -2.2;
+      } else if (throwFollow || (atk && move === "throw")) {
+        const e = throwFollow ? 1 : Math.max(atk.ext, atk.wind * 0.5);
+        hand = { x: lean + lerp(22, 46, e), y: shoulderY + 22 };
+        back = { x: lean + lerp(8, 38, e), y: shoulderY + 30 };
+        claw = 0;
+      } else if (atk) {
+        const { wind, ext } = atk;
+        if (move === "standLight") {
+          hand = { x: lean + lerp(22, 62, ext), y: shoulderY + lerp(30, 20, ext) };
+          claw = 0;
+        } else if (move === "standHeavy" || move === "airHeavy" || move === "crouchHeavy") {
+          hand = { x: lean + lerp(4, 34, ext), y: shoulderY + lerp(-10, 34, Math.max(ext, 0)) };
+          claw = lerp(-1.4, 0.8, ext);
+        } else if (move === "crouchLight" || move === "airLight") {
+          hand = { x: lean + lerp(20, 50, ext), y: move === "airLight" ? shoulderY + lerp(30, 56, ext) : -lerp(30, 10, ext) };
+          claw = 0.5;
+        } else if (move === "special" || move === "airSpecial") {
+          // 手を前にかざして門を開く
+          hand = { x: lean + lerp(18, 40, Math.max(ext, wind)), y: shoulderY + 14 };
+          claw = -0.2;
+        } else if (move === "crouchSpecial") {
+          // 手を振り上げて地面の門から柱を立てる
+          hand = { x: lean + 26, y: shoulderY + lerp(30, -20, Math.max(ext, wind * 0.6)) };
+          claw = -1.3;
+        }
+      }
+      ctx.lineCap = "round";
+      limb(armFrom.x, armFrom.y + 4, back.x, back.y, 8);
+      limb(armFrom.x, armFrom.y, hand.x, hand.y, 8);
+      ctx.strokeStyle = accent;
+      for (let k = -1; k <= 1; k++) {
+        const a = claw + k * 0.35;
+        limb(hand.x, hand.y, hand.x + Math.cos(a) * 14, hand.y + Math.sin(a) * 14, 2.5);
+      }
+      ctx.strokeStyle = "#000";
+
+      // 闇の術（技の当たる範囲あたりに差し色で描く）
+      if (atk) {
+        const m = atk.m;
+        const e = atk.ext;
+        ctx.save();
+        ctx.translate(0, hover); // 術は足元を基準に描く
+        ctx.globalAlpha *= 0.75;
+        ctx.fillStyle = accent;
+        ctx.strokeStyle = accent;
+        if (move === "standHeavy" && e > 0) {
+          // 影の鎌：前に大きな弧
+          ctx.lineWidth = 8 * e;
+          ctx.beginPath();
+          ctx.arc(m.hitbox.x1 + 30, -105, 70, -1.1, 0.9 * e);
+          ctx.stroke();
+        } else if (move === "crouchHeavy" && e > 0) {
+          // 闇溜まり：足元に広がる闇
+          ctx.beginPath();
+          ctx.ellipse((m.hitbox.x1 + m.hitbox.x2) / 2, -6, ((m.hitbox.x2 - m.hitbox.x1) / 2) * e, 10, 0, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (move === "crouchSpecial") {
+          // 闇柱：地面の門から柱が立つ
+          const cx = (m.hitbox.x1 + m.hitbox.x2) / 2;
+          const half = (m.hitbox.x2 - m.hitbox.x1) / 2;
+          ctx.restore();
+          ctx.save();
+          ctx.translate(0, hover);
+          portal(cx, -4, half + 6, 8, Math.max(atk.wind, e), accent);
+          if (e > 0) {
+            ctx.globalAlpha = 0.7;
+            ctx.fillStyle = accent;
+            ctx.fillRect(cx - half * 0.7, -m.hitbox.y2 * e, half * 1.4, m.hitbox.y2 * e);
+            ctx.globalAlpha = 0.9;
+            ctx.fillStyle = "#12001f";
+            ctx.fillRect(cx - half * 0.3, -m.hitbox.y2 * e, half * 0.6, m.hitbox.y2 * e);
+          }
+        } else if ((move === "special" || move === "airSpecial") && !atk.rec) {
+          // 異空間弾：門が先に開いてから弾が出る（弾が出たら門は効果として残る）
+          const pr = m.projectile;
+          ctx.restore();
+          ctx.save();
+          ctx.translate(0, hover);
+          portal(pr.spawnX, -pr.y, pr.width * 0.6, pr.height, atk.wind, accent);
+        }
+        ctx.restore();
+      }
+
+      if (guarding) {
+        ctx.strokeStyle = p === POSE.BLOCK ? "rgba(160, 220, 255, 0.9)" : "rgba(255, 255, 255, 0.55)";
+        ctx.lineWidth = p === POSE.BLOCK ? 5 : 3;
+        ctx.beginPath();
+        const midY = crouching ? -h * 0.45 : -h * 0.6;
+        ctx.arc(o.w / 2 + 10, midY, h * 0.45, -0.8, 0.8);
+        ctx.stroke();
       }
     }
 
@@ -183,6 +400,12 @@
         ctx.translate(0, -h * 0.5);
         ctx.rotate(-0.7);
         ctx.translate(0, h * 0.5);
+      }
+
+      if (f.charId === "genma") {
+        drawGenma(f, state, { h, w, p, crouching, guarding, hurt, throwFollow, airborne, atk, move, accent });
+        ctx.restore();
+        return;
       }
 
       const headR = isKagetsu ? 13 : 12;
@@ -408,6 +631,27 @@
         const accent = p.owner === 1 && other.charId === owner.charId ? ACCENT_MIRROR[owner.charId] : ACCENT[owner.charId];
         const x = p.x / C.SCALE;
         const y = p.y / C.SCALE;
+        if (owner.charId === "genma") {
+          // 異空間弾：差し色に光る闇の玉。動く向きに尾を引く
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(Math.atan2(p.vy || 0, p.vx));
+          ctx.globalAlpha = 0.35;
+          ctx.fillStyle = accent;
+          ctx.beginPath();
+          ctx.ellipse(-p.w * 0.6, 0, p.w * 0.8, p.h * 0.3, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.beginPath();
+          ctx.arc(0, 0, p.w / 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#12001f";
+          ctx.beginPath();
+          ctx.arc(0, 0, p.w / 2 - 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          continue;
+        }
         ctx.save();
         ctx.translate(x, y);
         ctx.scale(p.facing, 1);
@@ -427,6 +671,15 @@
     // 当たった火花（白とオレンジ）、ガードの火花（青白）、文字（投げ抜け）
     function drawEffects(state) {
       for (const e of state.effects) {
+        if (e.kind === "portal") {
+          // 飛び道具が出てきた門が、少しの間残って閉じる
+          const c = ACCENT[e.charId] || "#b25cff";
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, e.life / 10);
+          portal(e.x, e.y, 22, e.h / 2 + 10, Math.min(1, e.life / 14), e.mirror ? ACCENT_MIRROR[e.charId] : c);
+          ctx.restore();
+          continue;
+        }
         if (e.kind === "text") {
           ctx.save();
           ctx.globalAlpha = Math.min(1, e.life / 15);
@@ -645,7 +898,7 @@
 
     // ---- メニュー（タイトル・モード選択・キャラ選択）と、試合の上に出す小さなメニュー ----
 
-    const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家" };
+    const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家", genma: "ワープと術で翻弄する悪役" };
     const LEVEL_NOTE = ["はじめての人に", "慣れてきたら", "腕に自信がある人に", "対戦から学んだCPU"];
     const HINT_MENU = "↑↓：えらぶ　Enter：決定　Esc：もどる";
     const HINT_SELECT = "↑↓：項目をえらぶ　←→：変える　Enter：決定　Esc：もどる";

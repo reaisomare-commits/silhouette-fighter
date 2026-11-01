@@ -24,8 +24,9 @@
       jumpForward: px(c.jumpForward),
       gravity: px(c.gravity),
       landingLag: c.landingLag,
-      forwardDash: { ...c.forwardDash, speed: px(c.forwardDash.speed) },
-      backDash: { ...c.backDash, speed: px(c.backDash.speed) },
+      forwardDash: { ...c.forwardDash, speed: px(c.forwardDash.speed || 0), distance: px(c.forwardDash.distance || 0) },
+      backDash: { ...c.backDash, speed: px(c.backDash.speed || 0), distance: px(c.backDash.distance || 0) },
+      float: c.float || null,
     };
   }
 
@@ -41,6 +42,7 @@
     STEP: "step", // ステップで踏み込んでいる（カゲツ）
     RUN: "run", // ダッシュで走っている（リン）
     BACKSTEP: "backstep", // バックステップで下がっている
+    WARP: "warp", // ワープで消えている（ゲンマ。攻撃も投げも当たらない）
     DASH_RECOVERY: "dashRecovery", // ステップ・ダッシュ・バックステップの止まり際（動けない）
     ATTACK: "attack", // 技を出している（どの技かは move）
     HIT: "hit", // 攻撃を受けてのけぞっている
@@ -55,6 +57,8 @@
   // 通常技（地上のU・I）か。必殺技キャンセル・連続技ができるのはこれだけ
   const GROUND_NORMALS = ["standLight", "standHeavy", "crouchLight", "crouchHeavy"];
   const isLightMove = (name) => name === "standLight" || name === "crouchLight";
+  // 空中で出す技（1回のジャンプで1回だけ）
+  const isAirMove = (name) => name === "airLight" || name === "airHeavy" || name === "airSpecial";
 
   // ラウンドの進み具合
   const PHASE = Object.freeze({
@@ -90,6 +94,9 @@
       moveFrame: 0, // 技を出してから何フレーム目か（押したフレームが1）
       moveHit: false, // この技がもう当たった（ガードされた）か。1回の技で1回だけ当たる
       airAttackUsed: false, // このジャンプで空中攻撃を出したか
+      floatLeft: 0, // このジャンプであと何フレーム浮けるか（浮遊できるキャラだけ）
+      floating: false, // 浮いて止まっている最中か
+      warpDir: 0, // ワープの向き（1＝前、-1＝後ろ）
       stun: 0, // のけぞり・ガード硬直の残りフレーム
       downTimer: 0, // ダウンの残りフレーム
       downFrame: 0, // 倒れてから何フレームたったか（倒れる・バウンド・起き上がりの動きを描くため）
@@ -205,7 +212,7 @@
     f.buffer = null;
     f.charging = !!CHARACTERS[f.charId].moves[name].charge;
     f.chargeFrames = 0;
-    if (name === "airLight" || name === "airHeavy") f.airAttackUsed = true;
+    if (isAirMove(name)) f.airAttackUsed = true;
     if (!chain) f.chainLights = 0;
     if (isLightMove(name)) f.chainLights += 1;
   }
@@ -388,9 +395,33 @@
     } else if (f.move) {
       // 空中攻撃の最中。着地するまで何もできない
       f.moveFrame += 1;
+      const m = moveData(f);
+      if (m.projectile && f.moveFrame === m.startup) spawnProjectile(state, f, m);
     } else if ((wantAttack === "light" || wantAttack === "heavy" || wantAttack === "throw") && !f.airAttackUsed) {
       // 空中攻撃は1回のジャンプで1回だけ（空中でU＋Iは強攻撃になる）
       startMove(state, f, wantAttack === "light" ? "airLight" : "airHeavy");
+    } else if (wantAttack === "special" && !f.airAttackUsed && CHARACTERS[f.charId].moves.airSpecial) {
+      // 空中の必殺技（ゲンマの異空間弾）。空中攻撃と合わせて1回のジャンプで1回。飛び道具がもう画面にあれば出ない（入力は捨てる）
+      f.buffer = null;
+      if (!hasProjectile(state, f)) startMove(state, f, "airSpecial");
+    }
+
+    // 浮遊：頂上を過ぎてからジャンプのキーを押し続けている間は、落ちずに浮く。離したらもう浮けない
+    if (!f.onGround && st.float && f.pose !== POSE.LAUNCH) {
+      const hold = isDown(input, BUTTON.JUMP);
+      if (f.floating && (!hold || f.floatLeft <= 0)) {
+        f.floating = false;
+        f.floatLeft = 0;
+      } else if (!f.floating && hold && f.floatLeft > 0 && f.vy >= 0) {
+        f.floating = true;
+        f.vy = 0;
+      }
+      if (f.floating) {
+        f.floatLeft -= 1;
+        if (f.buffer === "jump") f.buffer = null; // 浮くために押したジャンプは、着地後のジャンプにしない
+      }
+    } else {
+      f.floating = false;
     }
 
     // 地上で自由に動けるときの操作
@@ -409,6 +440,7 @@
         f.vy = -st.jumpVelocity;
         f.vx = forward ? f.facing * st.jumpForward : back ? -f.facing * st.jumpForward : 0;
         f.pose = POSE.JUMP;
+        f.floatLeft = st.float ? st.float.frames : 0;
       } else if (wantAttack === "throw") {
         f.vx = 0;
         f.crouching = false;
@@ -440,11 +472,13 @@
       } else if (doubleForward) {
         f.buffer = null;
         f.crouching = false;
-        startAction(f, st.forwardDash.type === "run" ? POSE.RUN : POSE.STEP, st);
+        if (st.forwardDash.type === "warp") startWarp(f, st.forwardDash, 1);
+        else startAction(f, st.forwardDash.type === "run" ? POSE.RUN : POSE.STEP, st);
       } else if (doubleBack) {
         f.buffer = null;
         f.crouching = false;
-        startAction(f, POSE.BACKSTEP, st);
+        if (st.backDash.type === "warp") startWarp(f, st.backDash, -1);
+        else startAction(f, POSE.BACKSTEP, st);
       } else if (down) {
         // しゃがみ中は歩けない。後ろを押していればしゃがみガード
         f.vx = 0;
@@ -466,12 +500,12 @@
       }
     }
 
-    // 空中では横の速さはそのまま、重力で落ちる。ガードはできない
-    if (!f.onGround) {
+    // 空中では横の速さはそのまま、重力で落ちる。ガードはできない。浮いている間は落ちず、横の速さも遅くなる
+    if (!f.onGround && !f.floating) {
       f.vy += st.gravity;
     }
 
-    f.x += f.vx + f.pushVx;
+    f.x += (f.floating ? Math.trunc((f.vx * st.float.speedRate) / 100) : f.vx) + f.pushVx;
     f.y += f.vy;
     // 押し返しは毎フレーム弱まる
     f.pushVx = Math.trunc((f.pushVx * 4) / 5);
@@ -483,6 +517,8 @@
       f.vy = 0;
       f.onGround = true;
       f.airAttackUsed = false;
+      f.floating = false;
+      f.floatLeft = 0;
       if (f.pose === POSE.LAUNCH) {
         knockDown(f);
       } else {
@@ -513,6 +549,15 @@
     }
   }
 
+  // ワープを始める：その場で消える。dir は 1＝前、-1＝後ろ
+  function startWarp(f, dash, dir) {
+    f.action = POSE.WARP;
+    f.pose = POSE.WARP;
+    f.actionTimer = dash.frames;
+    f.warpDir = dir;
+    f.vx = 0;
+  }
+
   // 止まり際（動けない時間）に入る
   function startRecovery(f, frames, keepSpeed, backstep = false) {
     f.backstepRecovery = backstep;
@@ -525,6 +570,19 @@
   // ステップ・ダッシュ・バックステップを1フレーム進める。
   // 途中でガードや向きの切り替えはできない（ダッシュ中のジャンプだけはできる）
   function updateAction(f, st, { forward, down, jump }) {
+    if (f.action === POSE.WARP) {
+      // 消えている間は動かない。時間が来たら distance だけ先（後ろ）に現れる。相手の体は通り抜ける
+      f.vx = 0;
+      f.actionTimer -= 1;
+      if (f.actionTimer <= 0) {
+        const back = f.warpDir < 0;
+        const dash = back ? st.backDash : st.forwardDash;
+        f.x += f.facing * f.warpDir * dash.distance;
+        clampToStage(f);
+        startRecovery(f, dash.recovery, false, back);
+      }
+      return;
+    }
     if (f.action === POSE.STEP || f.action === POSE.BACKSTEP) {
       f.actionTimer -= 1;
       if (f.actionTimer <= 0) {
@@ -542,6 +600,7 @@
         f.vy = -st.jumpVelocity;
         f.vx = f.facing * st.jumpForward;
         f.pose = POSE.JUMP;
+        f.floatLeft = st.float ? st.float.frames : 0;
       } else if (canStop && (!forward || down)) {
         // 前を離したらブレーキをかけながら止まる
         startRecovery(f, st.forwardDash.recovery, true);
@@ -554,6 +613,7 @@
         f.action = null;
         f.vx = 0;
         f.pose = POSE.STAND;
+        f.warpDir = 0;
       }
     }
   }
@@ -594,7 +654,7 @@
 
   function hurtbox(f) {
     if (f.pose === POSE.DOWN || f.pose === POSE.LAUNCH || f.pose === POSE.THROWN) return null;
-    if (backstepInvincible(f)) return null;
+    if (backstepInvincible(f) || f.action === POSE.WARP) return null;
     const w = CHARACTERS[f.charId].width;
     const x = f.x / S;
     const y = f.y / S;
@@ -669,18 +729,36 @@
       x: f.x + f.facing * pr.spawnX * S,
       y: f.y - pr.y * S,
       vx: f.facing * pr.speed * S,
+      vy: (pr.fall || 0) * S, // 斜め下に飛ぶ飛び道具（空中の異空間弾）は下へも進む
       facing: f.facing,
       w: pr.width,
       h: pr.height,
       age: 0,
     });
+    // 異空間の門から出る飛び道具（ゲンマ）は、出た所に門の絵を少し残す（描画用）
+    if (pr.portal) {
+      const i = state.fighters.indexOf(f);
+      const mirror = i === 1 && state.fighters[0].charId === f.charId;
+      state.effects.push({ kind: "portal", charId: f.charId, mirror, x: (f.x + f.facing * pr.spawnX * S) / S, y: (f.y - pr.y * S) / S, h: pr.height, life: 16 });
+    }
   }
 
   // 飛び道具を進める。画面の外に出たら消える。飛び道具同士がぶつかったら両方消える
   function moveProjectiles(state) {
     for (const p of state.projectiles) {
-      if (p.age > 0) p.x += p.vx; // 出た瞬間のフレームは動かない（目の前の相手にはすぐ当たる）
+      if (p.age > 0) {
+        // 出た瞬間のフレームは動かない（目の前の相手にはすぐ当たる）
+        p.x += p.vx;
+        p.y += p.vy;
+      }
       p.age += 1;
+      // 地面に着いたら消える
+      if (p.y - (p.h / 2) * S > C.GROUND_Y * S) {
+        p.dead = true;
+      } else if (p.vy > 0 && p.y + (p.h / 2) * S >= C.GROUND_Y * S) {
+        p.dead = true;
+        state.effects.push({ kind: "block", x: p.x / S, y: C.GROUND_Y - 6, life: 12 });
+      }
     }
     const list = state.projectiles;
     for (let i = 0; i < list.length; i++) {
@@ -785,7 +863,10 @@
     // のけぞり・ガード硬直の長さは、硬直差がそのとおりになるように決める。
     // 空中攻撃は「着地して着地硬直が終わるまで」を数え、低い所で当てたときに表どおりになる
     const base = proj
-      ? moveTotal(m) - m.startup
+      ? air
+        ? // 空中から撃った飛び道具：低い所で撃って、すぐ着地したときと同じに数える
+          BATTLE.airHitLow + toStats(att.charId).landingLag
+        : moveTotal(m) - m.startup
       : air
         ? // 空中攻撃：着地の airHitLow フレーム前より低い所で当てたら表どおりの有利。
           // それより高い所（上りや頂上）で当てると、早く当てた分だけ有利が減る
@@ -892,7 +973,7 @@
 
   // 投げられる状態か：地上にいて、のけぞり・ガード硬直・ダウン中・バックステップで下がっている最中・ジャンプの着地硬直中でない
   function throwable(f) {
-    return f.onGround && f.stun === 0 && f.action !== POSE.BACKSTEP && f.pose !== POSE.LANDING && !f.grab && f.pose !== POSE.DOWN && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN;
+    return f.onGround && f.stun === 0 && f.action !== POSE.BACKSTEP && f.action !== POSE.WARP && f.pose !== POSE.LANDING && !f.grab && f.pose !== POSE.DOWN && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN;
   }
 
   function checkThrows(state) {

@@ -111,6 +111,14 @@
     return (SF.learnedData && deserialize(SF.learnedData)) || createBrain();
   }
 
+  // 保存してあった頭脳に、ない組み合わせの表があれば、ゲームに入っている学習データからコピーして足す
+  // （キャラが増える前に保存した頭脳でも、新しいキャラとの組み合わせを学習済みの状態で戦えるように）
+  function fillMissing(brain) {
+    const base = defaultBrain();
+    for (const [k, t] of Object.entries(base.tables)) if (!brain.tables[k]) brain.tables[k] = t;
+    return brain;
+  }
+
   // ふつうに戦うときに使う頭脳。ブラウザの学習画面で育てたものがあれば、そちらに差しかえる
   let current = null;
   function currentBrain() {
@@ -340,6 +348,7 @@
     deserialize,
     clone,
     defaultBrain,
+    fillMissing,
     currentBrain,
     setCurrentBrain,
     stateOf,

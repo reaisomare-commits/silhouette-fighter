@@ -311,7 +311,7 @@ function measureAdvantage(att, def, moveName, blocking) {
   return { adv: startB[0] - startA[0], result, damage, b };
 }
 
-for (const att of ["kagetsu", "rin"]) {
+for (const att of ["kagetsu", "rin", "genma"]) {
   const def = att === "kagetsu" ? "rin" : "kagetsu";
   const lines = [];
   for (const name of ["standLight", "standHeavy", "crouchLight", "crouchHeavy"]) {
@@ -699,13 +699,15 @@ function measureSpecial(att, def, name, blocking, gap = 70) {
   return { hitAt, result, damage, adv: sb - sa };
 }
 
-for (const att of ["kagetsu", "rin"]) {
+for (const att of ["kagetsu", "rin", "genma"]) {
   const def = att === "kagetsu" ? "rin" : "kagetsu";
   const lines = [];
   for (const name of ["special", "crouchSpecial"]) {
     const m = CH[att].moves[name];
-    const hit = measureSpecial(att, def, name, false);
-    const block = measureSpecial(att, def, name, true);
+    // ゲンマの異空間弾は門の目の前（spawnX の所）に相手を置いて測る
+    const gap = m.projectile && m.projectile.spawnX > 100 ? m.projectile.spawnX : 70;
+    const hit = measureSpecial(att, def, name, false, gap);
+    const block = measureSpecial(att, def, name, true, gap);
     assert.strictEqual(hit.hitAt + 1, m.startup, `${m.name}の発生が違う`);
     assert.strictEqual(hit.damage, m.damage, `${m.name}のダメージが違う`);
     if (m.hitAdv === "down") assert.strictEqual(hit.result, POSE.DOWN, `${m.name}はダウンするはず`);
@@ -762,6 +764,135 @@ for (const att of ["kagetsu", "rin"]) {
   assert.strictEqual(st.projectiles.length, 1, "飛刃は画面に1つまで");
   assert.ok(!second, "飛刃が画面にあるときは2発目が出ないはず");
   console.log(`OK 飛刃: 目の前でガードさせて${near.adv}、離れてガードさせて${far.adv}。画面に1つまで`);
+}
+
+// ゲンマ：体力500、ワープ、浮遊、異空間弾（地上・空中）
+{
+  const G = CH.genma;
+  assert.strictEqual(G.health, 500, "ゲンマの体力は500のはず");
+  const R = BUTTON.RIGHT;
+  const L = BUTTON.LEFT;
+
+  // ワープ：前を2回で消え、消えている間は攻撃も投げも当たらない。distance 先に現れ、相手をすり抜けて裏に回れる
+  function warp(dirBtn, oppX) {
+    const st = newGame(1, ["genma", "kagetsu"]);
+    const g = st.fighters[0];
+    g.x = 300 * S;
+    st.fighters[1].x = oppX * S;
+    const seq = [dirBtn, 0, dirBtn];
+    let vanish = 0;
+    let firstVanish = -1;
+    let appear = -1;
+    let x0 = g.x;
+    for (let i = 0; i < 60; i++) {
+      SF.game.step(st, [seq[i] || 0, 0]);
+      if (g.pose === POSE.WARP) {
+        if (firstVanish < 0) {
+          firstVanish = i;
+          x0 = g.x; // 1回目に押したときに少し歩くので、消えた所から測る
+        }
+        vanish += 1;
+        assert.strictEqual(SF.game.hurtbox(g), null, "ワープで消えている間は攻撃が当たらないはず");
+      } else if (firstVanish >= 0 && appear < 0) appear = i;
+    }
+    return { dist: (g.x - x0) / S, vanish, st, g };
+  }
+  const fw = warp(R, 800);
+  assert.strictEqual(fw.vanish, G.forwardDash.frames, "前ワープで消えている時間が違う");
+  assert.strictEqual(fw.dist, G.forwardDash.distance, "前ワープで進む距離が違う");
+  const bw = warp(L, 800);
+  assert.strictEqual(bw.dist, -G.backDash.distance, "後ろワープで下がる距離が違う");
+  // 相手のすぐ前からワープすると、相手の裏に出る
+  const cross = warp(R, 380);
+  assert.ok(cross.g.x > cross.st.fighters[1].x, "前ワープで相手をすり抜けて裏に出るはず");
+  assert.strictEqual(cross.g.facing, -1, "裏に出たら相手の方を向き直すはず");
+  // 消えている間は投げられない
+  {
+    const st = newGame(1, ["genma", "kagetsu"]);
+    st.fighters[0].x = 400 * S;
+    st.fighters[1].x = 455 * S;
+    const seq = [L, 0, L];
+    for (let i = 0; i < 4; i++) SF.game.step(st, [seq[i] || 0, i === 3 ? U | I : 0]);
+    for (let i = 0; i < 10; i++) SF.game.step(st, [0, 0]);
+    assert.notStrictEqual(st.fighters[0].pose, POSE.THROWN, "ワープで消えている間は投げられないはず");
+    assert.strictEqual(st.fighters[0].health, G.health);
+  }
+
+  // 浮遊：頂上を過ぎてからジャンプのキーを押し続けると、最大 float.frames だけ長く空中にいる。離すともう浮けない
+  function airTime(holdFrames) {
+    const st = newGame(1, ["genma", "kagetsu"]);
+    const g = st.fighters[0];
+    let n = 0;
+    for (let i = 0; i < 200; i++) {
+      SF.game.step(st, [i < holdFrames ? BUTTON.JUMP : 0, 0]);
+      if (!g.onGround) n += 1;
+    }
+    return n;
+  }
+  const normal = airTime(1);
+  const full = airTime(200);
+  const brief = airTime(40);
+  assert.strictEqual(full - normal, G.float.frames, `浮遊で長くなる時間が違う（${normal}F → ${full}F）`);
+  assert.ok(brief > normal && brief < full, "途中で離したら、そこから落ちるはず");
+  // カゲツは浮かない
+  {
+    const st = newGame(1, ["kagetsu", "genma"]);
+    let n = 0;
+    for (let i = 0; i < 200; i++) {
+      SF.game.step(st, [BUTTON.JUMP, 0]);
+      if (!st.fighters[0].onGround) n += 1;
+      if (st.fighters[0].onGround && n > 0) break;
+    }
+    assert.ok(n < normal + 5, "カゲツは浮かないはず");
+  }
+
+  // 異空間弾：門は spawnX 先に開く。目の前の相手には当たらない
+  {
+    const st = closeGame("genma", "kagetsu", 70);
+    for (let i = 0; i < 80; i++) SF.game.step(st, [i === 0 ? O : 0, 0]);
+    assert.strictEqual(st.fighters[1].health, CH.kagetsu.health, "異空間弾は目の前の相手には当たらないはず");
+    assert.ok(st.effects.length >= 0);
+  }
+  // 空中の異空間弾：斜め下へ飛ぶ。空中攻撃と合わせて1回のジャンプで1回
+  {
+    const st = newGame(1, ["genma", "kagetsu"]);
+    const g = st.fighters[0];
+    g.x = 300 * S;
+    st.fighters[1].x = 900 * S;
+    let shots = 0;
+    let fell = false;
+    for (let i = 0; i < 70; i++) {
+      const press = i === 0 ? BUTTON.JUMP : i === 20 ? O : i === 40 ? I : i === 45 ? O : 0;
+      SF.game.step(st, [press, 0]);
+      if (g.moveFrame === G.moves.airSpecial.startup && g.move === "airSpecial") shots += 1;
+      for (const p of st.projectiles) if (p.vy > 0) fell = true;
+    }
+    assert.strictEqual(shots, 1, "空中の異空間弾は1回のジャンプで1回のはず");
+    assert.ok(fell, "空中の異空間弾は下へ進むはず");
+  }
+  // 空中の異空間弾を地上の相手に当てる（立ちガードでもしゃがみガードでも防げる）
+  {
+    function airShot(guardBtn) {
+      const st = newGame(1, ["genma", "kagetsu"]);
+      st.fighters[0].x = 300 * S;
+      st.fighters[1].x = 520 * S;
+      const hp0 = st.fighters[1].health;
+      let blocked = false;
+      for (let i = 0; i < 100; i++) {
+        SF.game.step(st, [i === 0 ? BUTTON.JUMP : i === 24 ? O : 0, guardBtn]);
+        if (st.fighters[1].pose === POSE.BLOCK) blocked = true;
+      }
+      return { dmg: hp0 - st.fighters[1].health, blocked };
+    }
+    const hit = airShot(0);
+    const low = airShot(R | D);
+    assert.strictEqual(hit.dmg, G.moves.airSpecial.damage, `空中の異空間弾のダメージが違う（${hit.dmg}）`);
+    assert.ok(low.blocked, "空中の異空間弾はしゃがみガードでも防げるはず");
+  }
+  console.log(
+    `OK ゲンマ: 体力${G.health}、ワープは${G.forwardDash.frames}F消えて${fw.dist}px先・${-bw.dist}px後ろに現れ、相手の裏にも出られる、` +
+      `浮遊で空中にいる時間 ${normal}F → 最大${full}F、異空間弾は目の前に当たらない、空中の異空間弾は斜め下へ1回のジャンプで1回`,
+  );
 }
 
 // 連続技を入れて、合計ダメージと「途中で相手が動けなかったか」を調べる。
@@ -1264,7 +1395,7 @@ require("../src/core/learned-data.js");
   assert.strictEqual(m.screen, M.SCREEN.MODE);
   go(m, "ok");
   assert.strictEqual(m.screen, M.SCREEN.SELECT);
-  let r = go(m, "right", "down", "right", "down", "right", "right", "right");
+  let r = go(m, "right", "down", "left", "down", "right", "right", "right");
   assert.strictEqual(r, null);
   // 学習AIのときは「あなたとの対戦から学ぶ」（はじめは「する」）が設定に入る
   r = go(m, "down", "down", "ok");
