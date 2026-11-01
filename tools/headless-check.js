@@ -1862,7 +1862,9 @@ require("../src/core/autobattle.js");
     return Math.round((100 * w) / n);
   }
   const t1 = process.hrtime.bigint();
+  // 方針の手がかりも消して、本当に何も覚えていない表から学ぶ（Q学習そのものが効いているかを見る）
   const fresh = L.createBrain();
+  L.tableFor(fresh, "kagetsu", "rin").q.fill(0);
   const before = winRate(fresh, 40);
   for (let i = 0; i < 400; i++) {
     const side = i % 2;
@@ -1872,6 +1874,12 @@ require("../src/core/autobattle.js");
   const ms = Number(process.hrtime.bigint() - t1) / 1e6;
   assert.strictEqual(L.tableFor(fresh, "kagetsu", "rin").matches, 400, "学習した試合数が数えられていない");
   assert.ok(after >= before + 30, `学習しても強くならない（${before}% → ${after}%）`);
+  // キャラごとの方針：何も覚えていない表に方針の手がかりを入れただけで、学習前から「つよい」とそこそこ戦える
+  const guided = L.createBrain();
+  L.tableFor(guided, "kagetsu", "rin");
+  const guidedRate = winRate(guided, 40);
+  assert.ok(guidedRate > before, `方針の手がかりを入れても強くならない（${before}% → ${guidedRate}%）`);
+  for (const id of Object.keys(SF.characters.CHARACTERS)) assert.ok(L.POLICY[id], `${id} の方針がない`);
 
   // ゲームに入っている学習データの学習AIは「つよい」CPUにしっかり勝つ（どの組み合わせでも）
   // ゴウは学習データを作る前に入れたので（学習AIはゴウのいる戦いをまだ学んでいない）、ゴウのいる組み合わせは数えない。学び直したら外す
@@ -1893,7 +1901,7 @@ require("../src/core/autobattle.js");
       assert.ok(w >= need, `学習AI（${me}）が つよい（${opp}）に勝てていない（${w}/20）`);
     }
   }
-  console.log(`OK 学習AI: 何も覚えていない状態から400試合の学習で つよい への勝率 ${before}% → ${after}%（${(ms / 1000).toFixed(1)}秒）、入っている学習データは つよい に ${def.join("・")}`);
+  console.log(`OK 学習AI: 何も覚えていない状態から400試合の学習で つよい への勝率 ${before}% → ${after}%（方針の手がかりだけで ${guidedRate}%）（${(ms / 1000).toFixed(1)}秒）、入っている学習データは つよい に ${def.join("・")}`);
 }
 
 // ゲージとゲージ技
@@ -2086,8 +2094,8 @@ require("../src/core/autobattle.js");
   };
 
   // 張り手（U）はリーチが長い：カゲツの大振り斬り（I）の先端くらいの距離でも届く
-  const reach = run(gouGame("kagetsu", 135), 20, (i) => (i === 0 ? U : 0), 0);
-  assert.strictEqual(reach.fighters[1].health, 1000 - G.moves.standLight.damage, "張り手が135pxで届かない");
+  const reach = run(gouGame("kagetsu", 148), 20, (i) => (i === 0 ? U : 0), 0);
+  assert.strictEqual(reach.fighters[1].health, 1000 - G.moves.standLight.damage, "張り手が148pxで届かない");
   // そのかわり腕のやられる範囲も前に出る：届く距離ぎりぎりの大振り斬りを、伸ばした腕に合わされると負ける
   //   （張り手を出していなければ、カゲツの大振り斬りはゴウの体まで届かない距離）
   const far = 200;
@@ -2119,6 +2127,19 @@ require("../src/core/autobattle.js");
   run(ar2, 6, 0, (i) => (i === 5 ? U : 0)); // もう1発ジャブ
   run(ar2, 6, 0, 0);
   assert.strictEqual(ar2.fighters[1].health, CH.rin.health, "2発目を受けたのに大張り手が出た");
+
+  // 四股踏み（S＋I）は、当たった・ガードされた 張り手（U）と すね蹴り（S＋U）からキャンセルして出せる
+  for (const [label, first] of [["張り手", U], ["すね蹴り", D | U]]) {
+    for (const guard of [0, BUTTON.RIGHT | D]) {
+      const st2 = gouGame("kagetsu", 100);
+      let got = false;
+      for (let i = 0; i < 40; i++) {
+        SF.game.step(st2, [i === 0 ? first : i === 9 ? D | I : D, guard]);
+        if (st2.fighters[0].move === "crouchHeavy" && st2.fighters[0].moveFrame < 20) got = true;
+      }
+      assert.ok(got, `${label}から四股踏みにキャンセルできない（${guard ? "ガード" : "ヒット"}）`);
+    }
+  }
 
   // 岩落とし（O）：普通の投げより遠くから掴む。投げ抜けできない。220ダメージでダウン
   const sp = G.moves.special;
@@ -2190,12 +2211,19 @@ require("../src/core/autobattle.js");
   run(sproj, 150, (i) => (i === 18 ? I | O : 0), (i) => (i === 0 ? O : 0));
   assert.strictEqual(sproj.fighters[0].health, G.health, "大地落としの出だしに飛び道具が当たった");
   assert.strictEqual(sproj.fighters[1].health, CH.genma.health - su.damage, "飛び道具を撃った相手を大地落としで掴めない");
-  // 暗転を見てから跳べば避けられる（空振りは大きな隙）
-  const sj = gouGame("kagetsu", 200, FULL);
-  run(sj, 150, (i) => (i === 0 ? I | O : 0), (i) => (i === 41 ? BUTTON.JUMP : 0));
-  assert.strictEqual(sj.fighters[1].health, 1000, "跳んだ相手を大地落としで掴めた");
+  // 暗転を見てから跳んでも、バックステップしても掴む（カゲツの月影斬と同じく、暗転のあとでは対応できない）
+  for (const [label, esc] of [["跳んだ", BUTTON.JUMP], ["バックステップした", -1]]) {
+    const sj = gouGame("kagetsu", 200, FULL);
+    run(sj, 150, (i) => (i === 0 ? I | O : 0), (i) => (esc > 0 ? (i === 41 ? esc : 0) : i === 39 || i === 41 ? BUTTON.RIGHT : 0));
+    assert.strictEqual(sj.fighters[1].health, 1000 - su.damage, `暗転のあとで${label}相手を大地落としで掴めない`);
+  }
+  // 暗転する前から跳んでいた相手には空振りする（大きな隙）
+  const pre = gouGame("kagetsu", 200, FULL);
+  run(pre, 150, (i) => (i === 12 ? I | O : 0), (i) => (i === 0 ? BUTTON.JUMP : 0));
+  assert.strictEqual(pre.fighters[1].health, 1000, "暗転の前から跳んでいた相手を大地落としで掴めた");
+  assert.ok(su.recovery >= 70, "大地落としの空振りの隙");
 
-  console.log(`OK ゴウ: 張り手は135pxまで届くが腕に強攻撃を合わされる、弱と強がかち合ったら強が勝つ、大張り手の踏ん張りは1発だけ、岩落とし（${sp.damage}）は投げ抜けできずガード硬直中とジャンプ中は掴めない、つかみ上げ（${cs.damage}）は空中の相手だけ・空中攻撃に勝つ、踏み込みで飛び道具をすり抜け、大地落とし（${su.damage}）はガード・投げ抜け不可で約250pxまで届き跳べば避けられる`);
+  console.log(`OK ゴウ: 張り手は148pxまで届くが腕に強攻撃を合わされる、弱と強がかち合ったら強が勝つ、大張り手の踏ん張りは1発だけ、張り手・すね蹴りから四股踏みにキャンセルできる、岩落とし（${sp.damage}）は投げ抜けできずガード硬直中とジャンプ中は掴めない、つかみ上げ（${cs.damage}）は空中の相手だけ・空中攻撃に勝つ、踏み込みで飛び道具をすり抜け、大地落とし（${su.damage}）はガード・投げ抜け不可で約250pxまで届き、暗転のあとで跳んでもバックステップしても掴む（暗転の前から跳んでいれば空振り）`);
 }
 
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める

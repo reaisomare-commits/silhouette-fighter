@@ -216,7 +216,8 @@
     if (!o.move || o.moveHit) return null;
     const m = CHARACTERS[opp.charId].moves[o.move];
     // ガードできない投げの技（ゴウの岩落とし・大地落とし）：掴まれる前なら、弱攻撃で止めるか跳んで避ける（guard: "grab"）
-    if (m && m.kind === "throw" && o.move !== "throw" && !m.antiAir && o.moveFrame < m.startup) {
+    // （暗転のあとでは避けられない大地落としは除く）
+    if (m && m.kind === "throw" && o.move !== "throw" && !m.antiAir && !m.catchAfterFreeze && o.moveFrame < m.startup) {
       let grabReach = m.hitbox.x2 + CHARACTERS[me.charId].width / 2 + 10;
       if (m.lunge) grabReach += (m.lunge.to - m.lunge.from + 1) * m.lunge.speed;
       return dist <= grabReach ? { key: "m" + o.moveId, guard: "grab", lunge: !!m.lunge } : null;

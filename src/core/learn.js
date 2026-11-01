@@ -56,6 +56,80 @@
   const WALL_NEAR = 120; // 画面端からこれ以内なら「端」（ピクセル）
   const PROJ_NEAR = 420; // 相手の飛び道具がこれより近くで向かってきたら「飛び道具あり」（ピクセル）
 
+  // ---- キャラごとの方針（強そうな動きのまとめ） ----
+  // 技の数値と、CPU同士の自動対戦の記録（どの技がダメージを取れているか）から決めた「このキャラはこう戦うと強い」。
+  // 学習の始めの手がかりに使う：
+  //   ・わざと別の行動を試すとき（探検）、POLICY_GUIDE の割合で、方針の行動から選ぶ（残りはでたらめ）
+  //   ・まだ何も覚えていない表は、方針の行動の数字を少し高くしてから学び始める（POLICY_PRIOR）
+  //   方針はあくまで手がかりで、試して損だった行動は学習で数字が下がり、選ばれなくなる。
+  // 決まりは上から順に見て、最初に当てはまったものを使う。dist＝距離（DIST_LABELS の番号）、opp＝相手の様子（OPP_LABELS の番号、なければどれでも）
+  //   距離：0 投げの距離、1 弱攻撃の距離、2 強攻撃の距離、3 少し遠い、4 遠い、5 とても遠い
+  //   相手：0 ふつう、1 しゃがみ・ガード、2 技を出している、3 技のスキ、4 のけぞり・ガード硬直、5 空中
+  const POLICY = {
+    // カゲツ：飛刃で跳ばせて昇り斬りで落とす。中くらいの距離は大振り斬りの先端。近ければ柄打ちから連続技と投げ
+    kagetsu: [
+      { opp: [5], dist: [0, 1, 2, 3], act: { crouchSpecial: 4, back: 1 } },
+      { opp: [3], dist: [0, 1, 2], act: { heavy: 3, special: 1 } },
+      { dist: [4, 5], act: { special: 3, forward: 1, wait: 1 } },
+      { dist: [3], act: { special: 2, forward: 2, heavy: 1 } },
+      { dist: [2], act: { heavy: 3, crouchHeavy: 1, back: 1 } },
+      { dist: [0, 1], act: { light: 3, throw: 2, heavy: 1, crouchLight: 1 } },
+    ],
+    // リン：ダッシュと前ジャンプで近づき、近ければジャブ・投げ・中段の回し蹴りで崩す。スキには突進拳
+    rin: [
+      { opp: [5], dist: [0, 1, 2, 3], act: { crouchSpecial: 4, back: 1 } },
+      { opp: [3], dist: [0, 1, 2, 3], act: { special: 3, heavy: 2 } },
+      { dist: [4, 5], act: { dash: 3, jump: 2, forward: 1 } },
+      { dist: [3], act: { dash: 2, jump: 2, special: 1 } },
+      { dist: [2], act: { heavy: 3, special: 2, dash: 1 } },
+      { dist: [0, 1], act: { light: 3, throw: 3, heavy: 2, crouchLight: 1 } },
+    ],
+    // ゲンマ：離れて異空間弾、垂直ジャンプで浮いて撃つ。近づかれたら後ろへワープ。中くらいの距離は影の鎌
+    genma: [
+      { opp: [5], dist: [0, 1, 2], act: { crouchSpecial: 2, backdash: 2 } },
+      { opp: [3], dist: [0, 1, 2], act: { heavy: 3 } },
+      { dist: [4, 5], act: { special: 3, jumpUp: 2, wait: 1 } },
+      { dist: [3], act: { special: 3, heavy: 1, backdash: 1 } },
+      { dist: [2], act: { heavy: 3, backdash: 2, special: 1 } },
+      { dist: [0, 1], act: { backdash: 3, light: 2, throw: 1, heavy: 1 } },
+    ],
+    // ゴウ：踏み込み（飛び道具をすり抜ける）とガードで近づく。長い張り手で止め、近ければ岩落とし（投げ抜け不可）と投げ。
+    //   ガードを固める相手やガード硬直の終わりには岩落とし。跳んできたら、つかみ上げ
+    gou: [
+      { opp: [5], dist: [0, 1, 2, 3], act: { crouchSpecial: 4 } },
+      { opp: [1, 4], dist: [0, 1], act: { special: 3, throw: 2, light: 1 } },
+      { opp: [3], dist: [0, 1, 2], act: { heavy: 2, special: 2 } },
+      { dist: [4, 5], act: { dash: 3, forward: 2, back: 1 } },
+      { dist: [3], act: { dash: 2, forward: 2, back: 1 } },
+      { dist: [2], act: { light: 3, forward: 2, heavy: 1 } },
+      { dist: [1], act: { forward: 2, light: 2, special: 1 } },
+      { dist: [0], act: { special: 4, throw: 2, light: 1 } },
+    ],
+  };
+  const POLICY_GUIDE = 0.6; // 探検のとき、方針の行動から選ぶ割合
+  const POLICY_PRIOR = 0.03; // 何も覚えていない表で、方針の行動の数字をどれだけ高くしておくか（いちばん重い行動がこの値）
+
+  // 状況番号に当てはまる方針（{ 行動の id: 重み }）。なければ null
+  function policyFor(charId, s) {
+    const rules = POLICY[charId];
+    if (!rules) return null;
+    const os = Math.floor(s / 12) % OPP_LABELS.length;
+    const d = Math.floor(s / (12 * OPP_LABELS.length));
+    const rule = rules.find((r) => r.dist.includes(d) && (!r.opp || r.opp.includes(os)));
+    return rule ? rule.act : null;
+  }
+
+  // 何も覚えていない表に、方針の手がかりを入れる
+  function applyPolicyPrior(table, charId) {
+    for (let s = 0; s < STATES; s++) {
+      const act = policyFor(charId, s);
+      if (!act) continue;
+      const max = Math.max(...Object.values(act));
+      for (const [id, w] of Object.entries(act)) table.q[s * ACTIONS.length + ACTION_INDEX[id]] = (POLICY_PRIOR * w) / max;
+    }
+    return table;
+  }
+
   const tableKey = (me, opp) => `${me}>${opp}`;
 
   function createTable() {
@@ -67,9 +141,10 @@
     return { version: STATE_VERSION, tables: {}, played: 0 };
   }
 
+  // 表がまだなければ、方針の手がかりを入れた新しい表を作る
   function tableFor(brain, me, opp) {
     const k = tableKey(me, opp);
-    return brain.tables[k] || (brain.tables[k] = createTable());
+    return brain.tables[k] || (brain.tables[k] = applyPolicyPrior(createTable(), me));
   }
 
   // 保存用の形（JSONにできる、ふつうの配列）にする
@@ -253,8 +328,25 @@
 
     let a;
     if (SF.rng.nextInt(rng, 10000) < L.explore * 10000) {
-      do a = SF.rng.nextInt(rng, ACTIONS.length);
-      while (!allowed(state, index, a));
+      // 探検：POLICY_GUIDE の割合で、キャラの方針の行動から重みに合わせて選ぶ。残りはでたらめ
+      const act = policyFor(me.charId, s);
+      if (act && SF.rng.nextInt(rng, 100) < POLICY_GUIDE * 100) {
+        const ids = Object.keys(act).filter((id) => allowed(state, index, ACTION_INDEX[id]));
+        if (ids.length) {
+          let r = SF.rng.nextInt(rng, ids.reduce((t, id) => t + act[id], 0));
+          for (const id of ids) {
+            if (r < act[id]) {
+              a = ACTION_INDEX[id];
+              break;
+            }
+            r -= act[id];
+          }
+        }
+      }
+      if (a === undefined) {
+        do a = SF.rng.nextInt(rng, ACTIONS.length);
+        while (!allowed(state, index, a));
+      }
     } else {
       // いちばん数字の大きい行動。同じ数字が並んだら、その中からでたらめに選ぶ
       const base = s * ACTIONS.length;
@@ -338,6 +430,9 @@
   SF.learn = {
     ACTIONS,
     ACTION_INDEX,
+    POLICY,
+    policyFor,
+    applyPolicyPrior,
     STATES,
     STATE_VERSION,
     PLAYER_ALPHA,

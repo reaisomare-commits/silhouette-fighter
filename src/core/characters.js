@@ -199,9 +199,9 @@
       //   projectileInvincible: 出してからそのフレームまで飛び道具が当たらない
       moves: {
         // 張り手：弱攻撃なのにリーチが長い（強攻撃なみ）。そのかわり腕のやられる範囲も同じだけ前に出るので、強攻撃を合わされると負ける
-        standLight: { name: "張り手", startup: 7, active: 3, recovery: 12, hitAdv: 2, blockAdv: 0, damage: 60, guard: "mid", hitbox: { x1: 20, x2: 112, y1: 95, y2: 150 }, hurtExtend: { x1: 0, x2: 112, y1: 95, y2: 150 }, push: 20 },
+        standLight: { name: "張り手", startup: 7, active: 3, recovery: 12, hitAdv: 2, blockAdv: 0, damage: 60, guard: "mid", hitbox: { x1: 20, x2: 125, y1: 95, y2: 150 }, hurtExtend: { x1: 0, x2: 125, y1: 95, y2: 150 }, push: 20 },
         // 大振りだが、出だしから当たり終わるまで1発だけ攻撃を受け止める（踏ん張り）
-        standHeavy: { name: "大張り手", startup: 14, active: 4, recovery: 22, hitAdv: 3, blockAdv: -6, damage: 130, guard: "mid", hitbox: { x1: 25, x2: 125, y1: 80, y2: 155 }, push: 30, armor: { from: 3, to: 17 } },
+        standHeavy: { name: "大張り手", startup: 18, active: 4, recovery: 22, hitAdv: 3, blockAdv: -6, damage: 130, guard: "mid", hitbox: { x1: 25, x2: 125, y1: 80, y2: 155 }, push: 30, armor: { from: 3, to: 21 } },
         crouchLight: { name: "すね蹴り", startup: 8, active: 2, recovery: 12, hitAdv: 2, blockAdv: -1, damage: 50, guard: "low", hitbox: { x1: 20, x2: 100, y1: 0, y2: 35 }, push: 18 },
         crouchHeavy: { name: "四股踏み", startup: 16, active: 4, recovery: 24, hitAdv: "down", blockAdv: -10, damage: 120, guard: "low", hitbox: { x1: 10, x2: 125, y1: 0, y2: 25 }, push: 24, noCancel: true },
         airLight: { name: "肘落とし", startup: 7, active: 6, recovery: null, hitAdv: 10, blockAdv: 2, damage: 50, guard: "air", hitbox: { x1: 0, x2: 68, y1: -15, y2: 55 }, push: 10 },
@@ -213,9 +213,11 @@
         crouchSpecial: { name: "つかみ上げ", kind: "throw", noTech: true, antiAir: true, startup: 5, active: 8, recovery: 30, damage: 150, hitbox: { x1: -20, x2: 90, y1: 110, y2: 300 }, hurtExtend: { x1: 0, x2: 40, y1: 110, y2: 200 }, airInvincible: 12, hold: 20, finish: 24 },
         // 投げ：掴める範囲が広め、ダメージも普通の投げより大きい
         throw: { name: "ベアハッグ", kind: "throw", startup: 5, active: 2, recovery: 24, damage: 160, hitbox: { x1: 0, x2: 65, y1: 0, y2: 175 } },
-        // ゲージ技「大地落とし」：約200ピクセル先まで突進して掴み、高く跳んで叩きつける。ガードも投げ抜けもできない。
-        //   出だしは飛び道具が当たらない。ジャンプされると空振りして大きな隙
-        super: { name: "大地落とし", kind: "throw", noTech: true, startup: 3, active: 13, recovery: 50, damage: 320, hitbox: { x1: 0, x2: 70, y1: 0, y2: 180 }, lunge: { from: 2, to: 15, speed: 14 }, projectileInvincible: 16, hold: 50, finish: 30 },
+        // ゲージ技「大地落とし」：約250ピクセル先まで突進して掴み、高く跳んで叩きつける。ガードも投げ抜けもできない。
+        //   出だしは飛び道具が当たらない。catchAfterFreeze: 暗転したときに地上にいた相手は、暗転のあとで跳んでも
+        //   バックステップやワープをしても掴む（カゲツの月影斬と同じく、暗転を見てからでは対応できない）。
+        //   暗転する前から跳んでいた相手や、届かない距離の相手には空振りして、大きな隙（70F）
+        super: { name: "大地落とし", kind: "throw", noTech: true, catchAfterFreeze: true, startup: 3, active: 13, recovery: 70, damage: 320, hitbox: { x1: 0, x2: 70, y1: 0, y2: 180 }, lunge: { from: 2, to: 15, speed: 14 }, projectileInvincible: 16, hold: 50, finish: 30 },
       },
     },
   };
