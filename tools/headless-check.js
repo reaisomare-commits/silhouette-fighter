@@ -311,7 +311,7 @@ function measureAdvantage(att, def, moveName, blocking) {
   return { adv: startB[0] - startA[0], result, damage, b };
 }
 
-for (const att of ["kagetsu", "rin", "genma"]) {
+for (const att of ["kagetsu", "rin", "genma", "gou"]) {
   const def = att === "kagetsu" ? "rin" : "kagetsu";
   const lines = [];
   for (const name of ["standLight", "standHeavy", "crouchLight", "crouchHeavy"]) {
@@ -1859,7 +1859,8 @@ require("../src/core/autobattle.js");
   assert.ok(after >= before + 30, `学習しても強くならない（${before}% → ${after}%）`);
 
   // ゲームに入っている学習データの学習AIは「つよい」CPUにしっかり勝つ（どの組み合わせでも）
-  const ids = Object.keys(SF.characters.CHARACTERS);
+  // ゴウは学習データを作る前に入れたので（学習AIはゴウのいる戦いをまだ学んでいない）、ゴウのいる組み合わせは数えない。学び直したら外す
+  const ids = Object.keys(SF.characters.CHARACTERS).filter((id) => id !== "gou");
   const def = [];
   for (const me of ids) {
     for (const opp of ids) {
@@ -2049,6 +2050,137 @@ require("../src/core/autobattle.js");
   assert.strictEqual(1000 - blk.fighters[1].health, 8 * 4, "冥府球の削り");
   assert.ok(pushed > 120, `ガードしても押し出されない（${pushed}px）`);
   console.log(`OK ゲージ技: ゲージの溜まり方（ガードでも溜まる）・I＋O（どんな技からもキャンセル）・暗転・持ち越し・消極的だと減る、月影斬は暗転前からガードしないと防げず（ガードで${tYes.adv}F）無敵で切り返せる、練気は暗転明けすぐ動けて6秒間すべてキャンセル可能、冥府球は地上でも空中でも8回連続ヒット（${dmg}）・ガードで${Math.round(pushed)}px押し出し`);
+}
+
+// ゴウ：投げの大男
+{
+  const O = BUTTON.SPECIAL;
+  const G = CH.gou;
+  const FULL = SF.game.GAUGE_FULL;
+  // 左がゴウ、右が相手。dist は体の中心どうしの距離
+  function gouGame(opp, dist, gauge = 0) {
+    const st = newGame(1, ["gou", opp]);
+    st.fighters[0].x = 300 * S;
+    st.fighters[1].x = (300 + dist) * S;
+    st.fighters[0].gauge = gauge;
+    return st;
+  }
+  const run = (st, n, inA, inB) => {
+    for (let i = 0; i < n; i++) SF.game.step(st, [typeof inA === "function" ? inA(i) : inA, typeof inB === "function" ? inB(i) : inB]);
+    return st;
+  };
+
+  // 張り手（U）はリーチが長い：カゲツの大振り斬り（I）の先端くらいの距離でも届く
+  const reach = run(gouGame("kagetsu", 135), 20, (i) => (i === 0 ? U : 0), 0);
+  assert.strictEqual(reach.fighters[1].health, 1000 - G.moves.standLight.damage, "張り手が135pxで届かない");
+  // そのかわり腕のやられる範囲も前に出る：届く距離ぎりぎりの大振り斬りを、伸ばした腕に合わされると負ける
+  //   （張り手を出していなければ、カゲツの大振り斬りはゴウの体まで届かない距離）
+  const far = 200;
+  const miss = run(gouGame("kagetsu", far), 40, 0, (i) => (i === 0 ? I : 0));
+  assert.strictEqual(miss.fighters[0].health, G.health, "この距離では大振り斬りは体に届かないはず");
+  const arm = run(gouGame("kagetsu", far), 40, (i) => (i === 5 ? U : 0), (i) => (i === 0 ? I : 0));
+  assert.strictEqual(arm.fighters[0].health, G.health - CH.kagetsu.moves.standHeavy.damage, "伸ばした腕に大振り斬りが当たらない");
+  // 弱と強がかち合ったら強が勝つ：同じフレームに当たる張り手（弱）と大振り斬り（強）
+  const kh = CH.kagetsu.moves.standHeavy;
+  const gl = G.moves.standLight;
+  const clash = run(gouGame("kagetsu", 120), 40, (i) => (i === kh.startup - gl.startup ? U : 0), (i) => (i === 0 ? I : 0));
+  assert.strictEqual(clash.fighters[0].health, G.health - kh.damage, "かち合いで強攻撃が当たっていない");
+  assert.strictEqual(clash.fighters[1].health, 1000, "かち合いで弱攻撃も当たってしまった");
+  // 逆も同じ：ゴウの大張り手（強）とカゲツの柄打ち（弱）なら、ゴウの強が勝つ（踏ん張りでなく、かち合いで）
+  const gh = G.moves.standHeavy;
+  const kl = CH.kagetsu.moves.standLight;
+  const clash2 = run(gouGame("kagetsu", 110), 40, (i) => (i === 0 ? I : 0), (i) => (i === gh.startup - kl.startup ? U : 0));
+  assert.strictEqual(clash2.fighters[1].health, 1000 - gh.damage, "かち合いで大張り手が当たっていない");
+  assert.strictEqual(clash2.fighters[0].health, G.health, "かち合いで弱攻撃も当たってしまった");
+  assert.strictEqual(clash2.fighters[0].armorUsed, false, "かち合いで勝ったのに踏ん張りを使った");
+
+  // 踏ん張り：大張り手の出だしに受けた1発は受け止めて（ダメージは受ける）、そのまま殴る
+  const ar = run(gouGame("kagetsu", 110), 40, (i) => (i === 0 ? I : 0), (i) => (i === 0 ? U : 0));
+  assert.strictEqual(ar.fighters[0].health, G.health - kl.damage, "踏ん張りでダメージを受けていない");
+  assert.strictEqual(ar.fighters[1].health, 1000 - gh.damage, "踏ん張りのあと大張り手が当たらない");
+  // 2発目は受け止められない（飛刃を2回：1発目は受け止め、2発目でのけぞる）
+  const ar2 = gouGame("rin", 110);
+  run(ar2, 3, (i) => (i === 0 ? I : 0), (i) => (i === 0 ? U : 0)); // ジャブを受け止める
+  run(ar2, 6, 0, (i) => (i === 5 ? U : 0)); // もう1発ジャブ
+  run(ar2, 6, 0, 0);
+  assert.strictEqual(ar2.fighters[1].health, CH.rin.health, "2発目を受けたのに大張り手が出た");
+
+  // 岩落とし（O）：普通の投げより遠くから掴む。投げ抜けできない。220ダメージでダウン
+  const sp = G.moves.special;
+  const cg = gouGame("kagetsu", 105);
+  run(cg, 3, (i) => (i === 0 ? O : 0), 0);
+  run(cg, 60, 0, (i) => (i % 2 ? U | I : 0)); // 掴まれてから投げ抜けを連打
+  assert.strictEqual(cg.fighters[1].health, 1000 - sp.damage, "岩落としのダメージ");
+  assert.strictEqual(cg.fighters[1].pose, POSE.DOWN, "岩落としでダウンしない");
+  // 普通の投げ（U＋I）はこの距離では届かない
+  const nt = run(gouGame("kagetsu", 105), 40, (i) => (i === 0 ? U | I : 0), 0);
+  assert.strictEqual(nt.fighters[1].health, 1000, "普通の投げが105pxで届いた");
+  // ガード硬直中の相手は掴めない（張り手をガードさせてすぐ岩落とし）
+  const gs = run(gouGame("kagetsu", 100), 40, (i) => (i === 0 ? U : i === 8 ? O : 0), BUTTON.RIGHT);
+  assert.strictEqual(gs.fighters[1].health, 1000, "ガード硬直中に岩落としで掴めた");
+  // ジャンプされると空振りして大きな隙
+  const jw = gouGame("kagetsu", 100);
+  run(jw, 20, (i) => (i === 6 ? O : 0), (i) => (i === 0 ? BUTTON.JUMP : 0));
+  assert.strictEqual(jw.fighters[1].health, 1000, "跳んだ相手を岩落としで掴めた");
+
+  // つかみ上げ（S＋O）：跳んできた相手を掴んで叩きつける。地上の相手は掴めない
+  const cs = G.moves.crouchSpecial;
+  const aa = gouGame("kagetsu", 200);
+  let caught = -1;
+  for (let i = 0; i < 80; i++) {
+    SF.game.step(aa, [i === 30 ? D | O : i === 29 ? D : 0, i === 0 ? BUTTON.JUMP | BUTTON.LEFT : 0]);
+    if (caught < 0 && aa.fighters[1].pose === POSE.THROWN) caught = i;
+  }
+  assert.ok(caught > 0, "跳んできた相手をつかみ上げで掴めない");
+  assert.strictEqual(aa.fighters[1].health, 1000 - cs.damage, "つかみ上げのダメージ");
+  const gnd = run(gouGame("kagetsu", 90), 40, (i) => (i === 0 ? D | O : D), 0);
+  assert.strictEqual(gnd.fighters[1].health, 1000, "地上の相手をつかみ上げで掴めた");
+  // 出だしは空中攻撃が当たらない：落ちてきて空中攻撃を出した相手も掴める
+  const ai = gouGame("kagetsu", 200);
+  let aiCaught = false;
+  for (let i = 0; i < 80; i++) {
+    SF.game.step(ai, [i === 30 ? D | O : i === 29 ? D : 0, i === 0 ? BUTTON.JUMP | BUTTON.LEFT : i === 26 ? I : 0]);
+    if (ai.fighters[1].pose === POSE.THROWN) aiCaught = true;
+  }
+  assert.ok(aiCaught, "空中攻撃を出した相手をつかみ上げで掴めない");
+  assert.strictEqual(ai.fighters[0].health, G.health, "つかみ上げの出だしに空中攻撃が当たった");
+
+  // 踏み込み（前を2回）：出だしは飛び道具をすり抜ける
+  const fd = G.forwardDash;
+  const thru = gouGame("kagetsu", 400);
+  const R = BUTTON.RIGHT;
+  // 飛刃を撃たせて、目の前に来たところで踏み込む
+  let stepAt = -1;
+  for (let i = 0; i < 90; i++) {
+    const p = thru.projectiles[0];
+    const near = p && Math.abs(p.x - thru.fighters[0].x) / S < 90;
+    if (stepAt < 0 && near) stepAt = i;
+    const inA = stepAt >= 0 && i - stepAt < 3 ? (i - stepAt === 1 ? 0 : R) : 0;
+    SF.game.step(thru, [inA, i === 0 ? O : 0]);
+  }
+  assert.ok(stepAt > 0);
+  assert.strictEqual(thru.fighters[0].health, G.health, "踏み込みの出だしで飛刃をすり抜けない");
+
+  // 大地落とし（ゲージ技）：約200px先まで突進して掴む。ガードも投げ抜けもできない。320ダメージ
+  const su = G.moves.super;
+  const sg = gouGame("kagetsu", 250, FULL);
+  run(sg, 150, (i) => (i === 0 ? I | O : 0), (i) => BUTTON.RIGHT | (i % 2 ? U | I : 0));
+  assert.strictEqual(sg.fighters[1].health, 1000 - su.damage, `大地落としのダメージ（${1000 - sg.fighters[1].health}）`);
+  assert.strictEqual(sg.fighters[0].gauge, 0, "大地落としでゲージが溜まった");
+  // 遠すぎると届かない
+  const sfar = run(gouGame("kagetsu", 320, FULL), 150, (i) => (i === 0 ? I | O : 0), 0);
+  assert.strictEqual(sfar.fighters[1].health, 1000, "320pxで大地落としが届いた");
+  // 出だしは飛び道具をすり抜ける：ゲンマの異空間弾が飛んでくる中でも掴む
+  const sproj = gouGame("genma", 250, FULL);
+  run(sproj, 150, (i) => (i === 18 ? I | O : 0), (i) => (i === 0 ? O : 0));
+  assert.strictEqual(sproj.fighters[0].health, G.health, "大地落としの出だしに飛び道具が当たった");
+  assert.strictEqual(sproj.fighters[1].health, CH.genma.health - su.damage, "飛び道具を撃った相手を大地落としで掴めない");
+  // 暗転を見てから跳べば避けられる（空振りは大きな隙）
+  const sj = gouGame("kagetsu", 200, FULL);
+  run(sj, 150, (i) => (i === 0 ? I | O : 0), (i) => (i === 41 ? BUTTON.JUMP : 0));
+  assert.strictEqual(sj.fighters[1].health, 1000, "跳んだ相手を大地落としで掴めた");
+
+  console.log(`OK ゴウ: 張り手は135pxまで届くが腕に強攻撃を合わされる、弱と強がかち合ったら強が勝つ、大張り手の踏ん張りは1発だけ、岩落とし（${sp.damage}）は投げ抜けできずガード硬直中とジャンプ中は掴めない、つかみ上げ（${cs.damage}）は空中の相手だけ・空中攻撃に勝つ、踏み込みで飛び道具をすり抜け、大地落とし（${su.damage}）はガード・投げ抜け不可で約250pxまで届き跳べば避けられる`);
 }
 
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める
