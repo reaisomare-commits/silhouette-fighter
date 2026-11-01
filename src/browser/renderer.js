@@ -361,20 +361,21 @@
           limb(lean, shoulderY + 6, lean + 6, handY + 18, 9);
         } else {
           let front = { x: lean + 24, y: handY };
+          // 後ろの手（ふだんは胸の前で構える）
+          let back = { from: shoulderY + 6, x: lean + 12, y: handY + 12 };
           if (atk && move === "standLight") front = { x: lean + lerp(24, 54, atk.ext), y: handY - 6 * atk.ext };
           if (atk && move === "special") front = { x: lean + lerp(24, 62, atk.ext), y: handY - 4 * atk.ext };
           if ((atk && move === "throw") || throwFollow) {
-            // 投げ：両手を前に出して掴む
+            // 投げ：両手を前に出して掴む（後ろの手も前へ伸ばす。腕は2本のまま）
             const e = throwFollow ? 1 : Math.max(atk.ext, atk.wind * 0.5);
             front = { x: lean + lerp(24, 44, e), y: handY - 4 };
-            limb(lean, shoulderY + 10, lean + lerp(14, 40, e), handY + 8, 9);
-            circle(lean + lerp(14, 40, e), handY + 8, 6);
+            back = { from: shoulderY + 10, x: lean + lerp(14, 40, e), y: handY + 8 };
           }
           if (atk && move === "airLight") front = { x: lean + lerp(24, 44, atk.ext), y: handY + 26 * atk.ext };
           limb(lean, shoulderY + 4, front.x - 2, front.y, 9);
           circle(front.x, front.y, 6);
-          limb(lean, shoulderY + 6, lean + 10, handY + 12, 9);
-          circle(lean + 12, handY + 12, 6);
+          limb(lean, back.from, back.x - 2, back.y, 9);
+          circle(back.x, back.y, 6);
         }
         // 鉢巻（差し色）。後ろの端が風になびく
         ctx.strokeStyle = accent;
