@@ -119,6 +119,7 @@
       buffTimer: 0, // ゲージ技で強くなっている残りフレーム（リンの練気：すべての攻撃がキャンセルできる）
       passive: 0, // 消極的な動き（前に出ない・飛び道具しか撃たない）が続いているフレーム数
       superGuardable: true, // 今出しているゲージ技を、相手がガードできるか（暗転する前からガードを押していたか）
+      armorUsed: false, // 今の技の踏ん張り（ゴウの大張り手）で、もう攻撃を受け止めたか（1回の技で1発だけ）
     };
   }
 
@@ -223,6 +224,7 @@
     f.buffer = null;
     f.charging = !!CHARACTERS[f.charId].moves[name].charge;
     f.chargeFrames = 0;
+    f.armorUsed = false;
     if (isAirMove(name)) f.airAttackUsed = true;
     if (!chain) f.chainLights = 0;
     if (isLightMove(name)) f.chainLights += 1;
@@ -306,6 +308,32 @@
   function fullCharge(f) {
     const m = moveData(f);
     return !!(m && m.charge && m.charge.full && f.chargeFrames >= m.charge.max);
+  }
+
+  // 飛び道具が当たらない状態か：最大までためた突進拳（リン）、踏み込みの出だし・大地落としの出だし（ゴウ）
+  function projectileImmune(f) {
+    if (fullCharge(f) && moveData(f).charge.full.projectileInvincible) return true;
+    const fd = CHARACTERS[f.charId].forwardDash;
+    if (f.action === POSE.STEP && fd.projectileInvincible && fd.frames - f.actionTimer < fd.projectileInvincible) return true;
+    const m = moveData(f);
+    return !!(m && m.projectileInvincible && f.moveFrame <= m.projectileInvincible);
+  }
+
+  // 踏ん張り（ゴウの大張り手）で、攻撃を受け止められる時間か。1回の技で1発だけ
+  function armorActive(f) {
+    const m = moveData(f);
+    return !!(m && m.armor && !f.armorUsed && f.moveFrame >= m.armor.from && f.moveFrame <= m.armor.to);
+  }
+
+  // 空中の相手の攻撃が当たらない時間か（ゴウのつかみ上げの出だし）
+  function airInvincible(f) {
+    const m = moveData(f);
+    return !!(m && m.airInvincible && f.moveFrame <= m.airInvincible);
+  }
+
+  // 投げ抜けできない投げ（ゴウの岩落とし・つかみ上げ・大地落とし）で掴んでいる最中か。投げ終わるまで攻撃も当たらない
+  function holdingSlam(f) {
+    return !!(f.grab && CHARACTERS[f.charId].moves[f.grab.move].noTech);
   }
 
   // 自分の飛び道具がまだ画面にあるか（飛刃は画面に1つまで）
@@ -791,7 +819,7 @@
 
   function hurtbox(f) {
     if (f.pose === POSE.DOWN || f.pose === POSE.LAUNCH || f.pose === POSE.THROWN) return null;
-    if (backstepInvincible(f) || f.action === POSE.WARP || superInvincible(f)) return null;
+    if (backstepInvincible(f) || f.action === POSE.WARP || superInvincible(f) || holdingSlam(f)) return null;
     const w = CHARACTERS[f.charId].width;
     const x = f.x / S;
     const y = f.y / S;
@@ -1054,6 +1082,17 @@
     const fx = (Math.max(box.left, body.left) + Math.min(box.right, body.right)) / 2;
     const fy = (Math.max(box.top, body.top) + Math.min(box.bottom, body.bottom)) / 2;
 
+    // 踏ん張り（ゴウの大張り手）：1発だけ受け止めて、技を止めずに出し続ける（ダメージは受ける。ゲージ技は受け止められない）
+    if (!blocked && moveName !== "super" && armorActive(def)) {
+      def.armorUsed = true;
+      record(state, att, moveName, "damage", dealDamage(state, att, def, m.damage, false, moveName));
+      state.hitstop = Math.max(state.hitstop, BATTLE.hitstopHit);
+      state.effects.push({ kind: "hit", x: fx, y: fy, life: 14 });
+      state.effects.push({ kind: "text", text: "踏ん張り！", x: def.x / S, y: def.y / S - fighterHeight(def) - 30, life: 45 });
+      if (!proj && !air) att.pushVx = (-dir * pushPx * S) / 5;
+      return;
+    }
+
     if (blocked) {
       def.pose = POSE.BLOCK;
       def.crouching = def.holdDown;
@@ -1140,13 +1179,15 @@
       const def = state.fighters[1 - i];
       const box = hitbox(att);
       const body = box && touching(box, def);
+      // つかみ上げ（ゴウ）の出だしは、空中の相手の攻撃が当たらない
+      if (body && !att.onGround && airInvincible(def)) continue;
       if (body) hits.push({ att, def, m: moveData(att), box, body, p: null, rank: hitRank(att.move), name: att.move });
     }
     for (const p of state.projectiles) {
       const att = state.fighters[p.owner];
       const def = state.fighters[1 - p.owner];
-      // 最大までためた突進拳は、飛び道具をすり抜ける（飛び道具は消えずにそのまま飛ぶ）
-      if (fullCharge(def) && moveData(def).charge.full.projectileInvincible) continue;
+      // 最大までためた突進拳・ゴウの踏み込みや大地落としの出だしは、飛び道具をすり抜ける（飛び道具は消えずにそのまま飛ぶ）
+      if (projectileImmune(def)) continue;
       if (p.cooldown > 0) continue; // 何回も当たる飛び道具の、次に当たれるまで
       const box = projectileBox(p);
       // 何回も当たる飛び道具は、空中でやられている相手（ふつうは攻撃が当たらない）にも当たり続ける
@@ -1173,6 +1214,11 @@
     return f.onGround && f.stun === 0 && f.action !== POSE.BACKSTEP && f.action !== POSE.WARP && f.pose !== POSE.LANDING && !f.grab && f.pose !== POSE.DOWN && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN;
   }
 
+  // 空中で掴める状態か（ゴウのつかみ上げ）：空中にいて、空中でやられて落ちている最中でない
+  function airGrabbable(f) {
+    return !f.onGround && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN && !f.grab;
+  }
+
   function checkThrows(state) {
     const grabs = [];
     for (let i = 0; i < 2; i++) {
@@ -1180,22 +1226,29 @@
       const def = state.fighters[1 - i];
       const box = grabBox(att);
       const body = hurtbox(def);
-      if (box && body && throwable(def) && overlap(box, body)) grabs.push([att, def]);
+      const antiAir = box && moveData(att).antiAir;
+      const can = antiAir ? airGrabbable(def) : throwable(def);
+      if (box && body && can && overlap(box, body)) grabs.push([att, def]);
     }
     if (grabs.length === 2) {
       // 同時に掴み合ったら、両方とも投げ抜けしたことにする
       const [a, b] = state.fighters;
       a.moveHit = b.moveHit = true;
-      record(state, a, "throw", "techs");
-      record(state, b, "throw", "techs");
+      record(state, a, a.move, "techs");
+      record(state, b, b.move, "techs");
       throwTech(state, a, b);
       return;
     }
     for (const [att, def] of grabs) {
       att.moveHit = true;
-      att.grab = { timer: 0 };
+      att.grab = { timer: 0, move: att.move };
       att.pose = POSE.THROW;
       att.vx = 0;
+      att.pushVx = 0;
+      def.onGround = true; // 空中で掴んだ相手（つかみ上げ）も、投げ終わるまでは投げの動きで動かす
+      def.vy = 0;
+      def.pushVx = 0;
+      def.floating = false;
       def.punishedGrab = backstepPunishable(def);
       def.pose = POSE.THROWN;
       def.move = null;
@@ -1206,7 +1259,7 @@
       def.buffer = null;
       // 掴まれる少し前（投げ抜けの受付と同じフレーム数以内）にU＋Iを押していたら、投げ抜けになる
       // （ガード硬直が終わる頃に投げ返そうとしたら、相手の投げのほうが早かったとき）
-      def.techInput = def.throwPressAge <= BATTLE.throwTechWindow;
+      def.techInput = !moveData(att).noTech && def.throwPressAge <= BATTLE.throwTechWindow;
       // 相手を自分の目の前に引き寄せる
       const near = ((CHARACTERS[att.charId].width + CHARACTERS[def.charId].width) / 2 + 4) * S;
       def.x = att.x + att.facing * near;
@@ -1234,33 +1287,73 @@
     state.effects.push({ kind: "block", x: (a.x + b.x) / 2 / S, y: Math.min(a.y, b.y) / S - 90, life: 12 });
   }
 
-  // 掴んでいる投げを進める。投げ抜けの受付が終わったら投げる
+  // 掴んでいる投げを進める。投げ抜けの受付が終わったら投げる。
+  // 投げ抜けできない投げ（ゴウ）は、hold フレームかけて相手を持ち上げてから叩きつける
   function updateThrows(state) {
     for (let i = 0; i < 2; i++) {
       const att = state.fighters[i];
       const def = state.fighters[1 - i];
       if (!att.grab) continue;
       att.grab.timer += 1;
-      if (def.techInput && att.grab.timer <= BATTLE.throwTechWindow) {
-        record(state, att, "throw", "techs");
+      const name = att.grab.move;
+      const m = CHARACTERS[att.charId].moves[name];
+      if (m.noTech) {
+        slamMotion(att, def, name, att.grab.timer / m.hold);
+        if (att.grab.timer >= m.hold) finishThrow(state, att, def, m, name);
+      } else if (def.techInput && att.grab.timer <= BATTLE.throwTechWindow) {
+        record(state, att, name, "techs");
         throwTech(state, att, def);
       } else if (att.grab.timer > BATTLE.throwTechWindow) {
-        // 投げる：相手を前に放り投げてダウンさせる
-        const m = CHARACTERS[att.charId].moves.throw;
-        att.grab = null;
-        att.move = null;
-        att.pose = POSE.THROW;
-        att.stun = BATTLE.throwFinish;
-        def.techInput = false;
-        record(state, att, "throw", "hits");
-        record(state, att, "throw", "damage", dealDamage(state, att, def, m.damage, def.punishedGrab, "throw"));
-        def.punishedGrab = false;
-        knockDown(def);
-        def.pushVx = (att.facing * 60 * S) / 5;
-        state.hitstop = Math.max(state.hitstop, BATTLE.hitstopHit);
-        state.effects.push({ kind: "hit", x: def.x / S, y: def.y / S - 20, life: 14 });
+        finishThrow(state, att, def, m, name);
       }
     }
+  }
+
+  // 投げ抜けできない投げの動き（t は 0〜1）。掴んだ相手を持ち上げる・一緒に跳ぶ（位置だけ動かす。この間はどちらにも攻撃は当たらない）
+  function slamMotion(att, def, name, t) {
+    const ground = C.GROUND_Y * S;
+    const near = ((CHARACTERS[att.charId].width + CHARACTERS[def.charId].width) / 2 + 4) * S;
+    const overhead = CHARACTERS[att.charId].height - 10;
+    if (name === "super") {
+      // 大地落とし：相手を頭の上に担いで高く跳び、落ちてくる（上り60%、下り40%）
+      const u = t < 0.6 ? (t / 0.6) * 0.5 : 0.5 + ((t - 0.6) / 0.4) * 0.5;
+      att.y = ground - Math.round(Math.sin(Math.PI * Math.min(1, u)) * 240) * S;
+      def.x = att.x + att.facing * 10 * S;
+      def.y = att.y - overhead * S;
+    } else {
+      // 岩落とし：前の相手を頭の上まで持ち上げてから、前へ叩きつける。つかみ上げ：空中で掴んで頭の上から叩きつける
+      const up = name === "crouchSpecial" ? 0.3 : 0.55;
+      const a = t < up ? (name === "crouchSpecial" ? 1 : t / up) : 1 - (t - up) / (1 - up);
+      const th = (Math.PI / 2) * Math.max(0, Math.min(1, a));
+      def.x = att.x + Math.round(att.facing * Math.cos(th) * (near / S)) * S;
+      def.y = ground - Math.round(Math.sin(th) * overhead) * S;
+    }
+    clampToStage(def);
+  }
+
+  // 投げる：相手を前に放り投げてダウンさせる
+  function finishThrow(state, att, def, m, name) {
+    const ground = C.GROUND_Y * S;
+    att.grab = null;
+    att.move = null;
+    att.pose = POSE.THROW;
+    att.stun = m.finish || BATTLE.throwFinish;
+    att.y = ground;
+    def.techInput = false;
+    if (m.noTech) {
+      // 叩きつけ：相手は自分の目の前の地面に落ちる
+      const near = ((CHARACTERS[att.charId].width + CHARACTERS[def.charId].width) / 2 + 4) * S;
+      def.x = att.x + att.facing * near;
+      def.y = ground;
+      clampToStage(def);
+    }
+    record(state, att, name, "hits");
+    record(state, att, name, "damage", dealDamage(state, att, def, m.damage, def.punishedGrab, name));
+    def.punishedGrab = false;
+    knockDown(def);
+    def.pushVx = (att.facing * (m.noTech ? 30 : 60) * S) / 5;
+    state.hitstop = Math.max(state.hitstop, BATTLE.hitstopHit);
+    state.effects.push({ kind: "hit", x: def.x / S, y: def.y / S - 20, life: 14 });
   }
 
   // 2人の体が重なっていたら、半分ずつ押し戻す。

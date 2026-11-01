@@ -7,8 +7,8 @@
   const { CHARACTERS, BATTLE } = SF.characters;
 
   // 差し色：カゲツは刃が青、リンは鉢巻が赤。同じキャラ同士のときは右側を別の色にする
-  const ACCENT = { kagetsu: "#4da6ff", rin: "#ff4d4d", genma: "#b25cff" };
-  const ACCENT_MIRROR = { kagetsu: "#5cff8a", rin: "#ffd24d", genma: "#ff7ad9" };
+  const ACCENT = { kagetsu: "#4da6ff", rin: "#ff4d4d", genma: "#b25cff", gou: "#ff8c2a" };
+  const ACCENT_MIRROR = { kagetsu: "#5cff8a", rin: "#ffd24d", genma: "#ff7ad9", gou: "#5fe0d0" };
 
   const POSE_LABEL = {
     [POSE.STAND]: "立ち",
@@ -120,6 +120,19 @@
         limb(-len * 0.45 - 16, -24, -len * 0.45 - 34, -36, 4);
         ctx.fillStyle = accent;
         ctx.fillRect(-len * 0.45 - 20, -18, 5, 2);
+        ctx.fillStyle = "#000";
+        return;
+      }
+      if (f.charId === "gou") {
+        // ゴウ：大きな体をあお向けに投げ出す。差し色の帯
+        const len = CHARACTERS.gou.height * 0.72;
+        limb(-len * 0.42, -16, len * 0.12, -16, 34);
+        circle(-len * 0.42 - 16, -16, 15);
+        circle(-len * 0.42 - 26, -26, 7); // まげ
+        limb(len * 0.12, -12, len * 0.55, -8, 18);
+        limb(len * 0.12, -20, len * 0.5, -26, 18);
+        ctx.fillStyle = accent;
+        ctx.fillRect(len * 0.02, -34, 12, 34);
         ctx.fillStyle = "#000";
         return;
       }
@@ -338,6 +351,176 @@
       }
     }
 
+    // ゴウ（剛）：大きな体の力士風の大男。頭にまげ、腰に差し色の帯。太い腕で張り手と掴み
+    function drawGou(f, state, o) {
+      const { p, crouching, guarding, hurt, throwFollow, atk, move, accent } = o;
+      const h = o.h;
+      const frame = state.frame;
+      const airborne = o.airborne;
+      const m = atk && atk.m;
+      // 踏ん張りの間は体のまわりが差し色に光る
+      if (m && m.armor && !f.armorUsed && f.moveFrame >= m.armor.from && f.moveFrame <= m.armor.to) {
+        ctx.save();
+        ctx.strokeStyle = accent;
+        ctx.globalAlpha = 0.5 + 0.3 * Math.sin(frame * 0.9);
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.ellipse(0, -h * 0.5, o.w * 0.95, h * 0.58, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      // 大地落とし：突進中は後ろに差し色の土煙の帯
+      if (move === "super" && !atk.rec && f.moveFrame >= 2 && !f.grab) {
+        ctx.save();
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = accent;
+        const trail = Math.min(f.moveFrame - 1, 14) * 14;
+        ctx.fillRect(-trail, -h * 0.5, trail, 12);
+        ctx.fillRect(-trail * 0.8, -20, trail * 0.8, 10);
+        ctx.restore();
+      }
+      const headR = 15;
+      const stomp = move === "crouchHeavy";
+      const headY = -h + headR;
+      const shoulderY = headY + headR + 4;
+      const hipY = airborne ? -h * 0.42 : crouching ? -h * 0.38 : -h * 0.42;
+      let lean = { [POSE.GUARD_STAND]: -4, [POSE.GUARD_CROUCH]: -4, [POSE.BLOCK]: -6, [POSE.WALK_FORWARD]: 3, [POSE.STEP]: 12, [POSE.BACKSTEP]: -8, [POSE.HIT]: -12, [POSE.LAUNCH]: -10, [POSE.THROWN]: -12, [POSE.TECH]: -12, [POSE.THROW]: 6 }[p] || 0;
+      if (atk) {
+        const fwd = { standLight: 8, standHeavy: 14, crouchLight: 4, crouchHeavy: 2, special: 10, throw: 8, super: 22, crouchSpecial: -6, airHeavy: 14 }[move] || 4;
+        lean = lerp(-4 * atk.wind, fwd, atk.ext);
+      }
+      if (f.grab) lean = -2;
+      const legW = 18;
+      // 足：がに股で太い。四股踏みは前の足を高く上げてから踏み下ろす
+      if (airborne) {
+        if (move === "airHeavy") {
+          // ボディプレス：体を前に倒し、足を後ろへ
+          limb(-8, hipY, -34, hipY + 14, legW);
+          limb(8, hipY, -20, hipY + 26, legW);
+        } else {
+          limb(-10, hipY, -20, hipY + 24, legW);
+          limb(-20, hipY + 24, -10, hipY + 42, legW);
+          limb(10, hipY, 22, hipY + 22, legW);
+          limb(22, hipY + 22, 14, hipY + 40, legW);
+        }
+      } else if (stomp) {
+        const raise = atk.ext > 0 || atk.rec ? 0 : atk.wind;
+        limb(-10, hipY, -26, 0, legW);
+        limb(10, hipY, lerp(30, 40, raise), lerp(0, hipY + 10, raise), legW);
+      } else if (crouching) {
+        limb(-10, hipY, -30, -26, legW);
+        limb(-30, -26, -24, 0, legW);
+        if (move === "crouchLight") {
+          limb(10, hipY, lerp(30, 96, atk.ext), lerp(-26, -10, atk.ext), legW);
+        } else {
+          limb(10, hipY, 30, -26, legW);
+          limb(30, -26, 26, 0, legW);
+        }
+      } else {
+        const s = p === POSE.WALK_FORWARD || p === POSE.GUARD_STAND ? Math.sin(frame * 0.18) * 6 : 0;
+        const wide = p === POSE.STEP || (atk && (move === "standHeavy" || move === "super" || move === "special")) ? 10 : 0;
+        limb(-10, hipY, -24 - s - wide, 0, legW);
+        limb(10, hipY, 24 + s + wide, 0, legW);
+      }
+      // 胴体：肩幅が広く、腹が出ている
+      const bodyW = o.w * 0.9;
+      ctx.beginPath();
+      ctx.moveTo(lean - bodyW / 2, shoulderY);
+      ctx.lineTo(lean + bodyW / 2, shoulderY);
+      ctx.lineTo(bodyW / 2 + 2, hipY + 6);
+      ctx.lineTo(-bodyW / 2 + 2, hipY + 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(lean * 0.6 + 6, (shoulderY + hipY) / 2 + 12, bodyW * 0.48, (hipY - shoulderY) * 0.45, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 帯（差し色）
+      ctx.fillStyle = accent;
+      ctx.fillRect(-bodyW / 2 + 1, hipY - 6, bodyW, 12);
+      ctx.fillStyle = "#000";
+      // 頭とまげ
+      circle(lean, headY, headR);
+      ctx.beginPath();
+      ctx.ellipse(lean - 4, headY - headR - 2, 9, 5, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 腕：太い腕と大きな手のひら
+      const sh = { x: lean + 8, y: shoulderY + 8 };
+      const sh2 = { x: lean - 6, y: shoulderY + 10 };
+      let front = { x: lean + 30, y: shoulderY + 40 };
+      let back = { x: lean + 14, y: shoulderY + 48 };
+      let palm = 9;
+      if (f.grab) {
+        // 掴んだ相手を頭の上に持ち上げる
+        front = { x: lean + 10, y: headY - 34 };
+        back = { x: lean - 10, y: headY - 34 };
+      } else if (guarding) {
+        front = { x: lean + 32, y: shoulderY + 4 };
+        back = { x: lean + 30, y: shoulderY + 22 };
+      } else if (hurt) {
+        front = { x: lean - 20, y: shoulderY - 8 };
+        back = { x: lean - 24, y: shoulderY + 20 };
+      } else if (throwFollow) {
+        front = { x: lean + 44, y: shoulderY + 50 };
+        back = { x: lean + 36, y: shoulderY + 58 };
+      } else if (atk) {
+        const { wind, ext } = atk;
+        if (move === "standLight") {
+          front = { x: lean + lerp(30, m.hitbox.x2 - 10, ext), y: shoulderY + lerp(40, 18, ext) };
+          palm = 12;
+        } else if (move === "standHeavy") {
+          front = ext > 0 || atk.rec ? { x: lean + lerp(30, m.hitbox.x2 - 12, ext), y: shoulderY + lerp(30, 14, ext) } : { x: lean - lerp(0, 26, wind), y: shoulderY + lerp(30, -10, wind) };
+          back = { x: lean + 6, y: shoulderY + 40 };
+          palm = 15;
+        } else if (move === "special" || move === "throw" || move === "super") {
+          // 掴みかかる：両手を前に大きく広げる
+          const e = Math.max(ext, wind * 0.6);
+          front = { x: lean + lerp(30, 70, e), y: shoulderY + 22 };
+          back = { x: lean + lerp(14, 62, e), y: shoulderY + 44 };
+          palm = 11;
+        } else if (move === "crouchSpecial") {
+          // つかみ上げ：両手を頭の上へ伸ばす
+          const e = Math.max(ext, wind);
+          front = { x: lean + lerp(30, 40, e), y: lerp(shoulderY + 40, headY - 70, e) };
+          back = { x: lean + lerp(14, 20, e), y: lerp(shoulderY + 48, headY - 62, e) };
+          palm = 11;
+        } else if (move === "airLight") {
+          front = { x: lean + lerp(20, 40, ext), y: shoulderY + lerp(30, 64, ext) };
+        } else if (move === "airHeavy") {
+          front = { x: lean + 44, y: shoulderY + 30 };
+          back = { x: lean + 34, y: shoulderY + 44 };
+        } else if (move === "crouchLight" || move === "crouchHeavy") {
+          front = { x: lean + 30, y: shoulderY + 30 };
+          back = { x: lean + 6, y: shoulderY + 34 };
+        }
+      }
+      limb(sh2.x, sh2.y, back.x, back.y, 14);
+      circle(back.x, back.y, 9);
+      limb(sh.x, sh.y, front.x, front.y, 15);
+      circle(front.x, front.y, palm);
+      // 四股踏み：踏み下ろした所から地面に差し色の衝撃
+      if (stomp && atk.ext > 0) {
+        ctx.save();
+        ctx.strokeStyle = accent;
+        ctx.globalAlpha = 0.8 * atk.ext;
+        ctx.lineWidth = 4;
+        for (let k = 0; k < 3; k++) {
+          ctx.beginPath();
+          ctx.ellipse(70 + k * 18, -2, 30 + k * 16, 8 + k * 3, 0, Math.PI, 0);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      if (guarding) {
+        ctx.strokeStyle = p === POSE.BLOCK ? "rgba(160, 220, 255, 0.9)" : "rgba(255, 255, 255, 0.55)";
+        ctx.lineWidth = p === POSE.BLOCK ? 5 : 3;
+        ctx.beginPath();
+        const midY = crouching ? -h * 0.45 : -h * 0.6;
+        ctx.arc(o.w / 2 + 10, midY, h * 0.45, -0.8, 0.8);
+        ctx.stroke();
+      }
+    }
+
     // キャラのシルエットを描く。
     // 足元を(0,0)、前（相手の方）を+x、上を-yとした向きで描き、左向きのときは左右反転する
     function drawFighter(f, index, state) {
@@ -402,8 +585,21 @@
         ctx.translate(0, h * 0.5);
       }
 
+      // 頭の上に持ち上げられている（ゴウの投げ）：体を横にして、頭の上に寝かせる
+      if (p === POSE.THROWN && f.y < (C.GROUND_Y - 20) * C.SCALE) {
+        const lift = Math.min(1, (C.GROUND_Y * C.SCALE - f.y) / (120 * C.SCALE));
+        ctx.translate(0, -15 * lift);
+        ctx.rotate((-Math.PI / 2) * lift);
+        ctx.translate(0, (h / 2) * lift);
+      }
+
       if (f.charId === "genma") {
         drawGenma(f, state, { h, w, p, crouching, guarding, hurt, throwFollow, airborne, atk, move, accent });
+        ctx.restore();
+        return;
+      }
+      if (f.charId === "gou") {
+        drawGou(f, state, { h, w, p, crouching, guarding, hurt, throwFollow, airborne, atk, move, accent });
         ctx.restore();
         return;
       }
@@ -1014,7 +1210,9 @@
 
     // ---- メニュー（タイトル・モード選択・キャラ選択）と、試合の上に出す小さなメニュー ----
 
-    const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家", genma: "ワープと術で翻弄する悪役" };
+    const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家", genma: "ワープと術で翻弄する悪役", gou: "近づいて投げる力自慢の大男" };
+    // キャラ一覧に出す短い説明
+    const CHAR_SHORT = { kagetsu: "飛び道具と対空", rin: "速さで攻める", genma: "離れて術で戦う", gou: "投げで大ダメージ" };
     const LEVEL_NOTE = ["はじめての人に", "慣れてきたら", "腕に自信がある人に", "対戦から学んだCPU"];
     const HINT_MENU = "↑↓：えらぶ　Enter：決定　Esc：もどる";
     const HINT_SELECT = "↑↓：項目をえらぶ　←→：変える　Enter：決定　Esc：もどる";
@@ -1132,8 +1330,8 @@
 
       const w = 340;
       const x = (C.STAGE_WIDTH - w) / 2;
-      const rowH = 60;
-      const top = 100;
+      const rowH = 48;
+      const top = 92;
       rows.forEach((row, r) => {
         const y = top + r * (rowH + 8);
         const sel = r === menu.cursor;
@@ -1149,7 +1347,7 @@
           return;
         }
         panel(x, y, w, rowH, sel);
-        text(row.label, x + 12, y + 15, 13, sel ? "#ffd8a0" : "rgba(255,255,255,0.5)", "left", "normal");
+        text(row.label, x + 12, y + 12, 13, sel ? "#ffd8a0" : "rgba(255,255,255,0.5)", "left", "normal");
         let value;
         let note = "";
         let off = false; // 今は使われない行（薄く描く）
@@ -1165,21 +1363,71 @@
           // 強さを丸の数でも見せる
           for (let k = 0; k < SF.cpu.LEVELS.length; k++) {
             ctx.fillStyle = k <= lv ? "#ff8a4a" : "rgba(255,255,255,0.2)";
-            circle(C.STAGE_WIDTH / 2 - 16 + k * 16, y + 52, 4);
+            circle(C.STAGE_WIDTH / 2 - 16 + k * 16, y + 43, 4);
           }
         }
-        text(value, C.STAGE_WIDTH / 2, y + 34, 22, off ? "rgba(255,255,255,0.3)" : sel ? "#fff" : "rgba(255,255,255,0.7)");
-        if (note) text(note, x + w - 12, y + 15, 12, sel ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.4)", "right", "normal");
+        text(value, C.STAGE_WIDTH / 2, y + 27, 22, off ? "rgba(255,255,255,0.3)" : sel ? "#fff" : "rgba(255,255,255,0.7)");
+        if (note) text(note, x + w - 12, y + 12, 12, sel ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.4)", "right", "normal");
         if (sel && !off) {
           // 左右で変えられることを示す矢印（端の強さでは、それ以上いけない側を薄く）
           const lv = p.levels[row.side];
           const canL = row.kind !== "level" || lv > 0;
           const canR = row.kind !== "level" || lv < SF.cpu.LEVELS.length - 1;
-          text("◀", x + 50, y + 34, 18, canL ? "#ffd24d" : "rgba(255,210,77,0.25)");
-          text("▶", x + w - 50, y + 34, 18, canR ? "#ffd24d" : "rgba(255,210,77,0.25)");
+          text("◀", x + 50, y + 27, 18, canL ? "#ffd24d" : "rgba(255,210,77,0.25)");
+          text("▶", x + w - 50, y + 27, 18, canR ? "#ffd24d" : "rgba(255,210,77,0.25)");
         }
       });
+      drawRoster(mode, p, rows[menu.cursor], tick, top + rows.length * (rowH + 6) + 4);
       hint(HINT_SELECT);
+    }
+
+    // キャラ一覧：全員を並べて、今だれを選んでいるか（左右）を印で見せる。キャラの行を選んでいるときは、その側の枠を光らせる
+    const rosterStates = {};
+    function drawRoster(mode, p, row, tick, top) {
+      const ids = Object.keys(CHARACTERS);
+      const cw = 136;
+      const ch = 118;
+      const gap = 10;
+      const left = (C.STAGE_WIDTH - (ids.length * cw + (ids.length - 1) * gap)) / 2;
+      const sideLabel = mode.id === "pvc" ? ["あなた", "相手"] : ["左", "右"];
+      const sideColor = ["#ffd24d", "#8fc8ff"];
+      ids.forEach((id, k) => {
+        const cx = left + k * (cw + gap);
+        const picked = [0, 1].filter((side) => p.chars[side] === id);
+        const focus = row && row.kind === "char" && p.chars[row.side] === id ? row.side : -1;
+        ctx.fillStyle = picked.length ? "rgba(0, 0, 0, 0.78)" : "rgba(20, 12, 20, 0.6)";
+        ctx.fillRect(cx, top, cw, ch);
+        ctx.lineWidth = focus >= 0 ? 3 : 1;
+        ctx.strokeStyle = focus >= 0 ? sideColor[focus] : picked.length ? "rgba(255, 255, 255, 0.55)" : "rgba(255, 255, 255, 0.2)";
+        ctx.strokeRect(cx + 0.5, top + 0.5, cw - 1, ch - 1);
+        // 小さなシルエット（試合と同じ描き方）
+        if (!rosterStates[id]) {
+          const st = SF.game.createGame(1, [id, id]);
+          st.fighters[0].x = 0;
+          st.fighters[0].y = 0;
+          rosterStates[id] = st;
+        }
+        const st = rosterStates[id];
+        st.frame = tick;
+        ctx.save();
+        ctx.globalAlpha = picked.length ? 1 : 0.6;
+        ctx.translate(cx + cw / 2, top + 80);
+        ctx.scale(0.37, 0.37);
+        drawFighter(st.fighters[0], 0, st);
+        ctx.restore();
+        text(CHARACTERS[id].name, cx + cw / 2, top + 93, 16, picked.length ? "#fff" : "rgba(255,255,255,0.6)");
+        text(CHAR_SHORT[id] || "", cx + cw / 2, top + 109, 11, picked.length ? "#ffd8a0" : "rgba(255,216,160,0.5)", "center", "normal");
+        // 選んでいる側の印（同じキャラ同士なら2つ）
+        picked.forEach((side) => {
+          const lx = side === 0 ? cx + 4 : cx + cw - 4;
+          ctx.font = "bold 12px sans-serif";
+          const tw = ctx.measureText(sideLabel[side]).width + 10;
+          const bx = side === 0 ? lx : lx - tw;
+          ctx.fillStyle = sideColor[side];
+          ctx.fillRect(bx, top + 4, tw, 18);
+          text(sideLabel[side], bx + tw / 2, top + 13, 12, "#1a1020");
+        });
+      });
     }
 
     function drawMenu(menu, tick) {

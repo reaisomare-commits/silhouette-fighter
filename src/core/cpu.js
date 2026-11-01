@@ -44,6 +44,11 @@
       standHeavy: ["crouchSpecial"], // 影の鎌 → 闇柱
       crouchLight: ["heavy"], // 影這い → 闇溜まり
     },
+    // ゴウ：連続技は短い（のけぞり中の相手は掴めないので、投げは連続技に入れない）
+    gou: {
+      standLight: ["heavy"], // 張り手 → 大張り手
+      crouchLight: ["heavy"], // すね蹴り → 四股踏み
+    },
   };
 
   // 様子見のときに選ぶ行動と、その選びやすさ（重み）。距離は「近い・中くらい・遠い」の3つ
@@ -65,6 +70,12 @@
       mid: { heavy: 30, backdash: 20, crouchHeavy: 10, jumpUp: 10, back: 10, wait: 20 },
       far: { special: 40, jumpUp: 20, dash: 15, wait: 15, forward: 10 },
     },
+    // ゴウ：踏み込みとガードで近づき、近ければ岩落とし（コマンド投げ）と投げ、張り手で止める
+    gou: {
+      near: { special: 30, throw: 15, light: 20, crouchLight: 15, crouchHeavy: 5, wait: 10, guardLow: 5 },
+      mid: { forward: 30, dash: 25, light: 20, heavy: 10, crouchHeavy: 5, wait: 10 },
+      far: { forward: 40, dash: 40, jump: 5, wait: 15 },
+    },
   };
 
   // 浮遊できるキャラ（ゲンマ）が、1回のジャンプで浮くか・空中の飛び道具を撃つかを決める確率（%）
@@ -81,6 +92,8 @@
     kagetsu: { bands: ["mid", "far"], maxDist: 300, rate: 4 },
     rin: { bands: ["mid", "far"], maxDist: 999, rate: 3 },
     genma: { bands: ["mid", "far"], maxDist: 999, rate: 3 },
+    // ゴウの大地落としは掴む技なので、地上にいる相手に、届く距離（約250px）から
+    gou: { bands: ["near", "mid", "far"], maxDist: 240, rate: 2, grab: true },
   };
   // リンの練気で強くなっている間の連続技（すべての攻撃がキャンセルできるので長くつなぐ）
   const BUFF_COMBOS = {
@@ -202,6 +215,12 @@
     }
     if (!o.move || o.moveHit) return null;
     const m = CHARACTERS[opp.charId].moves[o.move];
+    // ガードできない投げの技（ゴウの岩落とし・大地落とし）：掴まれる前なら、弱攻撃で止めるか跳んで避ける（guard: "grab"）
+    if (m && m.kind === "throw" && o.move !== "throw" && !m.antiAir && o.moveFrame < m.startup) {
+      let grabReach = m.hitbox.x2 + CHARACTERS[me.charId].width / 2 + 10;
+      if (m.lunge) grabReach += (m.lunge.to - m.lunge.from + 1) * m.lunge.speed;
+      return dist <= grabReach ? { key: "m" + o.moveId, guard: "grab", lunge: !!m.lunge } : null;
+    }
     if (!m || m.kind === "throw" || !m.hitbox) return null;
     // 当たる時間が終わった技はもう怖くない
     if (o.moveFrame >= m.startup + m.active) return null;
@@ -303,7 +322,8 @@
     if (t) {
       if (cpu.guardKey !== t.key) {
         cpu.guardKey = t.key;
-        cpu.guardOk = chance(cpu, lv.guard);
+        // 投げの技を読んで逃げる確率は、投げ抜けする確率と同じ
+        cpu.guardOk = chance(cpu, t.guard === "grab" ? lv.tech : lv.guard);
         // 切り返し：ゲージが満タンで、出だしが無敵のゲージ技があれば、相手の技（飛び道具でないもの）にゲージ技を合わせるかを決める
         const sup = CHARACTERS[me.charId].moves.super;
         cpu.reversalOk = !!(sup && sup.invincible) && t.key[0] === "m" && SF.game.gaugeFull(me) && chance(cpu, lv.superUse / 2);
@@ -314,7 +334,20 @@
         cpu.thinkTimer = 0;
         return finish(cpu, SUPER);
       }
-      if (cpu.guardOk && me.onGround) {
+      if (t.guard === "grab") {
+        // 突進して掴む技（大地落とし）は後ろへ跳んで避け、その場で掴む技（岩落とし）は弱攻撃で止める
+        if (cpu.guardOk && isFree(me) && me.onGround && me.landingTimer === 0) {
+          cpu.guardOk = false;
+          cpu.hold = 0;
+          cpu.thinkTimer = 0;
+          if (t.lunge) {
+            cpu.hold = back;
+            cpu.thinkTimer = 50;
+            return finish(cpu, BUTTON.JUMP | back);
+          }
+          return finish(cpu, BUTTON.LIGHT);
+        }
+      } else if (cpu.guardOk && me.onGround) {
         cpu.hold = 0;
         cpu.thinkTimer = 0;
         return finish(cpu, back | (t.guard === "low" ? BUTTON.DOWN : 0));
@@ -397,7 +430,8 @@
     let plan;
     // ゲージが満タンなら、場面に合えばゲージ技を使う（学習AIも同じ決まりで使う。学習した表には入っていない）
     const sp = SUPER_PLAN[me.charId];
-    if (sp && SF.game.gaugeFull(me) && sp.bands.includes(band) && dist <= sp.maxDist && chance(cpu, lv.superUse / sp.rate)) {
+    const grabbable = !sp || !sp.grab || (o.onGround && o.pose !== POSE.HIT && o.pose !== POSE.BLOCK);
+    if (sp && grabbable && SF.game.gaugeFull(me) && sp.bands.includes(band) && dist <= sp.maxDist && chance(cpu, lv.superUse / sp.rate)) {
       return finish(cpu, SUPER);
     }
     if (cpu.learner) {
@@ -407,6 +441,9 @@
       plan = pick(cpu, plans[band]);
       // 飛刃は画面に1つまで
       if (plan === "special" && state.projectiles.some((p) => p.owner === index)) plan = "forward";
+      // コマンド投げ（ゴウの岩落とし）は届く距離でだけ
+      const spm = st.moves.special;
+      if (plan === "special" && spm.kind === "throw" && dist > reachOf(me, opp, "special") + 4) plan = "forward";
       if (plan === "throw" && dist > reachOf(me, opp, "throw") + 4) plan = "light";
       if (plan === "crouchHeavy" && dist > reachOf(me, opp, "crouchHeavy")) plan = "forward";
     }

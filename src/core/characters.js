@@ -173,6 +173,51 @@
         super: { name: "冥府球", kind: "special", startup: 18, active: 1, recovery: 26, hitAdv: "down", blockAdv: -4, damage: 40, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 50, y1: 70, y2: 140 }, push: 40, projectile: { speed: 2.5, width: 120, height: 120, spawnX: 90, y: 85, portal: true, multi: { hits: 8, interval: 8, hitAdv: 0, push: 20, airLift: 3 } } },
       },
     },
+    // ゴウ（剛）：投げの大男。体力が多くて大きいが遅い。近づけば、投げ抜けできないコマンド投げで一気に大ダメージを取る
+    gou: {
+      name: "ゴウ",
+      width: 70,
+      height: 185,
+      crouchHeight: 120,
+      walkForward: 1.7,
+      walkBack: 1.4,
+      // 低く重いジャンプ
+      jumpVelocity: 11.5,
+      jumpForward: 2.2,
+      gravity: 0.52,
+      // → 高さ約127ピクセル、滞空約44フレーム
+      landingLag: 5,
+      // 前を素早く2回：踏み込み（ゆっくり約50ピクセル）。踏み込んでいる間（projectileInvincible フレーム）は飛び道具が当たらない（すり抜ける）
+      forwardDash: { type: "step", frames: 14, speed: 3.6, recovery: 8, projectileInvincible: 14 },
+      backDash: { frames: 10, speed: 4, recovery: 14, invincible: 6 }, // 約40ピクセル下がる
+      health: 1300,
+      lightChainMax: 1,
+      // ゴウだけの性質：
+      //   armor: 踏ん張り。from〜to フレーム目に攻撃を受けても、1発だけは技が止まらない（ダメージは受ける。ゲージ技は受け止められない）
+      //   投げ（kind: "throw"）の noTech: true は投げ抜けできない投げ。掴んだら hold フレームかけて投げ、投げたあと finish フレーム動けない
+      //   antiAir: true は空中の相手だけを掴む投げ（地上の相手は掴めない）。airInvincible: 出してからそのフレームまで、空中の相手の攻撃が当たらない
+      //   projectileInvincible: 出してからそのフレームまで飛び道具が当たらない
+      moves: {
+        // 張り手：弱攻撃なのにリーチが長い（強攻撃なみ）。そのかわり腕のやられる範囲も同じだけ前に出るので、強攻撃を合わされると負ける
+        standLight: { name: "張り手", startup: 7, active: 3, recovery: 12, hitAdv: 2, blockAdv: 0, damage: 60, guard: "mid", hitbox: { x1: 20, x2: 112, y1: 95, y2: 150 }, hurtExtend: { x1: 0, x2: 112, y1: 95, y2: 150 }, push: 20 },
+        // 大振りだが、出だしから当たり終わるまで1発だけ攻撃を受け止める（踏ん張り）
+        standHeavy: { name: "大張り手", startup: 14, active: 4, recovery: 22, hitAdv: 3, blockAdv: -6, damage: 130, guard: "mid", hitbox: { x1: 25, x2: 125, y1: 80, y2: 155 }, push: 30, armor: { from: 3, to: 17 } },
+        crouchLight: { name: "すね蹴り", startup: 8, active: 2, recovery: 12, hitAdv: 2, blockAdv: -1, damage: 50, guard: "low", hitbox: { x1: 20, x2: 100, y1: 0, y2: 35 }, push: 18 },
+        crouchHeavy: { name: "四股踏み", startup: 16, active: 4, recovery: 24, hitAdv: "down", blockAdv: -10, damage: 120, guard: "low", hitbox: { x1: 10, x2: 125, y1: 0, y2: 25 }, push: 24, noCancel: true },
+        airLight: { name: "肘落とし", startup: 7, active: 6, recovery: null, hitAdv: 10, blockAdv: 2, damage: 50, guard: "air", hitbox: { x1: 0, x2: 68, y1: -15, y2: 55 }, push: 10 },
+        // ボディプレス：体ごと落ちてくる。下向きに広い
+        airHeavy: { name: "ボディプレス", startup: 10, active: 8, recovery: null, hitAdv: 13, blockAdv: 3, damage: 110, guard: "air", hitbox: { x1: -25, x2: 72, y1: -35, y2: 40 }, push: 14 },
+        // 岩落とし：コマンド投げ。普通の投げより遠くから掴めて、投げ抜けできない。空振りすると大きな隙
+        special: { name: "岩落とし", kind: "throw", noTech: true, startup: 8, active: 2, recovery: 40, damage: 200, hitbox: { x1: 0, x2: 85, y1: 0, y2: 175 }, hurtExtend: { x1: 0, x2: 50, y1: 70, y2: 150 }, hold: 24, finish: 28 },
+        // つかみ上げ：対空投げ。頭の上の空中の相手だけを掴んで叩きつける。出だしは空中の相手の攻撃が当たらない
+        crouchSpecial: { name: "つかみ上げ", kind: "throw", noTech: true, antiAir: true, startup: 5, active: 8, recovery: 30, damage: 150, hitbox: { x1: -20, x2: 90, y1: 110, y2: 300 }, hurtExtend: { x1: 0, x2: 40, y1: 110, y2: 200 }, airInvincible: 12, hold: 20, finish: 24 },
+        // 投げ：掴める範囲が広め、ダメージも普通の投げより大きい
+        throw: { name: "ベアハッグ", kind: "throw", startup: 5, active: 2, recovery: 24, damage: 160, hitbox: { x1: 0, x2: 65, y1: 0, y2: 175 } },
+        // ゲージ技「大地落とし」：約200ピクセル先まで突進して掴み、高く跳んで叩きつける。ガードも投げ抜けもできない。
+        //   出だしは飛び道具が当たらない。ジャンプされると空振りして大きな隙
+        super: { name: "大地落とし", kind: "throw", noTech: true, startup: 3, active: 13, recovery: 50, damage: 320, hitbox: { x1: 0, x2: 70, y1: 0, y2: 180 }, lunge: { from: 2, to: 15, speed: 14 }, projectileInvincible: 16, hold: 50, finish: 30 },
+      },
+    },
   };
 
   // 方向キーを2回押したとみなす間隔（1回目を押してから何フレーム以内に2回目を押すか）
