@@ -1462,11 +1462,16 @@
       shade.addColorStop(1, "rgba(10, 5, 20, 0)");
       ctx.fillStyle = shade;
       ctx.fillRect(0, 0, C.STAGE_WIDTH, 290);
-      // 題字の後ろの朱の筆跡と、横の判子
-      shuStroke(170, 128, 640, 36, 0.9);
-      outlined("シルエット格闘", C.STAGE_WIDTH / 2, 108, 88, PAPER);
-      seal(812, 70, 40, "影");
-      text("S I L H O U E T T E   F I G H T E R", C.STAGE_WIDTH / 2, 186, 16, "#ffd8a0", "center", "bold", true);
+      // 題字「SILHOUETTE fighters」：上の段に大きく SILHOUETTE、下の段に朱の筆跡を敷いて fighters。横に判子
+      ctx.save();
+      if ("letterSpacing" in ctx) ctx.letterSpacing = "6px";
+      setFont(84, "bold", true);
+      const tw = ctx.measureText("SILHOUETTE").width;
+      outlined("SILHOUETTE", C.STAGE_WIDTH / 2, 92, 84, PAPER);
+      ctx.restore();
+      shuStroke(C.STAGE_WIDTH / 2 - 170, 150, 380, 34, 0.9);
+      outlined("fighters", C.STAGE_WIDTH / 2, 160, 56, "#ffcf6b");
+      seal(C.STAGE_WIDTH / 2 + tw / 2 + 28, 58, 40, "影");
       // ゆっくり明滅する「スタート」
       ctx.save();
       ctx.globalAlpha = 0.55 + 0.45 * Math.sin(tick / 14);

@@ -4,7 +4,7 @@
   const SF = (root.SF = root.SF || {});
 
   SF.constants = Object.freeze({
-    VERSION: "0.6.1", // ゲームのバージョン（タイトル画面に出す。package.json の version と同じにする）
+    VERSION: "0.6.2", // ゲームのバージョン（タイトル画面に出す。package.json の version と同じにする）
     FPS: 60, // ゲームの計算は1秒に60回で固定
     SCALE: 100, // 1ピクセルを100として整数で計算する
     STAGE_WIDTH: 960, // 画面の横幅（ピクセル）
