@@ -718,6 +718,47 @@ for (const att of ["kagetsu", "rin"]) {
   console.log(`OK 必殺技 ${CH[att].name}: ${lines.join("、")}`);
 }
 
+// リンの突進拳はためる技：O を押している間ためて、離すと出る。長くためるほど遠くまで進む
+{
+  function dash(hold) {
+    const st = newGame(1, ["rin", "kagetsu"]);
+    st.fighters[0].x = 100 * S;
+    st.fighters[1].x = 1000 * S;
+    const a = st.fighters[0];
+    const x0 = a.x;
+    let startAt = -1;
+    for (let i = 0; i < 120; i++) {
+      SF.game.step(st, [i <= hold ? O : 0, 0]);
+      if (startAt < 0 && a.moveFrame === 2) startAt = i;
+    }
+    return { dist: (a.x - x0) / S, startAt };
+  }
+  const tap = dash(0);
+  const mid = dash(15);
+  const full = dash(CH.rin.moves.special.charge.max);
+  const over = dash(CH.rin.moves.special.charge.max + 20);
+  assert.strictEqual(tap.startAt, 1, "ためずに離したら、すぐ出るはず");
+  assert.strictEqual(mid.startAt, 16, "離すまでは構えたままのはず");
+  assert.ok(tap.dist > 90 && tap.dist < 110, `ためなしの突進拳は約99px進むはず: ${tap.dist}`);
+  assert.ok(mid.dist > tap.dist + 30 && full.dist > mid.dist + 30, "長くためるほど遠くまで進むはず");
+  assert.strictEqual(over.dist, full.dist, "ためられるのは最大までのはず");
+  console.log(`OK 突進拳のため: ためなし${tap.dist}px・15F${mid.dist}px・最大${full.dist}px`);
+}
+
+// リンの跳び蹴り上げは発生まで無敵：出始めに重なったカゲツの柄打ちは当たらず、跳び蹴り上げが当たる
+{
+  const st = closeGame("kagetsu", "rin", 60);
+  const [k, r] = st.fighters;
+  for (let i = 0; i < 40; i++) SF.game.step(st, [i === 0 ? U : 0, D | (i === 2 ? O : 0)]);
+  assert.strictEqual(r.health, CH.rin.health, "跳び蹴り上げの発生までは無敵のはず");
+  assert.ok(k.health < CH.kagetsu.health, "跳び蹴り上げが当たるはず");
+  // 無敵がなければ柄打ちが当たる（比べるため、しゃがみ弱攻撃で同じ時に出る）
+  const st2 = closeGame("kagetsu", "rin", 60);
+  for (let i = 0; i < 40; i++) SF.game.step(st2, [i === 0 ? U : 0, D | (i === 2 ? U : 0)]);
+  assert.ok(st2.fighters[1].health < CH.rin.health, "比べる側では柄打ちが当たるはず");
+  console.log("OK 跳び蹴り上げ: 発生まで無敵");
+}
+
 // 飛刃：離れて当てるほど有利。画面に1つまで
 {
   const near = measureSpecial("kagetsu", "rin", "special", true);

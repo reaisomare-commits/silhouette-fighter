@@ -82,7 +82,9 @@
       backstepRecovery: false, // 止まり際がバックステップのものか（攻撃を受けるとダメージが増える）
       punishedGrab: false,
       throwPressAge: 99, // U＋Iを押してから何フレームたったか（掴まれる少し前に押していても投げ抜けになる）
-      bufferAge: 0, // 先行入力を覚えてから何フレームたったか // バックステップの止まり際に掴まれたか（投げのダメージが増える）
+      bufferAge: 0, // 先行入力を覚えてから何フレームたったか
+      charging: false, // ためる技（リンの突進拳）で、ボタンを押し続けてためている最中か
+      chargeFrames: 0, // ためたフレーム数（長いほど遠くまで進む） // バックステップの止まり際に掴まれたか（投げのダメージが増える）
       actionTimer: 0, // その動きの残りフレーム（ダッシュは走ったフレーム数）
       move: null, // 出している技の名前（moves の中の名前）
       moveFrame: 0, // 技を出してから何フレーム目か（押したフレームが1）
@@ -201,6 +203,8 @@
     f.moveHit = false;
     f.pose = POSE.ATTACK;
     f.buffer = null;
+    f.charging = !!CHARACTERS[f.charId].moves[name].charge;
+    f.chargeFrames = 0;
     if (name === "airLight" || name === "airHeavy") f.airAttackUsed = true;
     if (!chain) f.chainLights = 0;
     if (isLightMove(name)) f.chainLights += 1;
@@ -334,7 +338,12 @@
       if (f.stun === 0) {
         f.pose = f.crouching ? POSE.CROUCH : POSE.STAND;
       }
+    } else if (f.onGround && f.move && f.charging && isDown(input, BUTTON.SPECIAL) && f.chargeFrames < moveData(f).charge.max) {
+      // ためる技：ボタンを押している間は、出る前の構えのまま止まってためる（離したら出る）
+      f.chargeFrames += 1;
+      f.vx = 0;
     } else if (f.onGround && f.move) {
+      f.charging = false;
       // 地上の技の最中。最後まで出しきるまで動けない。
       // ただし通常技が当たった（ガードされた）あとは、必殺技や次の通常技につなげられる
       const m = moveData(f);
@@ -367,7 +376,9 @@
       // 前に突っ込む技
       const cur = moveData(f);
       if (cur && cur.lunge && f.moveFrame >= cur.lunge.from && f.moveFrame <= cur.lunge.to) {
-        f.vx = f.facing * cur.lunge.speed * S;
+        // ためた分だけ速く進む（＝遠くまで届く）
+        const speed = cur.lunge.speed + (cur.charge && f.move === "special" ? f.chargeFrames * cur.charge.speedPerFrame : 0);
+        f.vx = f.facing * Math.trunc(speed * S);
       }
     } else if (f.onGround && f.action) {
       // ステップ・ダッシュ・バックステップの最中
@@ -584,6 +595,9 @@
   function hurtbox(f) {
     if (f.pose === POSE.DOWN || f.pose === POSE.LAUNCH || f.pose === POSE.THROWN) return null;
     if (backstepInvincible(f)) return null;
+    // 発生まで無敵の技（リンの跳び蹴り上げ）：当たり始めるまでは攻撃も投げも当たらない
+    const mv = moveData(f);
+    if (mv && mv.invincible && f.moveFrame < mv.startup) return null;
     const w = CHARACTERS[f.charId].width;
     const x = f.x / S;
     const y = f.y / S;
