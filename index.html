@@ -80,7 +80,8 @@
       <h2>学習AIをきたえる</h2>
       <p class="intro">学習AIは、対戦をくり返して「この距離・この状況では何をすると勝てるか」を自分で覚えるCPUです（機械学習の一つ、強化学習）。
         はじめから少し学習した状態で入っていて、ここでさらに学習させられます。学習した結果はこのブラウザに保存され、
-        「プレイヤー VS CPU」「CPU VS CPU」「自動対戦と記録」で強さに「学習AI」を選ぶと使われます。</p>
+        「プレイヤー VS CPU」「CPU VS CPU」「自動対戦と記録」で強さに「学習AI」を選ぶと使われます。
+        プレイヤー VS CPU で「あなたから学ぶ」を「する」にすると、あなた専用の学習AIが試合をしながら学び、あなたの戦い方に合わせて変わっていきます。</p>
       <div class="form">
         <label>学習するキャラ <select id="ln-char0"></select></label>
         <label>相手のキャラ <select id="ln-char1"></select></label>
@@ -110,6 +111,11 @@
       <h3>学習AIの考え（よくある場面で選ぶ行動）</h3>
       <p class="note">上の「学習するキャラ」と「相手のキャラ」の組み合わせで、経験の多い場面から順に、いちばん良いと考えている行動です。</p>
       <div class="table-wrap"><table id="ln-think"></table></div>
+      <h3>あなたとの対戦から学んだ学習AI</h3>
+      <p id="ln-player" class="intro"></p>
+      <div class="buttons">
+        <button id="ln-player-reset">あなたとの対戦で学んだ分を消す</button>
+      </div>
       <h3>学習データ</h3>
       <div class="buttons">
         <button id="ln-save">ファイルに保存</button>

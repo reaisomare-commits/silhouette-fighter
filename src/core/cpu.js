@@ -59,9 +59,9 @@
   const ANTI_AIR_RANGE = 130; // 跳んできた相手がこれより近づいたら対空技を出す（ピクセル、横の距離）
   const HISTORY = 64; // 相手の様子を何フレーム前まで覚えておくか（反応の速さより長く）
 
-  // opts は学習AIのときだけ使う：brain＝使う頭脳（なければ今の頭脳）、train＝学習するか、explore＝わざと別の行動を試す確率
+  // opts は学習AIのときだけ使う：brain＝使う頭脳（なければ今の頭脳）、train＝学習するか、explore＝わざと別の行動を試す確率、alpha＝表を直す強さ
   function createCpu(level = 1, seed = 1, opts = {}) {
-    const learner = LEVELS[level].learned ? SF.learn.createLearner(opts.brain || SF.learn.currentBrain(), opts.train, opts.explore) : null;
+    const learner = LEVELS[level].learned ? SF.learn.createLearner(opts.brain || SF.learn.currentBrain(), opts.train, opts.explore, opts.alpha) : null;
     return {
       learner, // 学習AIの記録（学習AIでなければ null）
       level,

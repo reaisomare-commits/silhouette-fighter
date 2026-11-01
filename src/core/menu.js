@@ -23,6 +23,7 @@
       { kind: "char", side: 0, label: "あなたのキャラ" },
       { kind: "char", side: 1, label: "相手のキャラ" },
       { kind: "level", side: 1, label: "CPUの強さ" },
+      { kind: "learnYou", label: "あなたから学ぶ" }, // 学習AIのときだけ使う
       { kind: "start", label: "たたかう！" },
     ],
     cvc: [
@@ -44,7 +45,7 @@
       cursor: 0, // キャラ選択画面で選んでいる行
       // モードごとに、前に選んだものを覚えておく（もどってきても選び直さなくてよい）
       picks: {
-        pvc: { chars: ["kagetsu", "rin"], levels: [1, 1] },
+        pvc: { chars: ["kagetsu", "rin"], levels: [1, 1], learnYou: true },
         cvc: { chars: ["kagetsu", "rin"], levels: [1, 1] },
       },
     };
@@ -62,6 +63,8 @@
       mode: id,
       chars: p.chars.slice(),
       levels: id === "pvc" ? [null, p.levels[1]] : p.levels.slice(),
+      // 学習AIが、あなたとの対戦から学ぶか（プレイヤー VS CPU で、相手が学習AIのときだけ true になりうる）
+      learnFromYou: id === "pvc" && !!SF.cpu.LEVELS[p.levels[1]].learned && !!p.learnYou,
     };
   }
 
@@ -101,6 +104,8 @@
       } else if (row.kind === "level") {
         // 強さは端で止める（よわい←→つよいが一周すると分かりにくいため）
         p.levels[row.side] = Math.max(0, Math.min(levelCount() - 1, p.levels[row.side] + d));
+      } else if (row.kind === "learnYou") {
+        p.learnYou = !p.learnYou; // する・しないの切り替え
       }
     } else if (action === "ok") {
       if (row.kind === "start") return { start: matchConfig(menu) };

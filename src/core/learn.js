@@ -51,6 +51,8 @@
   const MIN_ALPHA = 0.03; // 表を直す強さの下限（はじめは大きく、同じ場面を何度も経験すると小さくなる）
   const ROUND_REWARD = 1; // ラウンドの勝ち負けでもらう得点
   const PLAY_EXPLORE = 0.04; // 学習していないとき（ふつうに戦うとき）にも少しだけ別の行動を混ぜる（毎回同じ動きにならないように）
+  const PLAYER_ALPHA = 0.2; // あなたとの対戦から学ぶときの、表を直す強さ（試合数が少なくても戦い方が変わるように大きめ）
+  const PLAYER_EXPLORE = 0.05; // あなたとの対戦から学ぶときに、わざと別の行動を試す確率
   const WALL_NEAR = 120; // 画面端からこれ以内なら「端」（ピクセル）
   const PROJ_NEAR = 420; // 相手の飛び道具がこれより近くで向かってきたら「飛び道具あり」（ピクセル）
 
@@ -61,7 +63,8 @@
   }
 
   function createBrain() {
-    return { version: STATE_VERSION, tables: {} };
+    // played＝あなたとの対戦で学んだ試合数（あなたと戦って育てる頭脳だけが使う）
+    return { version: STATE_VERSION, tables: {}, played: 0 };
   }
 
   function tableFor(brain, me, opp) {
@@ -79,7 +82,7 @@
         n: Array.from(t.n),
       };
     }
-    return { version: brain.version, actions: ACTIONS.map((a) => a.id), states: STATES, tables };
+    return { version: brain.version, actions: ACTIONS.map((a) => a.id), states: STATES, played: brain.played || 0, tables };
   }
 
   // 保存した形から頭脳にもどす。形が合わなければ null
@@ -87,6 +90,7 @@
     if (!data || data.version !== STATE_VERSION || data.states !== STATES) return null;
     if (!Array.isArray(data.actions) || data.actions.join() !== ACTIONS.map((a) => a.id).join()) return null;
     const brain = createBrain();
+    brain.played = data.played || 0;
     for (const [k, t] of Object.entries(data.tables || {})) {
       if (!t || !Array.isArray(t.q) || t.q.length !== STATES * ACTIONS.length) return null;
       const table = createTable();
@@ -199,12 +203,14 @@
     return best;
   }
 
-  // CPUごとの学習の記録を作る。train＝学習する（表を直す）か、explore＝わざと別の行動を試す確率（0〜1）
-  function createLearner(brain, train, explore) {
+  // CPUごとの学習の記録を作る。train＝学習する（表を直す）か、explore＝わざと別の行動を試す確率（0〜1）、
+  // alpha＝表を直す強さを決めておくとき（なければ、経験した回数が増えるほど小さくする）
+  function createLearner(brain, train, explore, alpha) {
     return {
       brain,
       train: !!train,
       explore: explore === undefined ? (train ? 0.2 : PLAY_EXPLORE) : explore,
+      alpha: alpha || 0,
       table: null,
       lastS: -1, // 前に考えたときの状況番号（まだなければ -1）
       lastA: -1,
@@ -224,7 +230,7 @@
     const t = L.table;
     const i = L.lastS * ACTIONS.length + L.lastA;
     t.n[i] += 1;
-    const alpha = Math.max(MIN_ALPHA, 1 / t.n[i]);
+    const alpha = L.alpha || Math.max(MIN_ALPHA, 1 / t.n[i]);
     const target = reward + (nextS >= 0 ? GAMMA * bestValue(t, nextS) : 0);
     t.q[i] += alpha * (target - t.q[i]);
   }
@@ -326,6 +332,8 @@
     ACTION_INDEX,
     STATES,
     STATE_VERSION,
+    PLAYER_ALPHA,
+    PLAYER_EXPLORE,
     createBrain,
     tableFor,
     serialize,

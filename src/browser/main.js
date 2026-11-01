@@ -29,11 +29,25 @@
   const END_ITEMS = ["もう一度", "キャラ選択にもどる", "タイトルにもどる"];
 
   let matchCount = 0;
+  let counted = false; // この試合を「あなたと戦った試合数」に数えたか
   function newMatch() {
     matchCount += 1;
     state = SF.game.createGame(seed + matchCount, config.chars);
     // CPUは試合ごとに作り直す（左右で別の種）
-    cpus = config.levels.map((lv, i) => (lv === null ? null : SF.cpu.createCpu(lv, seed + matchCount * 2 + i)));
+    cpus = config.levels.map((lv, i) => {
+      if (lv === null) return null;
+      // 学習AIが「あなたとの対戦から学ぶ」ときは、あなた用に育てている頭脳を使い、試合をしながら表を直す
+      if (config.learnFromYou && i === 1) {
+        return SF.cpu.createCpu(lv, seed + matchCount * 2 + i, {
+          brain: SF.learnPage.playerBrain(),
+          train: true,
+          explore: SF.learn.PLAYER_EXPLORE,
+          alpha: SF.learn.PLAYER_ALPHA,
+        });
+      }
+      return SF.cpu.createCpu(lv, seed + matchCount * 2 + i);
+    });
+    counted = false;
     overlay = null;
     keyboard.read(); // メニューで押したキーが試合に残らないように捨てる
   }
@@ -58,6 +72,8 @@
   }
 
   function backToMenu(screen) {
+    // 試合の途中でやめても、終わったラウンドで学んだぶんは残す
+    if (scene === "battle" && config && config.learnFromYou) SF.learnPage.savePlayerBrain();
     scene = "menu";
     overlay = null;
     menu.screen = screen;
@@ -158,6 +174,12 @@
     SF.game.step(state, inputs);
 
     if (state.round.phase === SF.game.PHASE.MATCH_END) {
+      // あなたとの対戦から学んだ頭脳を、試合が終わったら保存する
+      if (config.learnFromYou && !counted) {
+        counted = true;
+        SF.learnPage.playerBrain().played += 1;
+        SF.learnPage.savePlayerBrain();
+      }
       endTimer += 1;
       if (endTimer >= END_MENU_DELAY && !overlay) overlay = { kind: "end", items: END_ITEMS, cursor: 0 };
     } else endTimer = 0;
@@ -197,6 +219,7 @@
       const label = (i) => {
         if (!cpus[i]) return "あなた";
         if (i === 1 && useDummy) return `練習相手 ${SF.dummy.MODES[dummy.mode].label}`;
+        if (i === 1 && config.learnFromYou) return `CPU 学習AI（あなたから学習中・${SF.learnPage.playerBrain().played + (counted ? 0 : 1)}試合目）`;
         return `CPU ${SF.cpu.LEVELS[config.levels[i]].label}`;
       };
       info.input = input;

@@ -7,6 +7,7 @@
   const doc = root.document;
   const $ = (id) => doc.getElementById(id);
   const STORE_KEY = "silhouette-fighter.learn-brain";
+  const PLAYER_KEY = "silhouette-fighter.player-brain"; // あなたとの対戦から学んだ頭脳
   const BLOCK = 50; // グラフの1点が何試合ぶんか
   const HARD = 2;
 
@@ -30,6 +31,8 @@
     file: $("ln-file"),
     def: $("ln-default"),
     reset: $("ln-reset"),
+    player: $("ln-player"),
+    playerReset: $("ln-player-reset"),
   };
 
   // ---- 頭脳の保存と読み込み（このブラウザの中） ----
@@ -51,6 +54,38 @@
     }
   }
   restoreBrain();
+
+  // ---- あなたとの対戦から学ぶ頭脳 ----
+  // はじめて使うときは、今の学習AIのコピーから始める。あなたと戦うたびに、この頭脳だけが変わっていく
+  let player = null;
+  function playerBrain() {
+    if (player) return player;
+    try {
+      const text = root.localStorage.getItem(PLAYER_KEY);
+      player = text && L.deserialize(JSON.parse(text));
+    } catch (e) {
+      player = null;
+    }
+    if (!player) {
+      player = L.clone(L.currentBrain());
+      player.played = 0;
+    }
+    return player;
+  }
+  function savePlayerBrain() {
+    if (!player) return false;
+    try {
+      root.localStorage.setItem(PLAYER_KEY, JSON.stringify(L.serialize(player)));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  function resetPlayerBrain() {
+    player = L.clone(L.currentBrain());
+    player.played = 0;
+    savePlayerBrain();
+  }
 
   // ---- 選ぶ欄 ----
   for (let i = 0; i < 2; i++) {
@@ -75,7 +110,7 @@
   function setRunning(on) {
     els.start.disabled = on;
     els.stop.disabled = !on;
-    for (const e of [...els.chars, els.opp, els.matches, els.evalBtn, els.save, els.load, els.def, els.reset]) e.disabled = on;
+    for (const e of [...els.chars, els.opp, els.matches, els.evalBtn, els.save, els.load, els.def, els.reset, els.playerReset]) e.disabled = on;
   }
 
   // ---- グラフ ----
@@ -170,6 +205,11 @@
       }
     }
     fillTable(els.tables, ["組み合わせ", "学習した試合数", "経験した場面の数"], rows);
+    const n = playerBrain().played;
+    els.player.textContent =
+      n > 0
+        ? `あなたと ${n} 試合戦って学んだ学習AIがいます。プレイヤー VS CPU で「あなたから学ぶ：する」にすると、この学習AIと戦い、さらに学んでいきます。`
+        : "まだあなたとは戦っていません。プレイヤー VS CPU で強さを「学習AI」、「あなたから学ぶ」を「する」にして戦うと、今の学習AIのコピーがあなたとの試合から学び始めます。";
 
     const me = els.chars[0].value;
     const opp = els.chars[1].value;
@@ -323,6 +363,11 @@
   els.def.addEventListener("click", () => useBrain(L.defaultBrain(), "最初から入っている学習データにもどしました"));
   els.reset.addEventListener("click", () => useBrain(L.createBrain(), "何も覚えていない状態にしました。学習させると、だんだん強くなる様子が見られます"));
   for (const e of els.chars) e.addEventListener("change", showInfo);
+  els.playerReset.addEventListener("click", () => {
+    resetPlayerBrain();
+    els.status.textContent = "あなたとの対戦で学んだ分を消して、今の学習AIからやり直すようにしました";
+    showInfo();
+  });
   els.back.addEventListener("click", () => {
     stop();
     close();
@@ -343,5 +388,5 @@
     if (onBack) onBack();
   }
 
-  SF.learnPage = { open, close, isOpen: () => !panel.hidden };
+  SF.learnPage = { open, close, isOpen: () => !panel.hidden, playerBrain, savePlayerBrain, resetPlayerBrain };
 })(globalThis);

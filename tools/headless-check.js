@@ -1119,11 +1119,15 @@ require("../src/core/learned-data.js");
   assert.strictEqual(m.screen, M.SCREEN.SELECT);
   let r = go(m, "right", "down", "right", "down", "right", "right", "right");
   assert.strictEqual(r, null);
-  r = go(m, "down", "ok");
-  assert.deepStrictEqual(r.start, { mode: "pvc", chars: ["rin", "kagetsu"], levels: [null, SF.cpu.LEARN_LEVEL] }, "プレイヤー VS CPU の設定がちがう");
+  // 学習AIのときは「あなたとの対戦から学ぶ」（はじめは「する」）が設定に入る
+  r = go(m, "down", "down", "ok");
+  assert.deepStrictEqual(r.start, { mode: "pvc", chars: ["rin", "kagetsu"], levels: [null, SF.cpu.LEARN_LEVEL], learnFromYou: true }, "プレイヤー VS CPU の設定がちがう");
+  go(m, "up", "right");
+  assert.strictEqual(M.matchConfig(m).learnFromYou, false, "あなたとの対戦から学ぶを「しない」にできない");
+  go(m, "left", "up");
 
   // 強さは端で止まる（学習AIの右は学習AI、よわいの左はよわい）
-  go(m, "up", "left", "left", "left", "left");
+  go(m, "left", "left", "left", "left");
   assert.strictEqual(M.matchConfig(m).levels[1], 0, "よわいより下にいってしまう");
 
   // もどる → モード選択 → CPU VS CPU。左右で別の強さを選べる
@@ -1134,11 +1138,11 @@ require("../src/core/learned-data.js");
   assert.strictEqual(m.cursor, 0, "モードを変えたら一番上から選ぶ");
   // 左：カゲツ・よわい　右：カゲツ・つよい。Enterを続けて押すと次の行へ進み、最後に始まる
   r = go(m, "ok", "left", "ok", "left", "ok", "right", "ok", "ok");
-  assert.deepStrictEqual(r.start, { mode: "cvc", chars: ["kagetsu", "kagetsu"], levels: [0, 2] }, "CPU VS CPU の設定がちがう");
+  assert.deepStrictEqual(r.start, { mode: "cvc", chars: ["kagetsu", "kagetsu"], levels: [0, 2], learnFromYou: false }, "CPU VS CPU の設定がちがう");
 
   // モードごとに前に選んだものを覚えている
   go(m, "back", "up", "ok");
-  assert.deepStrictEqual(M.matchConfig(m), { mode: "pvc", chars: ["rin", "kagetsu"], levels: [null, 0] }, "前に選んだものを忘れている");
+  assert.deepStrictEqual(M.matchConfig(m), { mode: "pvc", chars: ["rin", "kagetsu"], levels: [null, 0], learnFromYou: false }, "前に選んだものを忘れている");
 
   // 作った設定で試合とCPUが動く（CPU VS CPU を最後まで）
   const cfg = { mode: "cvc", chars: ["rin", "kagetsu"], levels: [0, 2] };
@@ -1262,6 +1266,31 @@ require("../src/core/autobattle.js");
   const saved = JSON.parse(JSON.stringify(L.serialize(brainA)));
   assert.deepStrictEqual(L.serialize(L.deserialize(saved)), L.serialize(brainA), "保存と読み込みで頭脳が変わった");
   assert.strictEqual(L.deserialize({ version: 999 }), null, "古い版のデータを読んでしまう");
+
+  // あなたとの対戦から学ぶ：あなた用のコピーだけが変わり、元の頭脳は変わらない。試合数も保存される
+  {
+    const base = L.defaultBrain();
+    const mine = L.clone(base);
+    mine.played = 0;
+    // あなたの代わりに「つよい」CPUを左に置いて、3試合
+    for (let k = 0; k < 3; k++) {
+      const st = SF.game.createGame(300 + k, ["rin", "kagetsu"]);
+      const you = SF.cpu.createCpu(2, 400 + k);
+      const ai = SF.cpu.createCpu(LEARN, 500 + k, { brain: mine, train: true, explore: L.PLAYER_EXPLORE, alpha: L.PLAYER_ALPHA });
+      for (let n = 0; n < 60 * 60 * 6 && st.round.phase !== SF.game.PHASE.MATCH_END; n++) {
+        SF.game.step(st, [SF.cpu.input(you, st, 0), SF.cpu.input(ai, st, 1)]);
+      }
+      mine.played += 1;
+    }
+    const a = L.tableFor(base, "kagetsu", "rin").q;
+    const b = L.tableFor(mine, "kagetsu", "rin").q;
+    let changed = 0;
+    for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 1e-6) changed += 1;
+    assert.ok(changed >= 20, `あなたとの対戦で表がほとんど変わっていない（${changed}マス）`);
+    assert.deepStrictEqual(L.serialize(base), L.serialize(L.defaultBrain()), "あなたとの対戦で元の頭脳まで変わった");
+    assert.strictEqual(L.deserialize(JSON.parse(JSON.stringify(L.serialize(mine)))).played, 3, "あなたと戦った試合数が保存されない");
+    console.log(`OK あなたとの対戦から学ぶ: 3試合で表の${changed}マスが変わり、元の学習AIはそのまま`);
+  }
 
   // 何も覚えていない頭脳から学習すると、勝率が上がる（カゲツ学習AI 対 リン つよい）
   function winRate(brain, n) {
