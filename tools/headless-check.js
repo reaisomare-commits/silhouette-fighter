@@ -1100,6 +1100,55 @@ require("../src/core/cpu.js");
   console.log(`OK CPUの強さ: ガード（中段/下段） ${guards.map((g, i) => `${LV[i].label}${g[0]}/${g[1]}%`).join("・")}、投げ抜け ${show(techs)}、対空 ${show(aas)}、連続技を最後まで ${show(combos)}`);
 }
 
+// メニュー：タイトル → モード選択 → キャラと強さの選択 → 試合の設定が正しく作られるか
+{
+  require("../src/core/menu.js");
+  const M = SF.menu;
+  const go = (menu, ...actions) => actions.map((a) => M.press(menu, a)).pop();
+
+  // プレイヤー VS CPU：自分をリン、相手をカゲツ、CPUをつよいに
+  const m = M.createMenu();
+  assert.strictEqual(m.screen, M.SCREEN.TITLE);
+  go(m, "back"); // タイトルでもどるを押しても何も起きない
+  assert.strictEqual(m.screen, M.SCREEN.TITLE);
+  go(m, "ok");
+  assert.strictEqual(m.screen, M.SCREEN.MODE);
+  go(m, "ok");
+  assert.strictEqual(m.screen, M.SCREEN.SELECT);
+  let r = go(m, "right", "down", "right", "down", "right", "right", "right");
+  assert.strictEqual(r, null);
+  r = go(m, "down", "ok");
+  assert.deepStrictEqual(r.start, { mode: "pvc", chars: ["rin", "kagetsu"], levels: [null, 2] }, "プレイヤー VS CPU の設定がちがう");
+
+  // 強さは端で止まる（つよいの右はつよい、よわいの左はよわい）
+  go(m, "up", "left", "left", "left", "left");
+  assert.strictEqual(M.matchConfig(m).levels[1], 0, "よわいより下にいってしまう");
+
+  // もどる → モード選択 → CPU VS CPU。左右で別の強さを選べる
+  go(m, "back");
+  assert.strictEqual(m.screen, M.SCREEN.MODE);
+  go(m, "down", "ok");
+  assert.strictEqual(m.screen, M.SCREEN.SELECT);
+  assert.strictEqual(m.cursor, 0, "モードを変えたら一番上から選ぶ");
+  // 左：カゲツ・よわい　右：カゲツ・つよい。Enterを続けて押すと次の行へ進み、最後に始まる
+  r = go(m, "ok", "left", "ok", "left", "ok", "right", "ok", "ok");
+  assert.deepStrictEqual(r.start, { mode: "cvc", chars: ["kagetsu", "kagetsu"], levels: [0, 2] }, "CPU VS CPU の設定がちがう");
+
+  // モードごとに前に選んだものを覚えている
+  go(m, "back", "up", "ok");
+  assert.deepStrictEqual(M.matchConfig(m), { mode: "pvc", chars: ["rin", "kagetsu"], levels: [null, 0] }, "前に選んだものを忘れている");
+
+  // 作った設定で試合とCPUが動く（CPU VS CPU を最後まで）
+  const cfg = { mode: "cvc", chars: ["rin", "kagetsu"], levels: [0, 2] };
+  const st = SF.game.createGame(7, cfg.chars);
+  const cpus = cfg.levels.map((lv, i) => SF.cpu.createCpu(lv, 7 + i));
+  for (let i = 0; i < 60 * 60 * 6 && st.round.phase !== SF.game.PHASE.MATCH_END; i++) {
+    SF.game.step(st, [SF.cpu.input(cpus[0], st, 0), SF.cpu.input(cpus[1], st, 1)]);
+  }
+  assert.strictEqual(st.round.phase, SF.game.PHASE.MATCH_END, "CPU VS CPU が終わらない");
+  console.log("OK メニュー: モード選択、キャラと強さの選択（左右別の強さ・同キャラ・端で止まる・選んだものを覚える）から試合の設定ができる");
+}
+
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める
 const t0 = process.hrtime.bigint();
 for (let i = 0; i < 100; i++) runMatch(i + 1, 3600);
