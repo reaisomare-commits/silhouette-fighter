@@ -14,6 +14,10 @@
     KeyO: BUTTON.SPECIAL,
   };
 
+  function isFormField(t) {
+    return !!t && /^(INPUT|SELECT|BUTTON|TEXTAREA)$/.test(t.tagName || "");
+  }
+
   function createKeyboard(target) {
     const held = new Set();
     // 1フレームより短い一瞬の押し（押してすぐ離す）も取りこぼさないよう、
@@ -21,6 +25,7 @@
     let tapped = 0;
 
     function onKeyDown(e) {
+      if (isFormField(e.target)) return; // 自動対戦の画面などで、入力欄やボタンを操作しているときは使わない
       if (KEY_TO_BUTTON[e.code] !== undefined) {
         held.add(e.code);
         tapped |= KEY_TO_BUTTON[e.code];

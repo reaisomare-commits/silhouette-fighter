@@ -1149,6 +1149,90 @@ require("../src/core/cpu.js");
   console.log("OK メニュー: モード選択、キャラと強さの選択（左右別の強さ・同キャラ・端で止まる・選んだものを覚える）から試合の設定ができる");
 }
 
+// 7. 自動対戦と記録
+require("../src/core/autobattle.js");
+{
+  const AB = SF.autobattle;
+  const M = SF.menu;
+  // メニューの3つ目「自動対戦と記録」で、記録の画面を開く合図が返る
+  const mm = M.createMenu();
+  M.press(mm, "ok");
+  M.press(mm, "down");
+  M.press(mm, "down");
+  assert.deepStrictEqual(M.press(mm, "ok"), { auto: true }, "自動対戦と記録が選べない");
+  assert.strictEqual(mm.screen, M.SCREEN.MODE, "自動対戦はキャラ選択画面に進まない");
+
+  // 記録をとっても試合の中身は変わらない（記録なしと同じ結果）
+  const chars = ["kagetsu", "rin"];
+  const play = (record) => {
+    const st = SF.game.createGame(11, chars, record ? { record: true } : {});
+    const cpus = [0, 1].map((i) => SF.cpu.createCpu(1, 22 + i));
+    const taken = [0, 0]; // ラウンドごとに減った体力の合計
+    let prev = st.round.phase;
+    for (let i = 0; i < 60 * 60 * 6 && st.round.phase !== SF.game.PHASE.MATCH_END; i++) {
+      SF.game.step(st, [SF.cpu.input(cpus[0], st, 0), SF.cpu.input(cpus[1], st, 1)]);
+      if (prev === SF.game.PHASE.FIGHT && st.round.phase === SF.game.PHASE.ROUND_END) {
+        st.fighters.forEach((f, j) => (taken[j] += CH[f.charId].health - f.health));
+      }
+      prev = st.round.phase;
+    }
+    return { st, taken };
+  };
+  const plain = play(false);
+  const rec = play(true);
+  assert.strictEqual(SF.game.hashState(plain.st), SF.game.hashState(rec.st), "記録をとると試合が変わってしまう");
+  assert.ok(rec.st.log && !Object.keys(rec.st).includes("log"), "記録は見えない形で持つはず");
+
+  // 与えたダメージの記録は、相手の減った体力と同じ。当たった＋ガードされた＋投げ抜けされた は使った回数以下
+  for (let i = 0; i < 2; i++) {
+    const rows = Object.values(rec.st.log.moves[i]);
+    const dmg = rows.reduce((s, r) => s + r.damage, 0);
+    assert.strictEqual(dmg, rec.taken[1 - i], `${i === 0 ? "左" : "右"}の与えたダメージの記録が合わない`);
+    for (const [name, r] of Object.entries(rec.st.log.moves[i])) {
+      assert.ok(r.hits + r.blocks + r.techs <= r.uses, `${name} の当たった回数が使った回数より多い`);
+    }
+  }
+
+  // 柄打ちを1回当てると、使った1・当たった1・ダメージ40と数える
+  {
+    const st = SF.game.createGame(1, ["kagetsu", "kagetsu"], { record: true, intro: false });
+    st.fighters[1].x = st.fighters[0].x + 70 * S;
+    for (let i = 0; i < 30; i++) SF.game.step(st, [i === 0 ? BUTTON.LIGHT : 0, 0]);
+    assert.deepStrictEqual(st.log.moves[0].standLight, { uses: 1, hits: 1, blocks: 0, techs: 0, damage: 40 }, "柄打ちの記録がちがう");
+  }
+
+  // 同じ条件と種なら同じ集計。左右を入れ替えると半分ずつになる
+  const setup = { chars: ["kagetsu", "rin"], levels: [1, 1], matches: 20, seed: 5, swap: true };
+  const summarize = () => {
+    const sum = AB.createSummary();
+    for (const m of AB.schedule(setup)) AB.addMatch(sum, AB.runMatch(m.seed, m.chars, m.levels));
+    return sum;
+  };
+  const s1 = summarize();
+  assert.deepStrictEqual(s1, summarize(), "同じ条件なのに集計が違う");
+  assert.strictEqual(AB.schedule(setup).filter((m) => m.chars[0] === "rin").length, 10, "左右の入れ替えが半分になっていない");
+  const k = s1.entries["kagetsu:1"];
+  const r = s1.entries["rin:1"];
+  assert.strictEqual(k.matches, 20);
+  assert.strictEqual(k.wins + k.losses + k.draws, 20);
+  assert.strictEqual(k.wins, r.losses, "カゲツの勝ちとリンの負けが合わない");
+  assert.ok(s1.rounds >= 40 && s1.rounds <= 60, "1試合は2〜3ラウンドのはず");
+
+  // 表とCSV
+  const ts = AB.tables(s1);
+  assert.deepStrictEqual(ts.map((t) => t.id), ["overview", "winrate", "moves-kagetsu-1", "moves-rin-1"]);
+  const csv = AB.toCsv(s1, [["左", "カゲツ"]]);
+  assert.ok(csv.startsWith("条件\r\n左,カゲツ"), "CSVの先頭に条件が書かれていない");
+  assert.ok(csv.includes("キャラごとの勝率") && csv.includes("柄打ち,U,"), "CSVに表が入っていない");
+  const win = ts[1].rows.map((row) => `${row[0]} ${row[5]}`).join("・");
+
+  const t1 = process.hrtime.bigint();
+  const sum = AB.createSummary();
+  for (const m of AB.schedule({ ...setup, matches: 100 })) AB.addMatch(sum, AB.runMatch(m.seed, m.chars, m.levels));
+  const ms1 = Number(process.hrtime.bigint() - t1) / 1e6;
+  console.log(`OK 自動対戦と記録: 記録しても試合は同じ、ダメージの記録は減った体力と一致、集計とCSV（20試合の勝率 ${win}）、CPU同士100試合を ${ms1.toFixed(0)} ミリ秒`);
+}
+
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める
 const t0 = process.hrtime.bigint();
 for (let i = 0; i < 100; i++) runMatch(i + 1, 3600);

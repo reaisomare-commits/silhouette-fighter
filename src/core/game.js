@@ -130,6 +130,9 @@
       },
     };
     resetFighters(state);
+    if (options.record) {
+      Object.defineProperty(state, "log", { value: { moves: [{}, {}] }, enumerable: false });
+    }
     if (options.intro === false) {
       state.round.phase = PHASE.FIGHT;
       state.round.phaseTimer = 0;
@@ -176,8 +179,19 @@
     );
   }
 
+  // 自動対戦の記録（options.record で作った試合だけ）。技ごとに 使った回数・当たった・ガードされた・投げ抜けされた・与えたダメージ を数える。
+  // 記録は state.log に入れるが、試合の再現の確認（hashState）には入らないよう、見えない形で持つ
+  function record(state, f, name, field, amount = 1) {
+    const log = state.log;
+    if (!log || !name) return;
+    const side = log.moves[state.fighters.indexOf(f)];
+    const row = side[name] || (side[name] = { uses: 0, hits: 0, blocks: 0, techs: 0, damage: 0 });
+    row[field] += amount;
+  }
+
   // chain＝連続技（通常技や必殺技からのつなぎ）として出したか
-  function startMove(f, name, chain = false) {
+  function startMove(state, f, name, chain = false) {
+    record(state, f, name, "uses");
     f.move = name;
     f.moveFrame = 1;
     f.moveHit = false;
@@ -314,7 +328,7 @@
       const next = cancelTarget(state, f, down);
       if (next) {
         f.crouching = next === "crouchLight" || next === "crouchHeavy";
-        startMove(f, next, true);
+        startMove(state, f, next, true);
       } else if (
         f.buffer === "throw" &&
         GROUND_NORMALS.includes(f.move) &&
@@ -322,6 +336,8 @@
         f.moveFrame <= BATTLE.throwInputWindow + 1
       ) {
         // UかIを押した直後にもう片方を押したら、出かけた技を投げに変える（押し始めから数える）
+        record(state, f, f.move, "uses", -1); // 出かけた技は出なかったことにして、投げを数える
+        record(state, f, "throw", "uses");
         f.move = "throw";
         f.buffer = null;
         f.crouching = false;
@@ -349,7 +365,7 @@
       f.moveFrame += 1;
     } else if ((wantAttack === "light" || wantAttack === "heavy" || wantAttack === "throw") && !f.airAttackUsed) {
       // 空中攻撃は1回のジャンプで1回だけ（空中でU＋Iは強攻撃になる）
-      startMove(f, wantAttack === "light" ? "airLight" : "airHeavy");
+      startMove(state, f, wantAttack === "light" ? "airLight" : "airHeavy");
     }
 
     // 地上で自由に動けるときの操作
@@ -371,7 +387,7 @@
       } else if (wantAttack === "throw") {
         f.vx = 0;
         f.crouching = false;
-        startMove(f, "throw");
+        startMove(state, f, "throw");
       } else if (wantAttack === "special") {
         // しゃがみながら O で S+O の技。飛刃がもう画面にあるときは出ない（入力は捨てる）
         const name = specialName(state, f, down);
@@ -379,7 +395,7 @@
         f.buffer = null;
         if (name) {
           f.crouching = false;
-          startMove(f, name);
+          startMove(state, f, name);
         } else {
           f.crouching = down;
           f.pose = down ? POSE.CROUCH : POSE.STAND;
@@ -389,7 +405,7 @@
         f.vx = 0;
         f.crouching = down;
         const name = (down ? "crouch" : "stand") + (wantAttack === "heavy" ? "Heavy" : "Light");
-        startMove(f, name);
+        startMove(state, f, name);
       } else if ((doubleForward || doubleBack) && down) {
         // しゃがんでいるときはステップ類は出ない（覚えていた入力は捨てる）
         f.buffer = null;
@@ -700,10 +716,11 @@
     def.combo += 1;
     const rate = comboRate(def.combo);
     const dmg = Math.floor((amount * rate) / 100);
+    const before = def.health;
     def.health = Math.max(0, def.health - dmg);
     def.comboDamage += dmg;
     state.comboInfo[state.fighters.indexOf(att)] = { hits: def.combo, damage: def.comboDamage, timer: 90 };
-    return dmg;
+    return before - def.health; // 実際に減った体力（記録用。体力が0より下には減らない）
   }
 
   // 掴んでいる最中に攻撃を受けたら、掴んでいた相手を放す
@@ -716,9 +733,12 @@
 
   // 当たった・ガードされたときの処理。
   // proj＝飛び道具が当たったとき。硬直の長さは「目の前で当てたとき」と同じにする（離れて当てるほど攻めた側が有利）
-  function applyHit(state, att, def, m, box, body, proj = null) {
+  // name＝当たった技の名前（記録用。相打ちで先に処理した当たりが技を止めても、正しい名前で数える）
+  function applyHit(state, att, def, m, box, body, proj = null, name = proj ? proj.move : att.move) {
     const air = m.recovery === null;
     const blocked = canBlock(def, m);
+    const moveName = name;
+    record(state, att, moveName, blocked ? "blocks" : "hits");
     if (!proj) att.moveHit = true;
     // のけぞり・ガード硬直の長さは、硬直差がそのとおりになるように決める。
     // 空中攻撃は「着地して着地硬直が終わるまで」を数え、低い所で当てたときに表どおりになる
@@ -740,11 +760,15 @@
       def.stun = Math.max(1, base + m.blockAdv);
       def.vx = 0;
       // 必殺技はガードされても少しだけ体力が減る（削り）
-      if (m.kind === "special") def.health = Math.max(0, def.health - Math.floor((m.damage * BATTLE.chipRate) / 100));
+      if (m.kind === "special") {
+        const chip = Math.min(def.health, Math.floor((m.damage * BATTLE.chipRate) / 100));
+        def.health -= chip;
+        record(state, att, moveName, "damage", chip);
+      }
       state.hitstop = Math.max(state.hitstop, BATTLE.hitstopBlock);
       state.effects.push({ kind: "block", x: fx, y: fy, life: 12 });
     } else {
-      dealDamage(state, att, def, m.damage);
+      record(state, att, moveName, "damage", dealDamage(state, att, def, m.damage));
       releaseGrab(state, def);
       def.move = null;
       def.action = null;
@@ -801,14 +825,14 @@
       const def = state.fighters[1 - i];
       const box = hitbox(att);
       const body = box && touching(box, def);
-      if (body) hits.push({ att, def, m: moveData(att), box, body, p: null, rank: hitRank(att.move) });
+      if (body) hits.push({ att, def, m: moveData(att), box, body, p: null, rank: hitRank(att.move), name: att.move });
     }
     for (const p of state.projectiles) {
       const att = state.fighters[p.owner];
       const def = state.fighters[1 - p.owner];
       const box = projectileBox(p);
       const body = touching(box, def);
-      if (body) hits.push({ att, def, m: CHARACTERS[att.charId].moves[p.move], box, body, p, rank: hitRank(p.move) });
+      if (body) hits.push({ att, def, m: CHARACTERS[att.charId].moves[p.move], box, body, p, rank: hitRank(p.move), name: p.move });
     }
     // 両方が当てていたら、相手より弱い方の当たりは消す
     const best = [0, 1].map((i) => Math.max(-1, ...hits.filter((h) => h.att === state.fighters[i]).map((h) => h.rank)));
@@ -818,7 +842,7 @@
     });
     for (const h of win) {
       if (h.p) h.p.dead = true;
-      applyHit(state, h.att, h.def, h.m, h.box, h.body, h.p);
+      applyHit(state, h.att, h.def, h.m, h.box, h.body, h.p, h.name);
     }
     state.projectiles = state.projectiles.filter((p) => !p.dead);
     checkThrows(state);
@@ -842,6 +866,8 @@
       // 同時に掴み合ったら、両方とも投げ抜けしたことにする
       const [a, b] = state.fighters;
       a.moveHit = b.moveHit = true;
+      record(state, a, "throw", "techs");
+      record(state, b, "throw", "techs");
       throwTech(state, a, b);
       return;
     }
@@ -893,6 +919,7 @@
       if (!att.grab) continue;
       att.grab.timer += 1;
       if (def.techInput && att.grab.timer <= BATTLE.throwTechWindow) {
+        record(state, att, "throw", "techs");
         throwTech(state, att, def);
       } else if (att.grab.timer > BATTLE.throwTechWindow) {
         // 投げる：相手を前に放り投げてダウンさせる
@@ -902,7 +929,8 @@
         att.pose = POSE.THROW;
         att.stun = BATTLE.throwFinish;
         def.techInput = false;
-        dealDamage(state, att, def, m.damage);
+        record(state, att, "throw", "hits");
+        record(state, att, "throw", "damage", dealDamage(state, att, def, m.damage));
         knockDown(def);
         def.pushVx = (att.facing * 60 * S) / 5;
         state.hitstop = Math.max(state.hitstop, BATTLE.hitstopHit);

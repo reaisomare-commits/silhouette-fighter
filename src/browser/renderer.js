@@ -724,16 +724,16 @@
       drawPreview(["kagetsu", "rin"], [C.STAGE_WIDTH * 0.3, C.STAGE_WIDTH * 0.7], tick);
       dim(0.5);
       outlined("モードをえらぶ", C.STAGE_WIDTH / 2, 70, 36, "#fff");
-      const w = 520;
-      const h = 110;
+      const w = 560;
+      const h = 100;
       const x = (C.STAGE_WIDTH - w) / 2;
       SF.menu.MODES.forEach((m, i) => {
-        const y = 140 + i * 140;
+        const y = 115 + i * 120;
         const sel = i === menu.modeCursor;
         panel(x, y, w, h, sel);
         if (sel) text("▶", x + 34, y + h / 2, 26, "#ffd24d");
-        text(m.label, C.STAGE_WIDTH / 2, y + 42, 36, sel ? "#fff" : "rgba(255,255,255,0.55)");
-        text(m.note, C.STAGE_WIDTH / 2, y + 82, 17, sel ? "#ffd8a0" : "rgba(255,255,255,0.4)", "center", "normal");
+        text(m.label, C.STAGE_WIDTH / 2, y + 40, 34, sel ? "#fff" : "rgba(255,255,255,0.55)");
+        text(m.note, C.STAGE_WIDTH / 2, y + 76, 17, sel ? "#ffd8a0" : "rgba(255,255,255,0.4)", "center", "normal");
       });
       hint(HINT_MENU);
     }
