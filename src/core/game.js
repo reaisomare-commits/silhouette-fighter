@@ -721,11 +721,13 @@
     const blocked = canBlock(def, m);
     if (!proj) att.moveHit = true;
     // のけぞり・ガード硬直の長さは、硬直差がそのとおりになるように決める。
-    // 空中攻撃は「着地して着地硬直が終わるまで」を数えるので、どの高さで当てても硬直差は同じ
+    // 空中攻撃は「着地して着地硬直が終わるまで」を数え、低い所で当てたときに表どおりになる
     const base = proj
       ? moveTotal(m) - m.startup
       : air
-        ? framesUntilLanding(att) + toStats(att.charId).landingLag
+        ? // 空中攻撃：着地の airHitLow フレーム前より低い所で当てたら表どおりの有利。
+          // それより高い所（上りや頂上）で当てると、早く当てた分だけ有利が減る
+          Math.min(framesUntilLanding(att), BATTLE.airHitLow) + toStats(att.charId).landingLag
         : attackerRemaining(att, m);
     const dir = att.facing;
     // 火花は当たる範囲と体が重なった所の真ん中に出す

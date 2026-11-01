@@ -16,7 +16,7 @@
   const PATTERN = ["light", "heavy", "crouchLight", "crouchHeavy", "jumpLight", "jumpHeavy", "special", "crouchSpecial", "throw"];
   const CYCLE = 75; // 1つの技を出してから次の技までのフレーム
   const NEAR = 120; // これより離れていたら歩いて近づく（ピクセル）
-  const THROW_NEAR = 80; // 投げのときはここまで近づく
+  const THROW_NEAR = 70; // 投げのときはここまで近づく
 
   function createDummy() {
     return { mode: 0, t: 0 };

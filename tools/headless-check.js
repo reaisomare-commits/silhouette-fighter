@@ -307,12 +307,13 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 30) {
     const st = newGame(1, [att, att === "rin" ? "kagetsu" : "rin"]);
     const [a, b] = st.fighters;
     a.x = 300 * S;
-    b.x = 430 * S;
+    b.x = (att === "rin" ? 470 : 430) * S; // リンは遠くまで跳ぶので離しておく
     let hitAt = -1;
     let pose = null;
     let sa = -1;
     let sb = -1;
     let landedA = false;
+    let airHit = false;
     for (let i = 0; i < 150; i++) {
       const after = hitAt >= 0;
       if (after) {
@@ -326,6 +327,7 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 30) {
       if (!after && a.moveHit) {
         hitAt = i;
         pose = b.pose;
+        airHit = a.move.startsWith("air");
         // 当たった直後の入力では先行入力が入らないよう、ここで消しておく
         a.buffer = null;
         b.buffer = null;
@@ -336,29 +338,34 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 30) {
         if (sb < 0 && !b.onGround) sb = i;
       }
     }
-    return { hitAt, pose, adv: sb - sa };
+    return { hitAt, pose, adv: sb - sa, airHit };
   }
   const out = [];
   for (const att of ["kagetsu", "rin"]) {
     for (const [name, btn] of [["airLight", U], ["airHeavy", I]]) {
       const m = CH[att].moves[name];
-      // 早めに当てた場合と遅めに当てた場合
-      const advs = [];
-      for (const pressAt of [16, 28]) {
+      // ボタンを押すフレームをずらして、高い所から低い所まで当ててみる
+      const res = [];
+      for (let pressAt = 1; pressAt < 50; pressAt++) {
         const h = airAdv(att, btn, pressAt, false);
         const g = airAdv(att, btn, pressAt, true);
-        if (h.hitAt < 0) continue;
-        assert.strictEqual(h.pose, POSE.HIT);
-        assert.strictEqual(g.pose, POSE.BLOCK);
-        assert.strictEqual(h.adv, m.hitAdv, `${CH[att].name}の${m.name}（${pressAt}F目）のヒット時の硬直差が違う`);
-        assert.strictEqual(g.adv, m.blockAdv, `${CH[att].name}の${m.name}のガード時の硬直差が違う`);
-        advs.push(pressAt);
+        if (h.hitAt < 0 || g.hitAt < 0 || !h.airHit || !g.airHit || h.pose !== POSE.HIT || g.pose !== POSE.BLOCK) continue;
+        res.push({ pressAt, hit: h.adv, block: g.adv });
       }
-      assert.ok(advs.length >= 1, `${CH[att].name}の${m.name}が当たらない`);
-      out.push(`${CH[att].name}${m.name} +${m.hitAdv}/+${m.blockAdv}`);
+      assert.ok(res.length >= 3, `${CH[att].name}の${m.name}が当たらない`);
+      const low = res.at(-1);
+      const high = res[0];
+      // 低い所で当てたら表どおり。高い所で当てたら有利が減る。遅く当てるほど有利は減らない
+      assert.strictEqual(low.hit, m.hitAdv, `${CH[att].name}の${m.name}（低い所）のヒット時の硬直差が違う`);
+      assert.strictEqual(low.block, m.blockAdv, `${CH[att].name}の${m.name}（低い所）のガード時の硬直差が違う`);
+      assert.ok(high.hit < m.hitAdv - 5, `${CH[att].name}の${m.name}は高い所で当てると有利が減るはず`);
+      // ジャンプしてすぐ出して当てても、着地して出した弱攻撃は間に合わない（連続技にならない）
+      assert.ok(high.hit < CH[att].moves.standLight.startup, `${CH[att].name}の${m.name}を高い所で当てても連続技にならないはず`);
+      for (let i = 1; i < res.length; i++) assert.ok(res[i].hit >= res[i - 1].hit, "遅く当てた方が有利が減った");
+      out.push(`${CH[att].name}${m.name} 高い所${high.hit > 0 ? "+" : ""}${high.hit}〜低い所+${low.hit}`);
     }
   }
-  console.log(`OK 空中攻撃の硬直差（高さに関係なく同じ）: ${out.join("、")}`);
+  console.log(`OK 空中攻撃の硬直差（ヒット時、低い所で当てると表どおり）: ${out.join("、")}`);
 }
 
 // ガードしたら守った側は下がらず、攻めた側が下がる（影縫い）
@@ -790,22 +797,22 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
   }
   for (const [att, def] of [["kagetsu", "rin"], ["rin", "kagetsu"]]) {
     const m = CH[att].moves.throw;
-    const t = throwTest(att, def, 70, { defInput: BUTTON.RIGHT });
+    const t = throwTest(att, def, 60, { defInput: BUTTON.RIGHT });
     assert.strictEqual(t.grabbedAt + 1, m.startup, `${CH[att].name}の投げの発生が違う`);
     assert.strictEqual(t.result, POSE.DOWN, "投げはガードできずダウンするはず");
     assert.strictEqual(t.damage, m.damage, "投げのダメージが違う");
-    const in8 = throwTest(att, def, 70, { techAt: BT.throwTechWindow });
+    const in8 = throwTest(att, def, 60, { techAt: BT.throwTechWindow });
     assert.strictEqual(in8.result, POSE.TECH, "8F目のU＋Iで投げ抜けできるはず");
     assert.strictEqual(in8.damage, 0, "投げ抜けしたらダメージなし");
-    const in9 = throwTest(att, def, 70, { techAt: BT.throwTechWindow + 1 });
+    const in9 = throwTest(att, def, 60, { techAt: BT.throwTechWindow + 1 });
     assert.strictEqual(in9.result, POSE.DOWN, "9F目では投げ抜けできないはず");
     // 1Fずれて押しても同時押し
-    const late = throwTest(att, def, 70, { delay: 1 });
+    const late = throwTest(att, def, 60, { delay: 1 });
     assert.strictEqual(late.result, POSE.DOWN, "UとIが1Fずれても投げになるはず");
   }
   // 投げ抜けしたら五分（同時に動ける）で離れる
   {
-    const t = throwTest("kagetsu", "rin", 70, { techAt: 3 });
+    const t = throwTest("kagetsu", "rin", 60, { techAt: 3 });
     const { a, b, st } = t;
     assert.strictEqual(a.stun, b.stun);
     assert.ok(Math.abs(a.x - b.x) > 100 * S, "投げ抜けしたら離れるはず");
@@ -851,7 +858,7 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
 
 // 練習相手：投げ抜けの設定なら投げ抜けする
 {
-  const st = closeGame("kagetsu", "rin", 70);
+  const st = closeGame("kagetsu", "rin", 60);
   const d = SF.dummy.createDummy();
   d.mode = SF.dummy.MODES.findIndex((m) => m.id === "guardTech");
   let teched = false;

@@ -34,7 +34,8 @@
       //   active: 当たる時間の長さ（F）
       //   recovery: 硬直（当たる時間が終わってから動けるまで）。空中攻撃は null＝着地まで
       //   hitAdv / blockAdv: 硬直差（当たった／ガードされたあと、攻めた側が何F先に動けるか）。"down" はダウンさせる
-      //     空中攻撃は「攻めた側が着地して着地硬直が終わったとき」から数える（どの高さで当てても同じ）
+      //     空中攻撃は「攻めた側が着地して着地硬直が終わったとき」から数え、下りの低い所（着地の airHitLow フレーム前より下）で
+      //     当てたときの値。それより高い所で当てると、そのフレーム数だけ有利が減る（ジャンプして最速で出しても連続技にならない）
       //   damage: ダメージ
       //   guard: "mid"＝立ち・しゃがみどちらでも防げる、"low"＝しゃがみガードだけ、"air"＝立ちガードだけ
       //   hitbox: 当たる範囲（ピクセル）。x は体の中心から前へ、y は足元から上へ（マイナスは足元より下）
@@ -61,7 +62,7 @@
         // 上に伸びるやられる範囲は頭の高さまで（上から来る相手に負けにくい）
         crouchSpecial: { name: "昇り斬り", kind: "special", startup: 8, active: 5, recovery: 35, hitAdv: "down", blockAdv: -25, damage: 100, guard: "mid", hitbox: { x1: 0, x2: 85, y1: 40, y2: 240 }, hurtExtend: { x1: 0, x2: 70, y1: 40, y2: 170 }, push: 20 },
         // 投げ：空振りすると、同じくらいの発生の柄打ち（硬直10F）より長く動けない
-        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 17, damage: 100, hitbox: { x1: 0, x2: 70, y1: 0, y2: 160 } },
+        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 17, damage: 100, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 } },
       },
     },
     rin: {
@@ -98,7 +99,7 @@
         // 跳び蹴り上げ：対空
         crouchSpecial: { name: "跳び蹴り上げ", kind: "special", startup: 6, active: 4, recovery: 30, hitAdv: "down", blockAdv: -22, damage: 85, guard: "mid", hitbox: { x1: -5, x2: 70, y1: 50, y2: 210 }, hurtExtend: { x1: -5, x2: 55, y1: 50, y2: 135 }, push: 20 },
         // 投げ：掴める範囲がカゲツより少し広い。空振りすると、同じくらいの発生のジャブ（硬直8F）より長く動けない
-        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 16, damage: 130, hitbox: { x1: 0, x2: 80, y1: 0, y2: 130 } },
+        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 16, damage: 130, hitbox: { x1: 0, x2: 65, y1: 0, y2: 130 } },
       },
     },
   };
@@ -123,6 +124,7 @@
     throwFinish: 20, // 投げきったあと、投げた側が動けるまで（F）
     throwTechStun: 14, // 投げ抜けしたあと、両方が動けるまで（F）
     throwTechPush: 40, // 投げ抜けで離れる距離（ピクセル、それぞれ）
+    airHitLow: 12, // 空中攻撃が表どおりの有利になる高さ（着地の何フレーム前より下で当てたか）
     hitstopHit: 8, // 当たった瞬間に止まる時間（F）
     hitstopBlock: 5, // ガードした瞬間に止まる時間（F）
     downFrames: 50, // ダウンしてから起き上がるまで（F、この間は攻撃が当たらない）
