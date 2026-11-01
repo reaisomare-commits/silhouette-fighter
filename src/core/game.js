@@ -79,6 +79,12 @@
       health: CHARACTERS[charId].health,
       landingTimer: 0, // 着地硬直の残りフレーム
       action: null, // ステップなど、途中で止められない動きの最中ならその種類（POSE と同じ名前）
+      backstepRecovery: false, // 止まり際がバックステップのものか（攻撃を受けるとダメージが増える）
+      punishedGrab: false,
+      throwPressAge: 99, // U＋Iを押してから何フレームたったか（掴まれる少し前に押していても投げ抜けになる）
+      bufferAge: 0, // 先行入力を覚えてから何フレームたったか
+      charging: false, // ためる技（リンの突進拳）で、ボタンを押し続けてためている最中か
+      chargeFrames: 0, // ためたフレーム数（長いほど遠くまで進む） // バックステップの止まり際に掴まれたか（投げのダメージが増える）
       actionTimer: 0, // その動きの残りフレーム（ダッシュは走ったフレーム数）
       move: null, // 出している技の名前（moves の中の名前）
       moveFrame: 0, // 技を出してから何フレーム目か（押したフレームが1）
@@ -197,6 +203,8 @@
     f.moveHit = false;
     f.pose = POSE.ATTACK;
     f.buffer = null;
+    f.charging = !!CHARACTERS[f.charId].moves[name].charge;
+    f.chargeFrames = 0;
     if (name === "airLight" || name === "airHeavy") f.airAttackUsed = true;
     if (!chain) f.chainLights = 0;
     if (isLightMove(name)) f.chainLights += 1;
@@ -233,6 +241,7 @@
   }
 
   // 押した瞬間のボタンと方向キーの2回押しを先行入力として覚える。前に覚えていたものは上書き（最後の入力を優先）。
+  // 攻撃を覚えたあとに左右の移動キーを押したら、その攻撃は取り消す（移動が最後の入力なので、動けるようになったら移動する）。
   // 同じフレームに2つ押したときは 投げ（U＋I） ＞ 必殺技 ＞ 強攻撃 ＞ 弱攻撃 ＞ ジャンプ ＞ ステップ・ダッシュ・バックステップ の順
   function registerPresses(f, input) {
     // 「前」と「後ろ」は押した時点の向きで決める
@@ -242,6 +251,9 @@
     if (f.tapForward > 0) f.tapForward -= 1;
     if (f.tapBack > 0) f.tapBack -= 1;
     if (f.lightAge < 99) f.lightAge += 1;
+    if (f.throwPressAge < 99) f.throwPressAge += 1;
+    if (f.bufferAge < 99) f.bufferAge += 1;
+    const oldBuffer = f.buffer;
     if (f.heavyAge < 99) f.heavyAge += 1;
     let dash = null;
     if (justPressed(input, f.prevInput, forwardBtn)) {
@@ -259,10 +271,15 @@
     if (light) f.lightAge = 0;
     if (heavy) f.heavyAge = 0;
     // UとIを（ほぼ）同時に押したら投げ。少しずれても THROW_INPUT_WINDOW フレーム以内なら同時押し
+    // 攻撃ボタンのあとに左右の移動キーを押したら、覚えていた攻撃は取り消す（移動が最後の入力）。
+    // ただし投げは取り消さない。ほぼ同時（THROW_INPUT_WINDOW フレーム以内）に押した方向キーでも取り消さない
+    const moved = justPressed(input, f.prevInput, forwardBtn) || justPressed(input, f.prevInput, backBtn);
+    if (moved && ["light", "heavy", "special"].includes(f.buffer) && f.bufferAge > BATTLE.throwInputWindow) f.buffer = null;
     const win = BATTLE.throwInputWindow;
     const both = (light && f.heavyAge <= win) || (heavy && f.lightAge <= win);
     if (both) {
       f.buffer = "throw";
+      f.throwPressAge = 0;
       f.lightAge = 99;
       f.heavyAge = 99;
     } else if (justPressed(input, f.prevInput, BUTTON.SPECIAL)) f.buffer = "special";
@@ -270,6 +287,7 @@
     else if (light) f.buffer = "light";
     else if (justPressed(input, f.prevInput, BUTTON.JUMP)) f.buffer = "jump";
     else if (dash) f.buffer = dash;
+    if (f.buffer !== oldBuffer) f.bufferAge = 0;
   }
 
   function updateFighter(state, f, input) {
@@ -320,7 +338,12 @@
       if (f.stun === 0) {
         f.pose = f.crouching ? POSE.CROUCH : POSE.STAND;
       }
+    } else if (f.onGround && f.move && f.charging && isDown(input, BUTTON.SPECIAL) && f.chargeFrames < moveData(f).charge.max) {
+      // ためる技：ボタンを押している間は、出る前の構えのまま止まってためる（離したら出る）
+      f.chargeFrames += 1;
+      f.vx = 0;
     } else if (f.onGround && f.move) {
+      f.charging = false;
       // 地上の技の最中。最後まで出しきるまで動けない。
       // ただし通常技が当たった（ガードされた）あとは、必殺技や次の通常技につなげられる
       const m = moveData(f);
@@ -353,7 +376,9 @@
       // 前に突っ込む技
       const cur = moveData(f);
       if (cur && cur.lunge && f.moveFrame >= cur.lunge.from && f.moveFrame <= cur.lunge.to) {
-        f.vx = f.facing * cur.lunge.speed * S;
+        // ためた分だけ速く進む（＝遠くまで届く）
+        const speed = cur.lunge.speed + (cur.charge && f.move === "special" ? f.chargeFrames * cur.charge.speedPerFrame : 0);
+        f.vx = f.facing * Math.trunc(speed * S);
       }
     } else if (f.onGround && f.action) {
       // ステップ・ダッシュ・バックステップの最中
@@ -489,7 +514,8 @@
   }
 
   // 止まり際（動けない時間）に入る
-  function startRecovery(f, frames, keepSpeed) {
+  function startRecovery(f, frames, keepSpeed, backstep = false) {
+    f.backstepRecovery = backstep;
     f.action = POSE.DASH_RECOVERY;
     f.pose = POSE.DASH_RECOVERY;
     f.actionTimer = frames;
@@ -502,8 +528,8 @@
     if (f.action === POSE.STEP || f.action === POSE.BACKSTEP) {
       f.actionTimer -= 1;
       if (f.actionTimer <= 0) {
-        const rec = f.action === POSE.STEP ? st.forwardDash.recovery : st.backDash.recovery;
-        startRecovery(f, rec, false);
+        const back = f.action === POSE.BACKSTEP;
+        startRecovery(f, back ? st.backDash.recovery : st.forwardDash.recovery, false, back);
       }
     } else if (f.action === POSE.RUN) {
       f.actionTimer += 1;
@@ -555,8 +581,20 @@
   }
 
   // やられる範囲（体）。ピクセルの四角 { left, right, top, bottom }。攻撃が当たらない状態なら null
+  // バックステップの初めの何フレームかは無敵（攻撃も投げも当たらない）
+  function backstepInvincible(f) {
+    const bd = CHARACTERS[f.charId].backDash;
+    return f.action === POSE.BACKSTEP && bd.frames - f.actionTimer < (bd.invincible || 0);
+  }
+
+  // バックステップの止まり際（隙）か。ここで攻撃や投げを受けるとダメージが増える
+  function backstepPunishable(f) {
+    return f.action === POSE.DASH_RECOVERY && f.backstepRecovery;
+  }
+
   function hurtbox(f) {
     if (f.pose === POSE.DOWN || f.pose === POSE.LAUNCH || f.pose === POSE.THROWN) return null;
+    if (backstepInvincible(f)) return null;
     const w = CHARACTERS[f.charId].width;
     const x = f.x / S;
     const y = f.y / S;
@@ -712,7 +750,11 @@
   }
 
   // コンボ補正をかけたダメージを与える。n発目は 100% − 10%×(n−1)（最低10%）
-  function dealDamage(state, att, def, amount) {
+  function dealDamage(state, att, def, amount, punish = false) {
+    if (punish && def.combo === 0) {
+      amount = Math.floor((amount * BATTLE.backstepPunishRate) / 100);
+      state.effects.push({ kind: "text", text: "隙狩り！", x: def.x / S, y: def.y / S - 190, life: 45 });
+    }
     def.combo += 1;
     const rate = comboRate(def.combo);
     const dmg = Math.floor((amount * rate) / 100);
@@ -768,7 +810,7 @@
       state.hitstop = Math.max(state.hitstop, BATTLE.hitstopBlock);
       state.effects.push({ kind: "block", x: fx, y: fy, life: 12 });
     } else {
-      record(state, att, moveName, "damage", dealDamage(state, att, def, m.damage));
+      record(state, att, moveName, "damage", dealDamage(state, att, def, m.damage, backstepPunishable(def)));
       releaseGrab(state, def);
       def.move = null;
       def.action = null;
@@ -848,9 +890,9 @@
     checkThrows(state);
   }
 
-  // 投げられる状態か：地上にいて、のけぞり・ガード硬直・ダウン中でない
+  // 投げられる状態か：地上にいて、のけぞり・ガード硬直・ダウン中・バックステップで下がっている最中・ジャンプの着地硬直中でない
   function throwable(f) {
-    return f.onGround && f.stun === 0 && !f.grab && f.pose !== POSE.DOWN && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN;
+    return f.onGround && f.stun === 0 && f.action !== POSE.BACKSTEP && f.pose !== POSE.LANDING && !f.grab && f.pose !== POSE.DOWN && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN;
   }
 
   function checkThrows(state) {
@@ -876,14 +918,17 @@
       att.grab = { timer: 0 };
       att.pose = POSE.THROW;
       att.vx = 0;
+      def.punishedGrab = backstepPunishable(def);
       def.pose = POSE.THROWN;
       def.move = null;
       def.action = null;
       def.landingTimer = 0;
       def.crouching = false;
       def.vx = 0;
-      def.buffer = null; // 掴まれる前に押していたものは投げ抜けにならない
-      def.techInput = false;
+      def.buffer = null;
+      // 掴まれる少し前（投げ抜けの受付と同じフレーム数以内）にU＋Iを押していたら、投げ抜けになる
+      // （ガード硬直が終わる頃に投げ返そうとしたら、相手の投げのほうが早かったとき）
+      def.techInput = def.throwPressAge <= BATTLE.throwTechWindow;
       // 相手を自分の目の前に引き寄せる
       const near = ((CHARACTERS[att.charId].width + CHARACTERS[def.charId].width) / 2 + 4) * S;
       def.x = att.x + att.facing * near;
@@ -930,7 +975,8 @@
         att.stun = BATTLE.throwFinish;
         def.techInput = false;
         record(state, att, "throw", "hits");
-        record(state, att, "throw", "damage", dealDamage(state, att, def, m.damage));
+        record(state, att, "throw", "damage", dealDamage(state, att, def, m.damage, def.punishedGrab));
+        def.punishedGrab = false;
         knockDown(def);
         def.pushVx = (att.facing * 60 * S) / 5;
         state.hitstop = Math.max(state.hitstop, BATTLE.hitstopHit);

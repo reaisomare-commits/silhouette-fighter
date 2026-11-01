@@ -27,7 +27,9 @@
         recovery: 5, // 止まってから動けるまで（フレーム）
       },
       // 後ろを素早く2回：バックステップ
-      backDash: { frames: 14, speed: 4.5, recovery: 6 }, // 約63ピクセル下がる
+      // 後ろを素早く2回：バックステップ。下がっている間は投げられない。
+      // 初めの invincible フレームは攻撃も当たらない（無敵）。止まり際（recovery）に攻撃や投げを受けるとダメージが増える
+      backDash: { frames: 14, speed: 4.5, recovery: 12, invincible: 8 }, // 約63ピクセル下がる
       health: 1000, // 体力
       // 技の表。時間はフレーム（1F＝1/60秒）。
       //   startup: 発生（ボタンを押したフレームを1として、何F目に当たり始めるか）
@@ -44,6 +46,7 @@
       //   projectile: 飛び道具の大きさと速さ（ピクセル）。spawnX は体の中心から前へ、y は足元から上へ（飛び道具の中心）
       //   lunge: 技の途中で前に進む（from〜to フレーム目に、1フレーム speed ピクセル）
       //   noCancel: true なら当たっても必殺技キャンセルできない
+      //   charge: ボタンを押している間ためて、離すと出る技（max フレームまで。ためた分 lunge の速さが speedPerFrame ずつ増える）
       //   hurtExtend: 技を出している間に伸びるやられる範囲（書かなければ hitbox と同じ）。
       //     当たる時間はこの範囲まで、発生前と硬直中はその半分の長さまで伸びる
       //   投げの hitbox は掴める範囲。recovery は空振りしたときの硬直
@@ -51,18 +54,18 @@
       lightChainMax: 1,
       moves: {
         standLight: { name: "柄打ち", startup: 6, active: 2, recovery: 10, hitAdv: 3, blockAdv: 1, damage: 40, guard: "mid", hitbox: { x1: 15, x2: 78, y1: 75, y2: 135 }, push: 18 },
-        standHeavy: { name: "大振り斬り", startup: 12, active: 3, recovery: 20, hitAdv: 2, blockAdv: -4, damage: 100, guard: "mid", hitbox: { x1: 25, x2: 150, y1: 55, y2: 150 }, push: 28 },
+        standHeavy: { name: "大振り斬り", startup: 12, active: 3, recovery: 24, hitAdv: 2, blockAdv: -8, damage: 100, guard: "mid", hitbox: { x1: 25, x2: 150, y1: 55, y2: 120 }, push: 28 },
         crouchLight: { name: "足元突き", startup: 7, active: 2, recovery: 11, hitAdv: 2, blockAdv: 0, damage: 35, guard: "low", hitbox: { x1: 20, x2: 112, y1: 0, y2: 40 }, push: 18 },
         crouchHeavy: { name: "足払い斬り", startup: 14, active: 3, recovery: 24, hitAdv: "down", blockAdv: -10, damage: 90, guard: "low", hitbox: { x1: 20, x2: 132, y1: 0, y2: 35 }, push: 24, noCancel: true },
-        airLight: { name: "空中攻撃（弱）", startup: 7, active: 6, recovery: null, hitAdv: 10, blockAdv: 3, damage: 35, guard: "air", hitbox: { x1: 0, x2: 72, y1: -35, y2: 55 }, push: 10 },
-        airHeavy: { name: "空中攻撃（強）", startup: 11, active: 6, recovery: null, hitAdv: 14, blockAdv: 4, damage: 85, guard: "air", hitbox: { x1: -5, x2: 95, y1: -50, y2: 50 }, push: 14 },
+        airLight: { name: "空中攻撃（弱）", startup: 7, active: 6, recovery: null, hitAdv: 10, blockAdv: 3, damage: 35, guard: "air", hitbox: { x1: 0, x2: 72, y1: -15, y2: 55 }, push: 10 },
+        airHeavy: { name: "空中攻撃（強）", startup: 11, active: 6, recovery: null, hitAdv: 14, blockAdv: 4, damage: 85, guard: "air", hitbox: { x1: -5, x2: 95, y1: -25, y2: 50 }, push: 14 },
         // 飛刃：飛び道具。画面に1つまで。硬直差は目の前で当てたときの値（離れて当てるほど攻めた側が有利）
-        special: { name: "飛刃", kind: "special", startup: 16, active: 1, recovery: 25, hitAdv: 4, blockAdv: -2, damage: 80, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 70, y1: 60, y2: 120 }, push: 14, projectile: { speed: 7, width: 44, height: 30, spawnX: 50, y: 75 } },
+        special: { name: "飛刃", kind: "special", startup: 16, active: 1, recovery: 25, hitAdv: 4, blockAdv: -8, damage: 80, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 70, y1: 60, y2: 120 }, push: 14, projectile: { speed: 7, width: 44, height: 30, spawnX: 50, y: 75 } },
         // 昇り斬り：対空。頭の上まで届く。外すと大きな隙
         // 上に伸びるやられる範囲は頭の高さまで（上から来る相手に負けにくい）
         crouchSpecial: { name: "昇り斬り", kind: "special", startup: 8, active: 5, recovery: 35, hitAdv: "down", blockAdv: -25, damage: 100, guard: "mid", hitbox: { x1: 0, x2: 85, y1: 40, y2: 240 }, hurtExtend: { x1: 0, x2: 70, y1: 40, y2: 170 }, push: 20 },
-        // 投げ：空振りすると、同じくらいの発生の柄打ち（硬直10F）より長く動けない
-        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 17, damage: 100, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 } },
+        // 投げ：空振りすると、同じくらいの発生の柄打ち（硬直10F）よりずっと長く動けない
+        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 22, damage: 100, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 } },
       },
     },
     rin: {
@@ -85,7 +88,7 @@
         minFrames: 8, // すぐ離しても最低これだけは走る
         recovery: 6, // 離してから止まるまでのブレーキ（フレーム）
       },
-      backDash: { frames: 12, speed: 5, recovery: 4 }, // 約60ピクセル下がる
+      backDash: { frames: 12, speed: 5, recovery: 10, invincible: 8 }, // 約60ピクセル下がる
       health: 900,
       lightChainMax: 2, // リンはUを2回つないでからIにもつなげられる
       moves: {
@@ -93,14 +96,16 @@
         standHeavy: { name: "回し蹴り", startup: 9, active: 3, recovery: 16, hitAdv: 3, blockAdv: -2, damage: 80, guard: "mid", hitbox: { x1: 15, x2: 98, y1: 60, y2: 125 }, push: 26 },
         crouchLight: { name: "小足", startup: 4, active: 2, recovery: 9, hitAdv: 3, blockAdv: 1, damage: 25, guard: "low", hitbox: { x1: 15, x2: 78, y1: 0, y2: 30 }, push: 16 },
         crouchHeavy: { name: "足払い", startup: 10, active: 3, recovery: 20, hitAdv: "down", blockAdv: -8, damage: 70, guard: "low", hitbox: { x1: 15, x2: 98, y1: 0, y2: 30 }, push: 22, noCancel: true },
-        airLight: { name: "空中攻撃（弱）", startup: 5, active: 6, recovery: null, hitAdv: 9, blockAdv: 2, damage: 25, guard: "air", hitbox: { x1: 0, x2: 58, y1: -30, y2: 50 }, push: 10 },
-        airHeavy: { name: "空中攻撃（強）", startup: 9, active: 6, recovery: null, hitAdv: 12, blockAdv: 3, damage: 70, guard: "air", hitbox: { x1: -5, x2: 78, y1: -40, y2: 45 }, push: 14 },
-        // 突進拳：素早く前に突っ込む。ガードされるとカゲツの柄打ちで反撃される
-        special: { name: "突進拳", kind: "special", startup: 10, active: 3, recovery: 24, hitAdv: 2, blockAdv: -8, damage: 80, guard: "mid", hitbox: { x1: 15, x2: 75, y1: 65, y2: 115 }, push: 24, lunge: { from: 2, to: 12, speed: 9 } },
-        // 跳び蹴り上げ：対空
-        crouchSpecial: { name: "跳び蹴り上げ", kind: "special", startup: 6, active: 4, recovery: 30, hitAdv: "down", blockAdv: -22, damage: 85, guard: "mid", hitbox: { x1: -5, x2: 70, y1: 50, y2: 210 }, hurtExtend: { x1: -5, x2: 55, y1: 50, y2: 135 }, push: 20 },
-        // 投げ：掴める範囲がカゲツより少し広い。空振りすると、同じくらいの発生のジャブ（硬直8F）より長く動けない
-        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 16, damage: 130, hitbox: { x1: 0, x2: 65, y1: 0, y2: 130 } },
+        airLight: { name: "空中攻撃（弱）", startup: 5, active: 6, recovery: null, hitAdv: 9, blockAdv: 2, damage: 25, guard: "air", hitbox: { x1: 0, x2: 58, y1: -15, y2: 50 }, push: 10 },
+        airHeavy: { name: "空中攻撃（強）", startup: 9, active: 6, recovery: null, hitAdv: 12, blockAdv: 3, damage: 70, guard: "air", hitbox: { x1: -5, x2: 78, y1: -20, y2: 45 }, push: 14 },
+        // 突進拳：素早く前に突っ込む。当たるとダウン。ガードされても少し不利なだけ
+        //   ためる技：O を押している間は構えてため、離すと出る（発生は離してから数える）。
+        //   ためたフレーム数×speedPerFrame だけ進む速さが増える（最大 max フレーム。ためなし約99px、最大約198px）
+        special: { name: "突進拳", kind: "special", startup: 10, active: 3, recovery: 24, hitAdv: "down", blockAdv: -2, damage: 80, guard: "mid", hitbox: { x1: 15, x2: 75, y1: 65, y2: 115 }, push: 24, lunge: { from: 2, to: 12, speed: 9 }, charge: { max: 30, speedPerFrame: 0.3 } },
+        // 跳び蹴り上げ：対空。ガードされたときに下がる距離（push）は小さい
+        crouchSpecial: { name: "跳び蹴り上げ", kind: "special", startup: 6, active: 4, recovery: 36, hitAdv: "down", blockAdv: -28, damage: 85, guard: "mid", hitbox: { x1: -20, x2: 90, y1: 50, y2: 210 }, hurtExtend: { x1: -5, x2: 55, y1: 50, y2: 135 }, push: 8 },
+        // 投げ：掴める範囲がカゲツより少し広い。空振りすると、同じくらいの発生のジャブ（硬直8F）よりずっと長く動けない
+        throw: { name: "投げ", kind: "throw", startup: 5, active: 2, recovery: 21, damage: 130, hitbox: { x1: 0, x2: 65, y1: 0, y2: 130 } },
       },
     },
   };
@@ -120,6 +125,7 @@
     comboScaleStep: 10,
     comboScaleMin: 10,
     chipRate: 10, // 必殺技をガードしたときに減る体力（ダメージの何%か）
+    backstepPunishRate: 125, // バックステップの止まり際に攻撃・投げを受けたときのダメージ（%。連続技の1発目だけ）
     throwInputWindow: 2, // UとIをこのフレーム数以内のずれで押せば「同時押し」とみなす
     throwTechWindow: 8, // 投げが決まってから何フレーム以内にU＋Iを押せば投げ抜けできるか
     throwFinish: 20, // 投げきったあと、投げた側が動けるまで（F）

@@ -186,6 +186,75 @@ console.log(`OK ジャンプ: カゲツ 高さ${kj.height}px/${kj.air}F、リン
   );
 }
 
+// バックステップ：初めは無敵、下がっている間は投げられない、止まり際に攻撃・投げを受けるとダメージが増える。
+// ジャンプの着地硬直中も投げられない
+{
+  const CHB = SF.characters.CHARACTERS;
+  const rate = SF.characters.BATTLE.backstepPunishRate;
+  // 右のキャラがバックステップし、左のキャラが t フレーム目にボタンを押す（当たるまで間合いを保つ）
+  function trial(att, def, btn, t, gap) {
+    const st = newGame(1, [att, def]);
+    st.fighters[0].x = 400 * S;
+    st.fighters[1].x = (400 + gap) * S;
+    const seq = [BUTTON.RIGHT, BUTTON.RIGHT, 0, 0, BUTTON.RIGHT];
+    for (let i = 0; i < 80; i++) {
+      const before = { hp: st.fighters[1].health, action: st.fighters[1].action, pose: st.fighters[1].pose };
+      if (i <= t + 20) st.fighters[0].x = st.fighters[1].x - gap * S;
+      SF.game.step(st, [i === t ? btn : 0, seq[i] ?? 0]);
+      if (st.fighters[1].health < before.hp) return { dmg: before.hp - st.fighters[1].health, when: before.action || before.pose };
+    }
+    return { dmg: 0 };
+  }
+  for (const [att, def] of [["kagetsu", "rin"], ["rin", "kagetsu"]]) {
+    const bd = CHB[def].backDash;
+    const start = 4; // 5フレーム目（3回目の入力）でバックステップが始まる
+    const light = CHB[att].moves.standLight;
+    const thr = CHB[att].moves.throw;
+    // 無敵：初めの invincible フレームに当たる時間が重なる弱攻撃は当たらない
+    const early = trial(att, def, BUTTON.LIGHT, start + bd.invincible - light.startup - 2, 50);
+    assert.strictEqual(early.dmg, 0, `${CHB[def].name}のバックステップの初めは無敵のはず`);
+    // 下がっている間は投げられない
+    for (let t = start - 4; t < start + bd.frames - thr.startup; t++) {
+      const r = trial(att, def, BUTTON.LIGHT | BUTTON.HEAVY, t, 50);
+      assert.ok(r.dmg === 0 || r.when === POSE.DASH_RECOVERY, `${CHB[def].name}のバックステップ中に投げられた（${t}F目）`);
+    }
+    // 止まり際（隙）に当てるとダメージが増える
+    const recT = start + bd.frames + 2 - light.startup;
+    const pun = trial(att, def, BUTTON.LIGHT, recT, 50);
+    assert.strictEqual(pun.when, POSE.DASH_RECOVERY);
+    assert.strictEqual(pun.dmg, Math.floor((light.damage * rate) / 100), `${CHB[def].name}のバックステップの隙に当てたらダメージが増えるはず`);
+    const thrPun = trial(att, def, BUTTON.LIGHT | BUTTON.HEAVY, start + bd.frames + 2 - thr.startup, 50);
+    assert.strictEqual(thrPun.dmg, Math.floor((thr.damage * rate) / 100), `${CHB[def].name}のバックステップの隙を投げたらダメージが増えるはず`);
+  }
+  // ジャンプの着地硬直中は投げられない：着地硬直の各フレームに、投げの掴める時間を重ねる
+  function landingThrow(lag) {
+    const run = (t) => {
+      const st = newGame(1, ["kagetsu", "rin"]);
+      st.fighters[0].x = 400 * S;
+      st.fighters[1].x = 450 * S;
+      let landF = -1;
+      for (let i = 0; i < 80; i++) {
+        st.fighters[0].x = st.fighters[1].x - 50 * S;
+        SF.game.step(st, [i === t ? BUTTON.LIGHT | BUTTON.HEAVY : 0, i === 0 ? BUTTON.JUMP : 0]);
+        if (landF < 0 && st.fighters[1].pose === POSE.LANDING) landF = i;
+        if (st.fighters[1].pose === POSE.THROWN) return { thrown: i, landF };
+      }
+      return { thrown: -1, landF };
+    };
+    const landF = run(-1).landF;
+    const startup = CHB.kagetsu.moves.throw.startup;
+    const res = [];
+    for (let k = 0; k < lag; k++) res.push(run(landF + k - startup + 1).thrown);
+    return { landF, res };
+  }
+  const lt = landingThrow(CHB.rin.landingLag);
+  assert.ok(lt.landF > 0);
+  assert.ok(lt.res.every((th) => th < 0 || th >= lt.landF + CHB.rin.landingLag), `ジャンプの着地硬直中は投げられないはず: ${lt.res}`);
+  console.log(
+    `OK バックステップ: 初めの${CHB.kagetsu.backDash.invincible}Fは無敵、下がっている間は投げられない、止まり際（カゲツ${CHB.kagetsu.backDash.recovery}F・リン${CHB.rin.backDash.recovery}F）に受けるとダメージ${rate}%。ジャンプの着地硬直中も投げられない`,
+  );
+}
+
 // 4. 戦い：攻撃・ガード・体力・ラウンド
 const CH = SF.characters.CHARACTERS;
 const U = BUTTON.LIGHT;
@@ -446,7 +515,20 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 30) {
   const r2 = bufferTest(seq2);
   assert.strictEqual(r2.second, "standHeavy", "最後に押した強攻撃が出るはず");
   assert.strictEqual(r2.at, r2.total);
-  console.log(`OK 先行入力: 硬直中に押した最後のボタンが最速（${r1.total + 1}F目）で出る`);
+  // 攻撃ボタンのあとに移動キーを押したら、攻撃は出ない（後ろ・前どちらも、押しっぱなしでも）
+  for (const dir of [BUTTON.LEFT, BUTTON.RIGHT]) {
+    const seq3 = [U];
+    seq3[5] = U;
+    for (let i = 8; i < 40; i++) seq3[i] = dir;
+    assert.strictEqual(bufferTest(seq3).second, null, "攻撃ボタンのあとに移動キーを押したら攻撃は出ないはず");
+    // 移動キーを押したあとに攻撃ボタンを押したら、攻撃が出る
+    const seq4 = [U];
+    for (let i = 3; i < 40; i++) seq4[i] = dir;
+    seq4[8] = dir | U;
+    seq4[9] = dir;
+    assert.strictEqual(bufferTest(seq4).second, "standLight", "移動キーのあとに押した攻撃は出るはず");
+  }
+  console.log(`OK 先行入力: 硬直中に押した最後のボタンが最速（${r1.total + 1}F目）で出る。攻撃のあとに移動キーを押したら攻撃は取り消し`);
 }
 
 // 先行入力：硬直中に方向キーを2回押すと、動けるようになった最初のフレームでステップ・ダッシュ・バックステップが出る
@@ -634,6 +716,33 @@ for (const att of ["kagetsu", "rin"]) {
     lines.push(`${m.name} 発生${m.startup}F ${m.hitAdv === "down" ? "ダウン" : "+" + hit.adv}/${block.adv} 削り${block.damage}`);
   }
   console.log(`OK 必殺技 ${CH[att].name}: ${lines.join("、")}`);
+}
+
+// リンの突進拳はためる技：O を押している間ためて、離すと出る。長くためるほど遠くまで進む
+{
+  function dash(hold) {
+    const st = newGame(1, ["rin", "kagetsu"]);
+    st.fighters[0].x = 100 * S;
+    st.fighters[1].x = 1000 * S;
+    const a = st.fighters[0];
+    const x0 = a.x;
+    let startAt = -1;
+    for (let i = 0; i < 120; i++) {
+      SF.game.step(st, [i <= hold ? O : 0, 0]);
+      if (startAt < 0 && a.moveFrame === 2) startAt = i;
+    }
+    return { dist: (a.x - x0) / S, startAt };
+  }
+  const tap = dash(0);
+  const mid = dash(15);
+  const full = dash(CH.rin.moves.special.charge.max);
+  const over = dash(CH.rin.moves.special.charge.max + 20);
+  assert.strictEqual(tap.startAt, 1, "ためずに離したら、すぐ出るはず");
+  assert.strictEqual(mid.startAt, 16, "離すまでは構えたままのはず");
+  assert.ok(tap.dist > 90 && tap.dist < 110, `ためなしの突進拳は約99px進むはず: ${tap.dist}`);
+  assert.ok(mid.dist > tap.dist + 30 && full.dist > mid.dist + 30, "長くためるほど遠くまで進むはず");
+  assert.strictEqual(over.dist, full.dist, "ためられるのは最大までのはず");
+  console.log(`OK 突進拳のため: ためなし${tap.dist}px・15F${mid.dist}px・最大${full.dist}px`);
 }
 
 // 飛刃：離れて当てるほど有利。画面に1つまで
@@ -853,7 +962,41 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
     assert.ok(t.recovery > s2.recovery, "投げの空振り硬直は同じくらいの発生の技より長いはず");
     lines.push(`${CH[id].name} 硬直${t.recovery}F（${s2.name}は${s2.recovery}F）`);
   }
-  console.log(`OK 投げ: ガードできずダウン、8F以内のU＋Iで投げ抜け（9Fは不可）、掴める距離 カゲツ${kr}px・リン${rr}px、空振り ${lines.join("・")}`);
+  // ガード硬直が終わる頃にU＋Iを押していたら（相手の投げが先に決まっても）投げ抜けになる。どの方向キーを押していても同じ
+  function guardThenTech(pressBefore, hold) {
+    const st = closeGame("kagetsu", "rin", 52);
+    const r = st.fighters[1];
+    r.pose = POSE.BLOCK;
+    r.stun = 10;
+    const throwAt = 6;
+    const grabAt = throwAt + CH.kagetsu.moves.throw.startup - 1;
+    for (let i = 0; i < 60; i++) {
+      SF.game.step(st, [i === throwAt ? U | I : 0, hold | (i === grabAt - pressBefore ? U | I : 0)]);
+      if (r.pose === POSE.TECH) return "tech";
+      if (r.pose === POSE.DOWN) return "thrown";
+    }
+    return "none";
+  }
+  for (const hold of [0, BUTTON.LEFT, BUTTON.RIGHT, BUTTON.DOWN, BUTTON.DOWN | BUTTON.RIGHT]) {
+    for (let k = 0; k <= BT.throwTechWindow; k++) assert.strictEqual(guardThenTech(k, hold), "tech", `掴まれる${k}F前のU＋Iで投げ抜けになるはず（方向${hold}）`);
+    assert.strictEqual(guardThenTech(BT.throwTechWindow + 1, hold), "thrown", "掴まれる9F前のU＋Iでは投げ抜けにならないはず");
+  }
+  // どの方向キーを押していても投げが出る。硬直中にU＋Iを押して、すぐ方向キーを押しても投げが出る
+  for (const dir of [0, BUTTON.LEFT, BUTTON.RIGHT, BUTTON.DOWN, BUTTON.DOWN | BUTTON.LEFT, BUTTON.DOWN | BUTTON.RIGHT]) {
+    const st = closeGame("kagetsu", "rin", 60);
+    SF.game.step(st, [dir | U | I, 0]);
+    assert.strictEqual(st.fighters[0].move, "throw", `方向キー${dir}を押しながらでも投げが出るはず`);
+    const st2 = closeGame("kagetsu", "rin", 60);
+    st2.fighters[0].stun = 5;
+    st2.fighters[0].pose = POSE.BLOCK;
+    let thrown = false;
+    for (let i = 0; i < 10; i++) {
+      SF.game.step(st2, [i === 0 ? U | I : dir, 0]);
+      if (st2.fighters[0].move === "throw") thrown = true;
+    }
+    assert.ok(thrown, `硬直中のU＋Iのあとに方向キー${dir}を押しても投げが出るはず`);
+  }
+  console.log(`OK 投げ: ガードできずダウン、8F以内のU＋Iで投げ抜け（9Fは不可。掴まれる8F前までに押していても投げ抜け）、どの方向キーでも投げが出る、掴める距離 カゲツ${kr}px・リン${rr}px、空振り ${lines.join("・")}`);
 }
 
 // 練習相手：投げ抜けの設定なら投げ抜けする
@@ -1052,6 +1195,10 @@ require("../src/core/learned-data.js");
   assert.strictEqual(techs[0], 0, "よわいCPUは投げ抜けしないはず");
 
   // 前ジャンプで跳び込んでくる相手に、CPUがどれだけ対空技を出すか
+  // 学習AIは、様子見を選ぶ頭脳で測る（学んだ立ち回りで先に技を出して動けないと、反射神経が測れないため）
+  const waitBrain = SF.learn.createBrain();
+  const waitTable = SF.learn.tableFor(waitBrain, "kagetsu", "rin");
+  for (let k = 0; k < waitTable.q.length; k += SF.learn.ACTIONS.length) waitTable.q[k] = 1;
   function antiAirRate(lv) {
     let jumps = 0;
     let aa = 0;
@@ -1059,7 +1206,7 @@ require("../src/core/learned-data.js");
       const st = newGame(seed, ["rin", "kagetsu"]);
       st.fighters[0].x = 300 * S;
       st.fighters[1].x = 480 * S;
-      const cpu = SF.cpu.createCpu(lv, seed);
+      const cpu = SF.cpu.createCpu(lv, seed, { brain: waitBrain });
       jumps++;
       for (let i = 0; i < 70; i++) {
         SF.game.step(st, [i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0, SF.cpu.input(cpu, st, 1)]);
