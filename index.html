@@ -12,25 +12,29 @@
       /* 自動対戦と記録の画面 */
       body.records-open { justify-content: flex-start; }
       body.records-open > canvas, body.records-open > p { display: none; }
-      #records { width: 100%; max-width: 960px; }
-      #records h2 { margin: 4px 0 12px; font-size: 22px; color: #ffd8a0; }
-      #records h3 { margin: 20px 0 6px; font-size: 16px; color: #fff; }
-      #records .note { text-align: left; font-size: 12px; color: #999; margin: 0 0 6px; }
-      #records .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 16px; background: #1c1c1c; padding: 12px; border-radius: 8px; }
-      #records label { font-size: 14px; display: flex; align-items: center; gap: 8px; }
-      #records select, #records input[type="number"] { flex: 1; min-width: 0; font-size: 14px; padding: 4px; background: #2a2a2a; color: #eee; border: 1px solid #444; border-radius: 4px; }
-      #records .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 8px; }
-      #records button { font-size: 15px; padding: 8px 16px; border-radius: 6px; border: 1px solid #555; background: #333; color: #eee; cursor: pointer; }
-      #records button.primary { background: #c56a1c; border-color: #e08a3a; color: #fff; }
-      #records button:disabled { opacity: 0.4; cursor: default; }
-      #records progress { width: 100%; height: 10px; }
-      #ab-status { text-align: left; font-size: 14px; color: #ccc; margin: 4px 0; }
-      #records .table-wrap { overflow-x: auto; }
-      #records table { border-collapse: collapse; font-size: 13px; width: 100%; white-space: nowrap; }
-      #records th, #records td { border-bottom: 1px solid #333; padding: 4px 8px; text-align: right; }
-      #records thead th { color: #ffd8a0; font-weight: normal; border-bottom: 1px solid #666; }
-      #records tbody th { text-align: left; font-weight: normal; color: #fff; }
-      #records thead th:first-child { text-align: left; }
+      .page { width: 100%; max-width: 960px; }
+      .page h2 { margin: 4px 0 12px; font-size: 22px; color: #ffd8a0; }
+      .page h3 { margin: 20px 0 6px; font-size: 16px; color: #fff; }
+      .page .note { text-align: left; font-size: 12px; color: #999; margin: 0 0 6px; }
+      .page .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 16px; background: #1c1c1c; padding: 12px; border-radius: 8px; }
+      .page label { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+      .page select, .page input[type="number"] { flex: 1; min-width: 0; font-size: 14px; padding: 4px; background: #2a2a2a; color: #eee; border: 1px solid #444; border-radius: 4px; }
+      .page .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 8px; }
+      .page button { font-size: 15px; padding: 8px 16px; border-radius: 6px; border: 1px solid #555; background: #333; color: #eee; cursor: pointer; }
+      .page button.primary { background: #c56a1c; border-color: #e08a3a; color: #fff; }
+      .page button:disabled { opacity: 0.4; cursor: default; }
+      .page progress { width: 100%; height: 10px; }
+      #ab-status, #ln-status { text-align: left; font-size: 14px; color: #ccc; margin: 4px 0; }
+      /* 学習AIの画面 */
+      .page .intro { text-align: left; font-size: 14px; line-height: 1.7; color: #ccc; margin: 0 0 12px; }
+      #ln-chart { width: 100%; height: auto; aspect-ratio: 16 / 6; background: #181818; border-radius: 8px; display: block; margin: 8px 0; }
+      #ln-eval { font-size: 15px; color: #ffd8a0; text-align: left; margin: 6px 0; min-height: 1.4em; }
+      .page .table-wrap { overflow-x: auto; }
+      .page table { border-collapse: collapse; font-size: 13px; width: 100%; white-space: nowrap; }
+      .page th, .page td { border-bottom: 1px solid #333; padding: 4px 8px; text-align: right; }
+      .page thead th { color: #ffd8a0; font-weight: normal; border-bottom: 1px solid #666; }
+      .page tbody th { text-align: left; font-weight: normal; color: #fff; }
+      .page thead th:first-child { text-align: left; }
     </style>
   </head>
   <body>
@@ -43,7 +47,7 @@
     <p>メニュー：矢印キーかWASDでえらぶ　Enter：決定　Esc：もどる</p>
     <p>試合中　Esc：一時停止　H：当たり判定を表示　3：相手を練習相手に（押すたびに動きを切り替え）　4：CPUにもどす</p>
     <p>（画面をクリックしてから操作してください）</p>
-    <div id="records" hidden>
+    <div id="records" class="page" hidden>
       <h2>自動対戦と記録</h2>
       <div class="form">
         <label>左のキャラ <select id="ab-char0"></select></label>
@@ -72,6 +76,55 @@
       <p id="ab-status">条件を選んで「開始」を押してください。同じ条件と種なら、何度やっても同じ結果になります。</p>
       <div id="ab-result"></div>
     </div>
+    <div id="learning" class="page" hidden>
+      <h2>学習AIをきたえる</h2>
+      <p class="intro">学習AIは、対戦をくり返して「この距離・この状況では何をすると勝てるか」を自分で覚えるCPUです（機械学習の一つ、強化学習）。
+        はじめから少し学習した状態で入っていて、ここでさらに学習させられます。学習した結果はこのブラウザに保存され、
+        「プレイヤー VS CPU」「CPU VS CPU」「自動対戦と記録」で強さに「学習AI」を選ぶと使われます。
+        プレイヤー VS CPU で「あなたから学ぶ」を「する」にすると、あなた専用の学習AIが試合をしながら学び、あなたの戦い方に合わせて変わっていきます。</p>
+      <div class="form">
+        <label>学習するキャラ <select id="ln-char0"></select></label>
+        <label>相手のキャラ <select id="ln-char1"></select></label>
+        <label>練習相手 <select id="ln-opp"></select></label>
+        <label>試合数
+          <select id="ln-matches">
+            <option>300</option>
+            <option selected>1000</option>
+            <option>3000</option>
+            <option>10000</option>
+          </select>
+        </label>
+      </div>
+      <div class="buttons">
+        <button id="ln-start" class="primary">学習スタート</button>
+        <button id="ln-stop" disabled>中止</button>
+        <button id="ln-eval-btn">実力をはかる（つよいCPUと200試合）</button>
+        <button id="ln-back">タイトルにもどる</button>
+      </div>
+      <progress id="ln-bar" value="0"></progress>
+      <p id="ln-status">キャラと練習相手を選んで「学習スタート」を押してください。</p>
+      <p id="ln-eval"></p>
+      <canvas id="ln-chart" width="960" height="360"></canvas>
+      <p class="note">グラフ：学習中の勝率（50試合ごと）。学習中はわざと色々な行動を試すので、実力より少し低めに出ます。</p>
+      <h3>学習の記録</h3>
+      <div class="table-wrap"><table id="ln-tables"></table></div>
+      <h3>学習AIの考え（よくある場面で選ぶ行動）</h3>
+      <p class="note">上の「学習するキャラ」と「相手のキャラ」の組み合わせで、経験の多い場面から順に、いちばん良いと考えている行動です。</p>
+      <div class="table-wrap"><table id="ln-think"></table></div>
+      <h3>あなたとの対戦から学んだ学習AI</h3>
+      <p id="ln-player" class="intro"></p>
+      <div class="buttons">
+        <button id="ln-player-reset">あなたとの対戦で学んだ分を消す</button>
+      </div>
+      <h3>学習データ</h3>
+      <div class="buttons">
+        <button id="ln-save">ファイルに保存</button>
+        <button id="ln-load">ファイルから読み込む</button>
+        <button id="ln-default">最初の学習データにもどす</button>
+        <button id="ln-reset">何も覚えていない状態にする</button>
+        <input id="ln-file" type="file" accept=".json,application/json" hidden />
+      </div>
+    </div>
     <script src="src/core/constants.js"></script>
     <script src="src/core/rng.js"></script>
     <script src="src/core/input.js"></script>
@@ -79,11 +132,14 @@
     <script src="src/core/game.js"></script>
     <script src="src/core/dummy.js"></script>
     <script src="src/core/cpu.js"></script>
+    <script src="src/core/learn.js"></script>
+    <script src="src/core/learned-data.js"></script>
     <script src="src/core/menu.js"></script>
     <script src="src/core/autobattle.js"></script>
     <script src="src/browser/keyboard.js"></script>
     <script src="src/browser/renderer.js"></script>
     <script src="src/browser/autobattle-page.js"></script>
+    <script src="src/browser/learn-page.js"></script>
     <script src="src/browser/main.js"></script>
   </body>
 </html>

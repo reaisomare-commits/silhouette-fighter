@@ -26,10 +26,18 @@
   const MAX_FRAMES = 60 * 60 * 6;
 
   // 1試合を最後まで進める。chars＝[左のキャラ, 右のキャラ]、levels＝[左の強さ, 右の強さ]（0よわい・1ふつう・2つよい）
-  function runMatch(seed, chars, levels) {
+  // opts は学習AIのときだけ使う：
+  //   brain＝頭脳（左右で別の頭脳を使うときは brains＝[左の頭脳, 右の頭脳]）、train＝[左は学習するか, 右は学習するか]、explore＝探検の確率
+  function runMatch(seed, chars, levels, opts = {}) {
     const { PHASE } = SF.game;
     const state = SF.game.createGame(seed, chars, { record: true });
-    const cpus = levels.map((lv, i) => SF.cpu.createCpu(lv, (seed * 2 + i) >>> 0));
+    const cpus = levels.map((lv, i) =>
+      SF.cpu.createCpu(lv, (seed * 2 + i) >>> 0, {
+        brain: opts.brains ? opts.brains[i] : opts.brain,
+        train: opts.train && opts.train[i],
+        explore: opts.explore,
+      }),
+    );
     const rounds = [];
     let fightFrames = 0; // 実際に戦っている時間（ラウンド開始の表示や決着の場面は数えない）
     let prevPhase = state.round.phase;

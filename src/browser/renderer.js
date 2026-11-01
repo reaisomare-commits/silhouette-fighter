@@ -649,7 +649,7 @@
     // ---- メニュー（タイトル・モード選択・キャラ選択）と、試合の上に出す小さなメニュー ----
 
     const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家" };
-    const LEVEL_NOTE = ["はじめての人に", "慣れてきたら", "腕に自信がある人に"];
+    const LEVEL_NOTE = ["はじめての人に", "慣れてきたら", "腕に自信がある人に", "対戦から学んだCPU"];
     const HINT_MENU = "↑↓ / W S：えらぶ　Enter：決定　Esc：もどる";
     const HINT_SELECT = "↑↓ / W S：項目をえらぶ　←→ / A D：変える　Enter：決定　Esc：もどる";
 
@@ -724,16 +724,16 @@
       drawPreview(["kagetsu", "rin"], [C.STAGE_WIDTH * 0.3, C.STAGE_WIDTH * 0.7], tick);
       dim(0.5);
       outlined("モードをえらぶ", C.STAGE_WIDTH / 2, 70, 36, "#fff");
-      const w = 560;
-      const h = 100;
+      const w = 600;
+      const h = 82;
       const x = (C.STAGE_WIDTH - w) / 2;
       SF.menu.MODES.forEach((m, i) => {
-        const y = 115 + i * 120;
+        const y = 108 + i * 96;
         const sel = i === menu.modeCursor;
         panel(x, y, w, h, sel);
         if (sel) text("▶", x + 34, y + h / 2, 26, "#ffd24d");
-        text(m.label, C.STAGE_WIDTH / 2, y + 40, 34, sel ? "#fff" : "rgba(255,255,255,0.55)");
-        text(m.note, C.STAGE_WIDTH / 2, y + 76, 17, sel ? "#ffd8a0" : "rgba(255,255,255,0.4)", "center", "normal");
+        text(m.label, C.STAGE_WIDTH / 2, y + 32, 30, sel ? "#fff" : "rgba(255,255,255,0.55)");
+        text(m.note, C.STAGE_WIDTH / 2, y + 62, 16, sel ? "#ffd8a0" : "rgba(255,255,255,0.4)", "center", "normal");
       });
       hint(HINT_MENU);
     }
@@ -784,8 +784,13 @@
         text(row.label, x + 12, y + 15, 13, sel ? "#ffd8a0" : "rgba(255,255,255,0.5)", "left", "normal");
         let value;
         let note = "";
+        let off = false; // 今は使われない行（薄く描く）
         if (row.kind === "char") value = CHARACTERS[p.chars[row.side]].name;
-        else {
+        else if (row.kind === "learnYou") {
+          off = !SF.cpu.LEVELS[p.levels[1]].learned;
+          value = off ? "ー" : p.learnYou ? "する" : "しない";
+          note = off ? "学習AIのときだけ" : p.learnYou ? "あなたに合わせて変わる" : "いつもの学習AI";
+        } else {
           const lv = p.levels[row.side];
           value = SF.cpu.LEVELS[lv].label;
           note = LEVEL_NOTE[lv] || "";
@@ -795,13 +800,13 @@
             circle(C.STAGE_WIDTH / 2 - 16 + k * 16, y + 52, 4);
           }
         }
-        text(value, C.STAGE_WIDTH / 2, y + 34, 22, sel ? "#fff" : "rgba(255,255,255,0.7)");
+        text(value, C.STAGE_WIDTH / 2, y + 34, 22, off ? "rgba(255,255,255,0.3)" : sel ? "#fff" : "rgba(255,255,255,0.7)");
         if (note) text(note, x + w - 12, y + 15, 12, sel ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.4)", "right", "normal");
-        if (sel) {
+        if (sel && !off) {
           // 左右で変えられることを示す矢印（端の強さでは、それ以上いけない側を薄く）
           const lv = p.levels[row.side];
-          const canL = row.kind === "char" || lv > 0;
-          const canR = row.kind === "char" || lv < SF.cpu.LEVELS.length - 1;
+          const canL = row.kind !== "level" || lv > 0;
+          const canR = row.kind !== "level" || lv < SF.cpu.LEVELS.length - 1;
           text("◀", x + 50, y + 34, 18, canL ? "#ffd24d" : "rgba(255,210,77,0.25)");
           text("▶", x + w - 50, y + 34, 18, canR ? "#ffd24d" : "rgba(255,210,77,0.25)");
         }
