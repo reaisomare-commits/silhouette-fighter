@@ -757,9 +757,12 @@
           ctx.textBaseline = "middle";
           ctx.lineWidth = 6;
           ctx.strokeStyle = "rgba(0,0,0,0.8)";
-          ctx.strokeText(e.text, e.x, e.y - (45 - e.life) * 0.5);
+          // 画面の端で文字が切れないように、横の位置を内側に寄せる
+          const half = ctx.measureText(e.text).width / 2 + 8;
+          const tx = Math.max(half, Math.min(C.STAGE_WIDTH - half, e.x));
+          ctx.strokeText(e.text, tx, e.y - (45 - e.life) * 0.5);
           ctx.fillStyle = "#bfe6ff";
-          ctx.fillText(e.text, e.x, e.y - (45 - e.life) * 0.5);
+          ctx.fillText(e.text, tx, e.y - (45 - e.life) * 0.5);
           ctx.restore();
           continue;
         }

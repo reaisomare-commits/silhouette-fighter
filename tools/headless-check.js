@@ -1918,6 +1918,42 @@ require("../src/core/autobattle.js");
   assert.strictEqual(carry.round.number, 2);
   assert.ok(carry.fighters[0].gauge > 3000, "ゲージが次のラウンドに持ち越されない");
 
+  // どんな技の途中でもキャンセルして出せる（空振りした大振り斬りの硬直中からでも）
+  const whiff = superGame(["kagetsu", "rin"], 400);
+  for (let i = 0; i < 20; i++) SF.game.step(whiff, [i === 0 ? I : 0, 0]);
+  assert.strictEqual(whiff.fighters[0].move, "standHeavy");
+  SF.game.step(whiff, [I | O, 0]);
+  assert.strictEqual(whiff.fighters[0].move, "super", "空振りの硬直中からゲージ技にキャンセルできない");
+  // リンの練気は空中攻撃の途中からも出せる
+  const airBuff = superGame(["rin", "kagetsu"], 400);
+  for (let i = 0; i < 30; i++) SF.game.step(airBuff, [i === 0 ? BUTTON.JUMP : i === 15 ? U : i === 18 ? I | O : 0, 0]);
+  assert.ok(airBuff.fighters[0].buffTimer > 0, "空中攻撃の途中から練気が出ない");
+
+  // ガードでも溜まる：ふつうの技はダメージの割合×20、飛び道具は食らったときと同じ×40
+  const gGuard = superGame(["kagetsu", "rin"], 100, 0);
+  for (let i = 0; i < 40; i++) SF.game.step(gGuard, [i === 0 ? I : 0, BUTTON.RIGHT]);
+  assert.strictEqual(gGuard.fighters[1].gauge, Math.floor((100 * 20 * 100) / 900), "ガードした側のゲージ");
+  const gProj = superGame(["kagetsu", "rin"], 300, 0);
+  for (let i = 0; i < 80; i++) SF.game.step(gProj, [i === 0 ? O : 0, BUTTON.RIGHT]);
+  assert.strictEqual(gProj.fighters[1].gauge, Math.floor((80 * 40 * 100) / 900), "飛び道具をガードした側のゲージ");
+
+  // 消極的な動きのペナルティ：前に出ず飛び道具しか撃たない時間が5秒続くと、そこから1秒ごとにゲージが3減る
+  const P = SF.characters.BATTLE.passive;
+  function passiveRun(inputFn, frames) {
+    const st = superGame(["genma", "kagetsu"], 500, 5000);
+    for (let i = 0; i < frames; i++) SF.game.step(st, [inputFn(i), 0]);
+    return st.fighters[0].gauge;
+  }
+  assert.strictEqual(passiveRun(() => 0, P.frames - 1), 5000, "5秒たつ前にゲージが減った");
+  assert.strictEqual(passiveRun(() => 0, P.frames), 5000 - P.drain * 100, "その場にいつづけてもゲージが減らない");
+  assert.strictEqual(passiveRun(() => 0, P.frames + P.every), 5000 - 2 * P.drain * 100);
+  // 飛び道具は当たるとゲージが溜まるので、消極的な時間が数え直しになっていないかで確かめる
+  const shooter = superGame(["genma", "kagetsu"], 500, 5000);
+  for (let i = 0; i <= P.frames + 100; i++) SF.game.step(shooter, [i % 120 === 0 ? O : 0, 0]); // 当たった瞬間の止まり（ヒットストップ）は数えないので少し長めに
+  assert.ok(shooter.fighters[0].passive >= P.frames, "飛び道具だけ撃っていても消極的と数えられない");
+  assert.strictEqual(passiveRun((i) => (i % 120 === 0 ? U : 0), P.frames + 1), 5000, "攻撃しているのにゲージが減った");
+  assert.strictEqual(passiveRun((i) => (i % 120 < 5 ? BUTTON.RIGHT : 0), P.frames + 1), 5000, "前に歩いているのにゲージが減った");
+
   // カゲツ：月影斬。暗転前からガードを押していないと防げない。暗転前から押していればガードでき、−2
   function tsukikage(holdBefore) {
     const st = superGame(["kagetsu", "rin"], 220);
@@ -2012,7 +2048,7 @@ require("../src/core/autobattle.js");
   assert.strictEqual(blocks, 8, "冥府球を8回ガードしていない");
   assert.strictEqual(1000 - blk.fighters[1].health, 8 * 4, "冥府球の削り");
   assert.ok(pushed > 120, `ガードしても押し出されない（${pushed}px）`);
-  console.log(`OK ゲージ技: ゲージの溜まり方・I＋O・暗転・持ち越し、月影斬は暗転前からガードしないと防げず（ガードで${tYes.adv}F）無敵で切り返せる、練気は暗転明けすぐ動けて6秒間すべてキャンセル可能、冥府球は地上でも空中でも8回連続ヒット（${dmg}）・ガードで${Math.round(pushed)}px押し出し`);
+  console.log(`OK ゲージ技: ゲージの溜まり方（ガードでも溜まる）・I＋O（どんな技からもキャンセル）・暗転・持ち越し・消極的だと減る、月影斬は暗転前からガードしないと防げず（ガードで${tYes.adv}F）無敵で切り返せる、練気は暗転明けすぐ動けて6秒間すべてキャンセル可能、冥府球は地上でも空中でも8回連続ヒット（${dmg}）・ガードで${Math.round(pushed)}px押し出し`);
 }
 
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める
