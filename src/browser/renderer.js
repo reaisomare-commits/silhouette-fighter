@@ -1462,11 +1462,19 @@
       shade.addColorStop(1, "rgba(10, 5, 20, 0)");
       ctx.fillStyle = shade;
       ctx.fillRect(0, 0, C.STAGE_WIDTH, 290);
-      // 題字の後ろの朱の筆跡と、横の判子
-      shuStroke(170, 128, 640, 36, 0.9);
-      outlined("シルエット格闘", C.STAGE_WIDTH / 2, 108, 88, PAPER);
-      seal(812, 70, 40, "影");
-      text("S I L H O U E T T E   F I G H T E R", C.STAGE_WIDTH / 2, 186, 16, "#ffd8a0", "center", "bold", true);
+      // 題字「DUSK DUEL」：上の段に白で DUSK、下の段は朱の筆跡の上に金色で DUEL。横に判子「影」（字間の分だけ右に寄せて真ん中に）
+      ctx.save();
+      if ("letterSpacing" in ctx) ctx.letterSpacing = "10px";
+      setFont(76, "bold", true);
+      const tw = ctx.measureText("DUSK").width;
+      outlined("DUSK", C.STAGE_WIDTH / 2 + 5, 84, 76, PAPER);
+      ctx.restore();
+      ctx.save();
+      if ("letterSpacing" in ctx) ctx.letterSpacing = "10px";
+      shuStroke(C.STAGE_WIDTH / 2 - 190, 150, 420, 36, 0.9);
+      outlined("DUEL", C.STAGE_WIDTH / 2 + 5, 162, 76, "#ffcf6b");
+      ctx.restore();
+      seal(C.STAGE_WIDTH / 2 + tw / 2 + 40, 50, 40, "影");
       // ゆっくり明滅する「スタート」
       ctx.save();
       ctx.globalAlpha = 0.55 + 0.45 * Math.sin(tick / 14);
