@@ -36,11 +36,21 @@
       .page thead th { color: #ffd8a0; font-weight: normal; border-bottom: 1px solid #666; }
       .page tbody th { text-align: left; font-weight: normal; color: #fff; }
       .page thead th:first-child { text-align: left; }
+      /* 支援・意見のリンク（src/browser/support.js でURLを設定したものだけ出る） */
+      #support { width: 100%; max-width: 960px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+      #support[hidden] { display: none; }
+      body.records-open > #support { display: none; }
+      .support-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+      .support-links a { font-size: 14px; padding: 6px 14px; border-radius: 6px; text-decoration: none; border: 1px solid #555; background: #2a2a2a; color: #eee; }
+      .support-links a.support { background: #c56a1c; border-color: #e08a3a; color: #fff; }
+      .support-links a:hover, .support-links a:focus-visible { filter: brightness(1.15); }
+      .support-note { font-size: 12px; color: #999; }
     </style>
   </head>
   <body>
     <canvas id="screen" width="960" height="540"></canvas>
     <p>画面をクリックしてから操作してください。操作のしかたは「資料」で見られます（試合中も Esc →「資料を見る」）。M キーで音のオン／オフ。</p>
+    <div id="support" hidden></div>
     <div id="records" class="page" hidden>
       <h2>自動対戦と記録</h2>
       <div class="form">
@@ -136,6 +146,7 @@
     <script src="src/browser/sound.js"></script>
     <script src="src/browser/autobattle-page.js"></script>
     <script src="src/browser/learn-page.js"></script>
+    <script src="src/browser/support.js"></script>
     <script src="src/browser/main.js"></script>
   </body>
 </html>
