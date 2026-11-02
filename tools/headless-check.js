@@ -2474,12 +2474,15 @@ require("../src/core/autobattle.js");
       const [a, b] = st.fighters;
       if (head(st).state === "recover") rested = true;
       if (st.hitstop) return;
-      if (b.stun > 0) contact = true;
+      if (!contact && b.stun > 0) contact = i;
       if (myFree < 0 && i > 0 && SF.game.isFree(a)) myFree = i;
       if (contact && oppFree < 0 && b.stun === 0) oppFree = i;
     });
     assert.ok(contact, `噛みつきの${label}が起きない`);
-    const got = oppFree - Math.max(myFree, 0);
+    // ムクロ本人は噛みつきを命じても止まらない（隙がない）
+    assert.strictEqual(myFree, 1, `噛みつきを出したムクロ本人に隙がある（${myFree}F）`);
+    // 硬直差は、噛みついた瞬間から数える（本人はずっと動ける）
+    const got = oppFree - contact;
     assert.ok(Math.abs(got - adv) <= 1, `噛みつきの${label}で +${adv} にならない（${got}）`);
     assert.ok(rested, "噛んだあと頭が動けなくならない");
   }
@@ -2562,6 +2565,47 @@ require("../src/core/autobattle.js");
   const sg = mGame("kagetsu", 250, null, FULL);
   run(sg, 160, (i) => (i === 0 ? I | O : 0), R);
   assert.ok(hp(sg) < 1000 && hp(sg) > 1000 - 100, `大口をガードできない（${1000 - hp(sg)}）`);
+
+  // 弱から強へキャンセルすると、ほかのキャラと同じく連続技になる（U→I、S＋U→S＋I、頭なしの U→I）
+  for (const [label, d, hx] of [["U→頭突き", 0, null], ["S＋U→屍転がし", D, null], ["U→振り下ろし", 0, 100], ["頭なしS＋U→屍転がし", D, 100]]) {
+    const cg = mGame("kagetsu", 70, hx);
+    let mc = 0;
+    run(cg, 60, (i) => d | (i === 0 ? U : i >= 4 && i <= 12 ? I : 0), 0, (i, st) => (mc = Math.max(mc, st.fighters[1].combo)));
+    assert.strictEqual(mc, 2, `${label}が連続技にならない`);
+  }
+  // 頭突きは下から振り上げる：しゃがんだ相手にも当たる
+  const lowButt = run(mGame("kagetsu", 80), 30, (i) => (i === 0 ? I : 0), D);
+  assert.ok(hp(lowButt) < 1000, "頭突きがしゃがんだ相手に当たらない");
+  // 頭が離れているとき、跳ね戻りを命じてもムクロ本人は止まらない
+  const hopFree = mGame("kagetsu", 300, 520);
+  let hopBusy = 0;
+  run(hopFree, 10, (i) => (i === 0 ? D | O : 0), 0, (i, st) => {
+    if (i > 0 && !SF.game.isFree(st.fighters[0])) hopBusy += 1;
+  });
+  assert.strictEqual(hopBusy, 0, "跳ね戻りを出したムクロ本人に隙がある");
+  // 大口は当たってもガードされても相手をすり抜けず、くっついて6回噛み続ける
+  for (const [label, inB] of [["ヒット", 0], ["ガード", R]]) {
+    const st = mGame("kagetsu", 250, null, FULL);
+    let passed = false;
+    let hits = 0;
+    let prev = st.fighters[1].health;
+    run(st, 200, (i) => (i === 0 ? I | O : 0), inB, (i, s2) => {
+      const p = s2.projectiles.find((q) => q.headSuper);
+      if (p && p.x > s2.fighters[1].x) passed = true;
+      if (s2.fighters[1].health < prev) hits += 1;
+      prev = s2.fighters[1].health;
+    });
+    assert.ok(!passed, `大口が${label}で相手をすり抜けた`);
+    assert.strictEqual(hits, MV.super.projectile.multi.hits, `大口の${label}で${MV.super.projectile.multi.hits}回噛まない（${hits}）`);
+  }
+  // 相手の向こう側の頭から出した大口（ムクロの方へ進む）は、噛み終わったら頭が体に戻る
+  const back2 = mGame("kagetsu", 200, 650, FULL);
+  run(back2, 220, (i) => (i === 0 ? I | O : 0), 0);
+  assert.strictEqual(head(back2), null, "ムクロの方へ進んだ大口のあと、頭が体に戻らない");
+  // 手前から出した大口は、頭がその場に残る
+  const fwd2 = mGame("kagetsu", 200, 350, FULL);
+  run(fwd2, 220, (i) => (i === 0 ? I | O : 0), 0);
+  assert.ok(head(fwd2), "前へ進んだ大口のあと、頭が体に戻った");
 
   console.log(`OK ムクロ: 体力${M.health}、這い寄り${stepDist}px（途中で後ろを押すとガード）、頭転がしは下段で相手の後ろに止まり噛みつきへ続けてガードさせられる、噛みつきはガード+${MV.headBite.blockAdv}・ヒット+${MV.headBite.hitAdv}（後ろからでもふつうのガード）、頭なしのIは中段・投げ${M.headless.throwDamage}、跳ね戻りは無敵の対空、頭は叩くと3秒転がり重なれば拾える、大口はジャンプでかわせず頭が離れていればのけぞり中・ダウン中も出せる`);
 }

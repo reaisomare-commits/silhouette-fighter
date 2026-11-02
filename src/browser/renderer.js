@@ -559,9 +559,10 @@
       let lean = { [POSE.GUARD_STAND]: 2, [POSE.GUARD_CROUCH]: 2, [POSE.BLOCK]: 0, [POSE.WALK_FORWARD]: 14, [POSE.STEP]: 34, [POSE.BACKSTEP]: -4, [POSE.HIT]: -10, [POSE.LAUNCH]: -10, [POSE.THROWN]: -12, [POSE.TECH]: -10, [POSE.THROW]: 14 }[p];
       if (lean === undefined) lean = 10 + sway;
       if (atk) {
-        const fwd = { standLight: 18, standHeavy: 34, headlessHeavy: 20, crouchLight: 14, crouchHeavy: 24, special: 12, crouchSpecial: 0, throw: 16, super: -8, headBite: 14, headHop: 6 }[move] || 10;
+        const fwd = { standLight: 18, standHeavy: 8, headlessHeavy: 20, crouchLight: 14, crouchHeavy: 24, special: 12, crouchSpecial: 0, throw: 16, super: -8, headBite: 14, headHop: 6 }[move] || 10;
         lean = lerp(6 - 6 * atk.wind, fwd, atk.ext);
         if (move === "headlessHeavy" && !atk.ext && !atk.rec) lean = -8 * atk.wind; // 両腕を振りかぶる間は反る
+        if (move === "standHeavy" && !atk.ext && !atk.rec) lean = 34 * atk.wind; // 頭突き：前に深くかがんで頭を低く構える
       }
       if (f.grab) lean = 18;
       const topY = -h; // 体のいちばん上（頭があれば頭のてっぺん）
@@ -574,11 +575,6 @@
         limb(-16, hipY + 22, -6, hipY + 40, legW);
         limb(6, hipY, 18, hipY + 20, legW);
         limb(18, hipY + 20, 12, hipY + 38, legW);
-      } else if (move === "crouchHeavy" && atk) {
-        // 屍転がし：前の足を地面すれすれに投げ出す
-        limb(-6, hipY, -22, -16, legW);
-        limb(-22, -16, -16, 0, legW);
-        limb(6, hipY, lerp(24, 116, atk.ext), lerp(-14, -8, atk.ext), legW);
       } else if (crouching) {
         limb(-6, hipY, -22, -18, legW);
         limb(-22, -18, -16, 0, legW);
@@ -618,9 +614,12 @@
       ctx.fillStyle = "#000";
       // 頭（付いているとき）。頭突きは前へ、首伸ばしは上へ
       if (!headless) {
-        const hx = lean + 6 + (move === "standHeavy" && atk ? 22 * atk.ext : 0) + (move === "crouchSpecial" ? 18 * (neckUp / 90) : 0);
-        const hy = topY + headR - neckUp;
-        if (neckUp > 4) limb(lean + 2, shoulderY, hx, hy + headR, 9);
+        // 頭突き：構えで頭を低く下げ、当たるときは胸の高さの前へ振り上げ、硬直の間に元の高さへ戻る
+        let butt = { x: 0, y: 0 };
+        if (move === "standHeavy" && atk) butt = !atk.ext && !atk.rec ? { x: 14 * atk.wind, y: 72 * atk.wind } : { x: 40 * atk.ext, y: 46 * atk.ext };
+        const hx = lean + 6 + butt.x + (move === "crouchSpecial" ? 18 * (neckUp / 90) : 0);
+        const hy = topY + headR - neckUp + butt.y;
+        if (neckUp > 4 || butt.y > 12) limb(lean + 2, shoulderY, hx, hy + headR * (butt.y > 12 ? 0 : 1), 9);
         drawMukuroHead(hx, hy, headR, accent, { open: move === "crouchSpecial" || move === "throw" || f.grab ? 1 : 0, dir: 1, frame });
       } else {
         // 首の切り口：短い首と、差し色の筋
@@ -662,6 +661,10 @@
           back = { x: front.x - 10, y: front.y + 10 };
         } else if (move === "crouchLight") {
           front = { x: lean + lerp(40, m.hitbox.x2 - 6, ext), y: lerp(shoulderY + 30, -16, ext) };
+        } else if (move === "crouchHeavy") {
+          // 屍転がし：両腕を地面すれすれに伸ばして、相手の足元を薙ぎ払う
+          front = { x: lean + lerp(30, m.hitbox.x2 - 4, ext), y: lerp(shoulderY + 30, -8, ext) };
+          back = { x: lean + lerp(22, m.hitbox.x2 - 24, ext), y: lerp(shoulderY + 36, -12, ext) };
         } else if (move === "special") {
           // 頭転がし：下手で後ろから前へ振る（発生で頭が手から離れる）
           const t = ext > 0 || atk.rec ? 1 : wind;
@@ -1173,7 +1176,8 @@
           const bite = (Math.sin(p.age * 0.9) + 1) / 2;
           ctx.save();
           ctx.translate(x, y);
-          ctx.scale(p.facing, 1);
+          // いつも相手の方を向く
+          ctx.scale(Math.sign(other.x - p.x) || p.facing, 1);
           const hw = p.w / 2;
           const hh = p.h / 2;
           ctx.globalAlpha = 0.9;
@@ -2165,7 +2169,7 @@
       rin: "速い拳法家。突進拳は押してためて離す（最大ためで飛び道具をすり抜け、ガードされても+1）。前2回でダッシュ。練気は6秒間すべての攻撃がキャンセルできる。",
       genma: "術で戦う悪役。異空間弾は離れた所に開く門から出て、空中でも撃てる。前2回でワープ。ジャンプの頂上から押し続けると浮く。冥府球はガードされても押し続ける。",
       gou: "体力1300の投げの大男。張り手はリーチが長い。大張り手は1発だけ攻撃を受け止める（踏ん張り）。岩落とし・つかみ上げ・大地落としは投げ抜けできない。",
-      mukuro: "体力700のゾンビ。O で頭を転がし（下段）、相手の後ろに置く。頭が外れたら O で噛みつき（ガードされて+10）、S＋O で跳ね戻り、I は中段の振り下ろし。自分が頭に重なると拾う。前2回の這い寄りは後ろでガード。大口は頭が離れていれば攻撃を受けている間も出せる。",
+      mukuro: "体力700のゾンビ。O で頭を転がし（下段）、相手の後ろに置く。頭が外れたら O で噛みつき（ガードされて+10）、S＋O で跳ね戻り（どちらも本人は止まらない）、I は中段の振り下ろし。自分が頭に重なると拾う。前2回の這い寄りは後ろでガード。大口は頭が離れていれば攻撃を受けている間も出せる。",
     };
     // 技の表に並べる順番と、出し方
     const MOVE_ORDER = [
