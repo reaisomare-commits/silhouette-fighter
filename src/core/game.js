@@ -118,6 +118,11 @@
       specialAge: 99, // Oを押してから何フレームたったか（I＋Oの同時押し判定用）
       buffTimer: 0, // ゲージ技で強くなっている残りフレーム（リンの練気：すべての攻撃がキャンセルできる）
       passive: 0, // 消極的な動き（前に出ない・飛び道具しか撃たない）が続いているフレーム数
+      advance: 0, // このラウンドで自分から前に進んだ距離から、自分から下がった距離を引いたもの（100倍の整数）
+      advanceBest: 0, // advance のこのラウンドの一番大きい値（積極的ボーナスの基準。これを更新したときだけゲージが増える）
+      passiveBase: 0, // 消極的ペナルティの基準。advance がここから BATTLE.passive.advance 以上増えたら数え直し
+      lastX: null, // 前のフレームの位置（自分から動いた距離を数えるため）
+      lastToward: 0, // 前のフレームで相手がどちら側にいたか（1＝右、-1＝左）
       superGuardable: true, // 今出しているゲージ技を、相手がガードできるか（暗転する前からガードを押していたか）
       superCatch: false, // 今出しているゲージ技（ゴウの大地落とし）が、暗転のあとで跳んだりよけたりした相手も掴むか（暗転したとき地上にいたか）
       armorUsed: false, // 今の技の踏ん張り（ゴウの大張り手）で、もう攻撃を受け止めたか（1回の技で1発だけ）
@@ -280,23 +285,50 @@
     f.superCatch = !!m.catchAfterFreeze && opp.onGround && opp.action !== POSE.BACKSTEP && opp.action !== POSE.WARP;
   }
 
-  // 消極的な動きのペナルティ。前に出る動きや飛び道具でない攻撃で数え直し、攻撃を受けている間などは止める
+  // 自分から動いているとみなす様子（歩く・走る・ステップ・バックステップ・ワープ・その止まり際・ジャンプ）。
+  // 攻撃を受けて押された、ガードで下がった、相手に押された、などは数えない
+  const SELF_MOVE_POSES = new Set([POSE.WALK_FORWARD, POSE.GUARD_STAND, POSE.RUN, POSE.STEP, POSE.BACKSTEP, POSE.WARP, POSE.DASH_RECOVERY, POSE.JUMP]);
+  const BUSY_POSES = new Set([POSE.BLOCK, POSE.HIT, POSE.DOWN, POSE.LAUNCH, POSE.THROWN, POSE.TECH]);
+
+  // 消極的な動きのペナルティと、積極的な動きのボーナス。
+  // どちらも「自分から前に進んだ距離 − 自分から下がった距離」（advance）で決める。前後に行ったり来たりしても advance は増えない。
+  //   ペナルティ：advance が基準から BATTLE.passive.advance ピクセル以上増えるか、飛び道具でない攻撃をすると数え直し。
+  //     下がっても基準は下がらないので、下がってから戻っただけでは数え直しにならない（大きく下がったときは、基準を BATTLE.passive.back ピクセル前まで下げる）
+  //   ボーナス：advance がこのラウンドの一番大きい値を BATTLE.aggressive.distance ピクセル更新するたびにゲージが gain 増える
   function updatePassive(state, f, opp) {
     const P = BATTLE.passive;
-    const toward = Math.sign(opp.x - f.x) || f.facing;
+    const A = BATTLE.aggressive;
+    const toward = f.lastToward || f.facing;
+    if (f.lastX === null) f.lastX = f.x;
+    const dx = (f.x - f.lastX) * toward; // 相手に向かって動いた距離（このフレーム）
+    f.lastX = f.x;
+    f.lastToward = Math.sign(opp.x - f.x) || toward;
+    const busy = f.stun > 0 || !!f.grab || BUSY_POSES.has(f.pose);
+    // 空中は攻撃中でもジャンプの動きを数える。地上で技を出している間（突進や押し返し）は数えない
+    if (!busy && (SELF_MOVE_POSES.has(f.pose) || f.action === POSE.WARP || !f.onGround)) f.advance += dx;
+
+    // 積極的ボーナス：前に進んだ記録を更新した分だけゲージが増える
+    const unit = A.distance * S;
+    while (f.advance >= f.advanceBest + unit) {
+      f.advanceBest += unit;
+      addGauge(f, A.gain * 100);
+    }
+
+    // 消極的ペナルティ
+    // 下がっても基準はすぐには下がらない（戻っただけでは数え直しにならない）。ただし back ピクセルより大きく下がった分は基準も下げる
+    if (f.advance < f.passiveBase - P.back * S) f.passiveBase = f.advance + P.back * S;
+    let progressed = f.advance - f.passiveBase >= P.advance * S;
+    if (progressed) f.passiveBase = f.advance;
+    // 相手に体がくっついて前に歩いている（押している）ときは、進めなくても前に出ているとみなす
+    const gap = Math.abs(opp.x - f.x) / S - (CHARACTERS[f.charId].width + CHARACTERS[opp.charId].width) / 2;
+    if (f.pose === POSE.WALK_FORWARD && gap <= P.closeGap) progressed = true;
     const m = moveData(f);
-    const forward =
-      f.pose === POSE.WALK_FORWARD ||
-      f.pose === POSE.RUN ||
-      f.pose === POSE.STEP ||
-      (f.action === POSE.WARP && f.warpDir > 0) ||
-      (!f.onGround && !f.move && f.vx * toward > 0);
     const engaging = m && !m.projectile; // 飛び道具でない攻撃（投げ・ゲージ技も）
-    if (forward || engaging || f.buffTimer > 0) {
+    if (progressed || engaging || f.buffTimer > 0) {
       f.passive = 0;
+      if (engaging || f.buffTimer > 0) f.passiveBase = f.advance;
       return;
     }
-    const busy = f.stun > 0 || f.grab || f.pose === POSE.BLOCK || f.pose === POSE.HIT || f.pose === POSE.DOWN || f.pose === POSE.LAUNCH || f.pose === POSE.THROWN;
     if (busy) return;
     f.passive += 1;
     if (f.passive >= P.frames && (f.passive - P.frames) % P.every === 0) {
@@ -825,9 +857,15 @@
     return f.action === POSE.DASH_RECOVERY && f.backstepRecovery;
   }
 
+  // 前ステップの出だしの無敵中か（ゴウの踏み込み。攻撃も投げも当たらない）
+  function stepInvincible(f) {
+    const fd = CHARACTERS[f.charId].forwardDash;
+    return f.action === POSE.STEP && !!fd.invincible && fd.frames - f.actionTimer < fd.invincible;
+  }
+
   function hurtbox(f) {
     if (f.pose === POSE.DOWN || f.pose === POSE.LAUNCH || f.pose === POSE.THROWN) return null;
-    if (backstepInvincible(f) || f.action === POSE.WARP || superInvincible(f) || holdingSlam(f)) return null;
+    if (backstepInvincible(f) || stepInvincible(f) || f.action === POSE.WARP || superInvincible(f) || holdingSlam(f)) return null;
     const w = CHARACTERS[f.charId].width;
     const x = f.x / S;
     const y = f.y / S;
@@ -1219,7 +1257,7 @@
 
   // 投げられる状態か：地上にいて、のけぞり・ガード硬直・ダウン中・バックステップで下がっている最中・ジャンプの着地硬直中でない
   function throwable(f) {
-    return f.onGround && f.stun === 0 && f.action !== POSE.BACKSTEP && f.action !== POSE.WARP && f.pose !== POSE.LANDING && !f.grab && f.pose !== POSE.DOWN && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN;
+    return f.onGround && f.stun === 0 && f.action !== POSE.BACKSTEP && !stepInvincible(f) && f.action !== POSE.WARP && f.pose !== POSE.LANDING && !f.grab && f.pose !== POSE.DOWN && f.pose !== POSE.LAUNCH && f.pose !== POSE.THROWN;
   }
 
   // 空中で掴める状態か（ゴウのつかみ上げ）：空中にいて、空中でやられて落ちている最中でない
