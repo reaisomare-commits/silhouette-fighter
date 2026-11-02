@@ -2720,6 +2720,25 @@
           ctx.globalAlpha = c.timer < 60 && c.timer % 8 < 4 ? 0.3 : 0.6; // 消える前は点滅
           drawFighter(c, i, state);
           ctx.restore();
+          // 画面の外にいる分身は、画面の端に向きの印（三角）を出す
+          const cx = c.x / C.SCALE;
+          if (cx < 0 || cx > C.STAGE_WIDTH) {
+            const other = state.fighters[1 - i];
+            const accent = i === 1 && other.charId === c.charId ? ACCENT_MIRROR[c.charId] : ACCENT[c.charId];
+            const edge = cx < 0 ? 6 : C.STAGE_WIDTH - 6;
+            const dir = cx < 0 ? -1 : 1;
+            const y = c.y / C.SCALE - 90;
+            ctx.save();
+            ctx.globalAlpha = 0.75;
+            ctx.fillStyle = accent;
+            ctx.beginPath();
+            ctx.moveTo(edge, y);
+            ctx.lineTo(edge - dir * 16, y - 12);
+            ctx.lineTo(edge - dir * 16, y + 12);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          }
         });
         order.forEach((i) => drawFighter(state.fighters[i], i, state));
         drawDizzy(state);
