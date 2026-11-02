@@ -682,11 +682,10 @@
       f.moveFrame += 1;
       const m = moveData(f);
       if (m.projectile && f.moveFrame === m.startup) spawnProjectile(state, f, m);
-      // 斜め下へ飛び込む技（カゲの影落ち）：発生から着地まで、45度で同じ速さで進む
+      // 斜め下へ飛び込む技（カゲの影落ち）：発生から着地まで、同じ向き・同じ速さで進む
       if (m.dive && f.moveFrame >= m.startup) {
-        const v = Math.round((m.dive.speed * S) / Math.SQRT2);
-        f.vx = f.facing * v;
-        f.vy = v;
+        f.vx = f.facing * Math.round(m.dive.forward * S);
+        f.vy = Math.round(m.dive.fall * S);
       }
     } else if (wantAttack === "special" && down && !f.airAttackUsed && CHARACTERS[f.charId].moves.airCrouchSpecial) {
       // 空中の S＋O（カゲの影落ち）。空中攻撃と合わせて1回のジャンプで1回

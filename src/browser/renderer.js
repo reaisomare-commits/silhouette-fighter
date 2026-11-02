@@ -832,7 +832,7 @@
       // 影落ち：体を前へ倒して斜め下へ飛び込む
       if (move === "airCrouchSpecial" && f.moveFrame >= m.startup) {
         ctx.translate(0, -h * 0.45);
-        ctx.rotate(0.75);
+        ctx.rotate(0.9);
         ctx.translate(0, h * 0.45);
       }
       // 朧月：伸び上がる
