@@ -1014,12 +1014,40 @@ for (const att of ["kagetsu", "rin", "genma"]) {
     assert.ok(n < normal + 5, "カゲツは浮かないはず");
   }
 
-  // 異空間弾：門は spawnX 先に開く。目の前の相手には当たらない
+  // 異空間弾：門は spawnX 先に開く。相手が門より内側（目の前）にいたら、弾は向きを変えて戻ってきて当たる
   {
+    const gm = CH.genma.moves.special;
     const st = closeGame("genma", "kagetsu", 70);
-    for (let i = 0; i < 80; i++) SF.game.step(st, [i === 0 ? O : 0, 0]);
-    assert.strictEqual(st.fighters[1].health, CH.kagetsu.health, "異空間弾は目の前の相手には当たらないはず");
-    assert.ok(st.effects.length >= 0);
+    let turned = false;
+    let hitAt = -1;
+    for (let i = 0; i < 120 && hitAt < 0; i++) {
+      SF.game.step(st, [i === 0 ? O : 0, 0]);
+      const p = st.projectiles[0];
+      if (p && p.vx * st.fighters[0].facing < 0) turned = true;
+      if (st.fighters[1].health < CH.kagetsu.health) hitAt = i;
+    }
+    assert.ok(turned, "内側の相手に向かって弾が向きを変えない");
+    assert.strictEqual(CH.kagetsu.health - st.fighters[1].health, gm.damage, "向きを変えた異空間弾が内側の相手に当たらない");
+    // 外側の相手には向きを変えずに飛ぶ
+    const far = newGame(1, ["genma", "kagetsu"]);
+    far.fighters[0].x = 200 * S;
+    far.fighters[1].x = 600 * S;
+    for (let i = 0; i < 40; i++) {
+      SF.game.step(far, [i === 0 ? O : 0, 0]);
+      const p = far.projectiles[0];
+      if (p) assert.ok(p.vx > 0, "外側の相手なのに異空間弾が向きを変えた");
+    }
+    // ゲンマが攻撃を受けたら、異空間弾は消える
+    const hitGenma = closeGame("genma", "kagetsu", 140);
+    let had = false;
+    for (let i = 0; i < 40; i++) {
+      SF.game.step(hitGenma, [i === 0 ? O : 0, i === 22 ? I : 0]);
+      if (hitGenma.projectiles.length) had = true;
+      if (hitGenma.fighters[0].pose === POSE.HIT) break;
+    }
+    assert.ok(had, "（確かめ方の確認）異空間弾が出ていない");
+    assert.strictEqual(hitGenma.fighters[0].pose, POSE.HIT, "（確かめ方の確認）ゲンマに攻撃が当たっていない");
+    assert.strictEqual(hitGenma.projectiles.length, 0, "ゲンマが攻撃を受けても異空間弾が消えない");
   }
   // 異空間弾はホーミング：跳んでいる相手の高さへ曲がって当たる
   {
@@ -2145,6 +2173,13 @@ require("../src/core/autobattle.js");
   const ar = run(gouGame("kagetsu", 110), 40, (i) => (i === 0 ? I : 0), (i) => (i === 0 ? U : 0));
   assert.strictEqual(ar.fighters[0].health, G.health - kl.damage, "踏ん張りでダメージを受けていない");
   assert.strictEqual(ar.fighters[1].health, 1000 - gh.damage, "踏ん張りのあと大張り手が当たらない");
+  // 踏ん張りは発生の直前（armor.to フレーム目）までで消える：そのあと発生までに受けた攻撃では止まる
+  const lateAt = gh.armor.to + 1; // 踏ん張りが消えたフレーム（発生より前）
+  assert.ok(lateAt < gh.startup);
+  const arLate = run(gouGame("kagetsu", 110), 40, (i) => (i === 0 ? I : 0), (i) => (i === lateAt - 1 - (kl.startup - 1) ? U : 0));
+  assert.strictEqual(arLate.fighters[0].health, G.health - kl.damage, "（確かめ方の確認）柄打ちが当たっていない");
+  assert.strictEqual(arLate.fighters[0].armorUsed, false, "発生の直前なのに踏ん張りが残っている");
+  assert.strictEqual(arLate.fighters[1].health, 1000, "踏ん張りが消えたあとに攻撃を受けたのに大張り手が出た");
   // 2発目は受け止められない（飛刃を2回：1発目は受け止め、2発目でのけぞる）
   const ar2 = gouGame("rin", 110);
   run(ar2, 3, (i) => (i === 0 ? I : 0), (i) => (i === 0 ? U : 0)); // ジャブを受け止める
@@ -2254,6 +2289,11 @@ require("../src/core/autobattle.js");
   run(sg, 150, (i) => (i === 0 ? I | O : 0), (i) => BUTTON.RIGHT | (i % 2 ? U | I : 0));
   assert.strictEqual(sg.fighters[1].health, 1000 - su.damage, `大地落としのダメージ（${1000 - sg.fighters[1].health}）`);
   assert.strictEqual(sg.fighters[0].gauge, 0, "大地落としでゲージが溜まった");
+  // 出だしは無敵：暗転のあとに相手の技（すでに出しかけていた柄打ち）が重なっても止まらずに掴む
+  const sgInv = gouGame("kagetsu", 110, FULL);
+  run(sgInv, 150, (i) => (i === 4 ? I | O : 0), (i) => (i === 0 ? U : 0));
+  assert.strictEqual(sgInv.fighters[0].health, G.health, "大地落としの出だしに攻撃が当たった");
+  assert.strictEqual(sgInv.fighters[1].health, 1000 - su.damage, "出しかけの技に大地落としが止められた");
   // 遠すぎると届かない
   const sfar = run(gouGame("kagetsu", 320, FULL), 150, (i) => (i === 0 ? I | O : 0), 0);
   assert.strictEqual(sfar.fighters[1].health, 1000, "320pxで大地落としが届いた");
@@ -2274,7 +2314,7 @@ require("../src/core/autobattle.js");
   assert.strictEqual(pre.fighters[1].health, 1000, "暗転の前から跳んでいた相手を大地落としで掴めた");
   assert.ok(su.recovery >= 70, "大地落としの空振りの隙");
 
-  console.log(`OK ゴウ: 張り手は148pxまで届くが腕に強攻撃を合わされる、弱と強がかち合ったら強が勝つ、大張り手の踏ん張りは1発だけ、張り手・すね蹴りから四股踏みにキャンセルできる、岩落とし（${sp.damage}）は投げ抜けできずガード硬直中とジャンプ中は掴めない、つかみ上げ（${cs.damage}）は空中の相手だけ・空中攻撃に勝つ、踏み込みは出だし無敵で飛び道具もすり抜け、大地落とし（${su.damage}）はガード・投げ抜け不可で約250pxまで届き、暗転のあとで跳んでもバックステップしても掴む（暗転の前から跳んでいれば空振り）`);
+  console.log(`OK ゴウ: 張り手は148pxまで届くが腕に強攻撃を合わされる、弱と強がかち合ったら強が勝つ、大張り手の踏ん張りは1発だけ・発生の直前で消える、張り手・すね蹴りから四股踏みにキャンセルできる、岩落とし（${sp.damage}）は投げ抜けできずガード硬直中とジャンプ中は掴めない、つかみ上げ（${cs.damage}）は空中の相手だけ・空中攻撃に勝つ、踏み込みは出だし無敵で飛び道具もすり抜け、大地落とし（${su.damage}）は出だし${su.invincible}F無敵・ガード・投げ抜け不可で約250pxまで届き、暗転のあとで跳んでもバックステップしても掴む（暗転の前から跳んでいれば空振り）`);
 }
 
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める

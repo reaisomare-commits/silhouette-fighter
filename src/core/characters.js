@@ -158,9 +158,12 @@
         crouchHeavy: { name: "闇溜まり", startup: 13, active: 4, recovery: 22, hitAdv: "down", blockAdv: -10, damage: 115, guard: "low", hitbox: { x1: 20, x2: 125, y1: 0, y2: 30 }, push: 22, noCancel: true },
         airLight: { name: "空中攻撃（弱）", startup: 6, active: 6, recovery: null, hitAdv: 9, blockAdv: 2, damage: 45, guard: "air", hitbox: { x1: 0, x2: 60, y1: -15, y2: 50 }, push: 10 },
         airHeavy: { name: "空中攻撃（強）", startup: 10, active: 6, recovery: null, hitAdv: 12, blockAdv: 3, damage: 110, guard: "air", hitbox: { x1: -5, x2: 85, y1: -20, y2: 45 }, push: 14 },
-        // 異空間弾：少し先（spawnX）に開いた門から飛び道具が出て、相手の高さへ曲がっていく（ホーミング）。目の前の相手には当たらない。画面に1つまで（空中のものと合わせて）。
+        // 異空間弾：少し先（spawnX）に開いた門から飛び道具が出て、相手の高さへ曲がっていく（ホーミング）。画面に1つまで（空中のものと合わせて）。
+        //   homing.turnBack：出てから turnBackFrames フレームの間に、相手が門より内側（自分と門の間）にいたら、横の速さを1フレームに turnBack ずつ変えて
+        //   向きを反対に変え、内側の相手に向かって飛ぶ（1回だけ）。
+        //   vanishOnHit: true なら、ゲンマが攻撃を受けたら（のけぞり・空中やられ・掴まれ）弾は消える
         // 硬直差は門の目の前で当てたときの値
-        special: { name: "異空間弾", kind: "special", startup: 20, active: 1, recovery: 22, hitAdv: 4, blockAdv: -6, damage: 105, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 45, y1: 80, y2: 130 }, push: 14, projectile: { speed: 5, width: 36, height: 36, spawnX: 220, y: 90, portal: true, homing: { turn: 0.25, max: 4 } } },
+        special: { name: "異空間弾", kind: "special", startup: 20, active: 1, recovery: 22, hitAdv: 4, blockAdv: -6, damage: 105, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 45, y1: 80, y2: 130 }, push: 14, projectile: { speed: 5, width: 36, height: 36, spawnX: 220, y: 90, portal: true, vanishOnHit: true, homing: { turn: 0.25, max: 4, turnBack: 0.5, turnBackFrames: 6 } } },
         // 異空間弾（空中）：空中で O。前の門から斜め下へ飛び、相手の高さへ曲がっていく（fall＝はじめに1フレームに下へ進むピクセル）。1回のジャンプで空中攻撃とどちらか1回。
         // 硬直差は「自分が低い所で出して、すぐ着地したとき」の値
         airSpecial: { name: "異空間弾（空中）", kind: "special", startup: 12, active: 1, recovery: null, hitAdv: 6, blockAdv: 1, damage: 90, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 40, y1: 40, y2: 100 }, push: 10, projectile: { speed: 5, fall: 5, width: 32, height: 32, spawnX: 60, y: 40, portal: true, homing: { turn: 0.25, max: 5 } } },
@@ -202,8 +205,8 @@
         // 張り手：弱攻撃なのにリーチが長い（強攻撃なみ）。そのかわり腕のやられる範囲も同じだけ前に出るので、強攻撃を合わされると負ける。
         // 張り手・大張り手は当たる範囲の上側が低め（頭の上の相手には当たりにくい）。弱強の技は硬直が長く、ガードされると不利が大きい
         standLight: { name: "張り手", startup: 7, active: 3, recovery: 15, hitAdv: 2, blockAdv: -3, damage: 60, guard: "mid", hitbox: { x1: 20, x2: 125, y1: 95, y2: 135 }, hurtExtend: { x1: 0, x2: 125, y1: 95, y2: 150 }, push: 20 },
-        // 大振りだが、出だしから当たり終わるまで1発だけ攻撃を受け止める（踏ん張り）
-        standHeavy: { name: "大張り手", startup: 18, active: 4, recovery: 25, hitAdv: 3, blockAdv: -9, damage: 130, guard: "mid", hitbox: { x1: 25, x2: 125, y1: 80, y2: 140 }, push: 30, armor: { from: 3, to: 21 } },
+        // 大振りだが、出だしから発生の直前（発生の2F前）まで1発だけ攻撃を受け止める（踏ん張り）。当たる時間には踏ん張りがない
+        standHeavy: { name: "大張り手", startup: 18, active: 4, recovery: 25, hitAdv: 3, blockAdv: -9, damage: 130, guard: "mid", hitbox: { x1: 25, x2: 125, y1: 80, y2: 140 }, push: 30, armor: { from: 1, to: 16 } },
         crouchLight: { name: "すね蹴り", startup: 8, active: 2, recovery: 15, hitAdv: 2, blockAdv: -4, damage: 50, guard: "low", hitbox: { x1: 20, x2: 100, y1: 0, y2: 35 }, push: 18 },
         crouchHeavy: { name: "四股踏み", startup: 16, active: 4, recovery: 27, hitAdv: "down", blockAdv: -13, damage: 120, guard: "low", hitbox: { x1: 10, x2: 125, y1: 0, y2: 25 }, push: 24, noCancel: true },
         airLight: { name: "肘落とし", startup: 7, active: 6, recovery: null, hitAdv: 10, blockAdv: 2, damage: 50, guard: "air", hitbox: { x1: 0, x2: 68, y1: -15, y2: 55 }, push: 10 },
@@ -216,10 +219,10 @@
         // 投げ：掴める範囲が広め、ダメージも普通の投げより大きい
         throw: { name: "ベアハッグ", kind: "throw", startup: 5, active: 2, recovery: 24, damage: 160, hitbox: { x1: 0, x2: 65, y1: 0, y2: 175 } },
         // ゲージ技「大地落とし」：約250ピクセル先まで突進して掴み、高く跳んで叩きつける。ガードも投げ抜けもできない。
-        //   出だしは飛び道具が当たらない。catchAfterFreeze: 暗転したときに地上にいた相手は、暗転のあとで跳んでも
+        //   出だし（invincible フレーム）は攻撃も投げも飛び道具も当たらない（無敵。暗転のあとに相手の技が重なっていても止まらない）。catchAfterFreeze: 暗転したときに地上にいた相手は、暗転のあとで跳んでも
         //   バックステップやワープをしても掴む（カゲツの月影斬と同じく、暗転を見てからでは対応できない）。
         //   暗転する前から跳んでいた相手や、届かない距離の相手には空振りして、大きな隙（70F）
-        super: { name: "大地落とし", kind: "throw", noTech: true, catchAfterFreeze: true, startup: 3, active: 13, recovery: 70, damage: 320, hitbox: { x1: 0, x2: 70, y1: 0, y2: 180 }, lunge: { from: 2, to: 15, speed: 14 }, projectileInvincible: 16, hold: 50, finish: 30 },
+        super: { name: "大地落とし", kind: "throw", noTech: true, catchAfterFreeze: true, startup: 3, active: 13, recovery: 70, damage: 320, hitbox: { x1: 0, x2: 70, y1: 0, y2: 180 }, lunge: { from: 2, to: 15, speed: 14 }, invincible: 16, projectileInvincible: 16, hold: 50, finish: 30 },
       },
     },
   };
