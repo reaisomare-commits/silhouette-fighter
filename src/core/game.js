@@ -1669,6 +1669,22 @@
       }
     }
     clampClone(c);
+    // 影と分身が重なったら（相手を画面端に追い詰めて飛び越したときなど、両方が相手の同じ側の端に来たとき）、
+    // 分身は相手をはさんで影の反対側（そのときの影と相手の距離）へ移る
+    if (c.action !== POSE.SHADOW && f.action !== POSE.SHADOW && !f.grab && f.pose !== POSE.THROWN) {
+      const cTop = c.y - Math.round(fighterHeight(c) * PUSH_HEIGHT_RATIO) * S;
+      const fTop = f.y - Math.round(fighterHeight(f) * PUSH_HEIGHT_RATIO) * S;
+      if (!(c.y <= fTop || f.y <= cTop) && Math.abs(c.x - f.x) < cloneGap(c, f)) {
+        const side = Math.sign(opp.x - f.x) || -f.facing; // 相手から見て影と反対の側
+        let x = opp.x + side * Math.max(Math.abs(opp.x - f.x), cloneGap(c, opp));
+        if (Math.abs(x - f.x) < cloneGap(c, f)) x = f.x + side * cloneGap(c, f); // 相手が影の真上にいるとき
+        state.effects.push({ kind: "smoke", x: c.x / S, y: c.y / S - fighterHeight(c) / 2, owner: c.cloneOf, life: 20 });
+        c.x = x;
+        clampClone(c);
+        c.facing = Math.sign(opp.x - c.x) || c.facing;
+        state.effects.push({ kind: "smoke", x: c.x / S, y: c.y / S - fighterHeight(c) / 2, owner: c.cloneOf, life: 20 });
+      }
+    }
   }
 
   // 分身の技：ダメージだけ影の damageRate %

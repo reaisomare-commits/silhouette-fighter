@@ -2826,12 +2826,27 @@ require("../src/core/autobattle.js");
           const L = lim(c.charId);
           if (c.x < L[0] || c.x > L[1]) offscreen++;
           if (c.onGround && o.onGround && c.action !== POSE.SHADOW && !noPush.has(o.pose)) assert.ok(Math.abs(c.x - o.x) >= gap(c.charId, o.charId) - S, `分身と相手が重なった: ${where()} 分身${c.x / S}`);
+          const me = st.fighters[k];
+          if (c.onGround && me.onGround && c.action !== POSE.SHADOW && me.action !== POSE.SHADOW && !noPush.has(me.pose)) assert.ok(Math.abs(c.x - me.x) >= gap(c.charId, me.charId) - S, `影と分身が重なった: ${where()} 分身${c.x / S}`);
         }
       }
     }
   }
   assert.ok(cloneFrames > frames / 3 && offscreen > 0, `分身があまり出ていない（${cloneFrames}/${frames}F、画面の外${offscreen}F）`);
-  console.log(`OK 画面端の重なり: カゲが出る${pairs.length}組×12試合（${frames}F、分身がいた${cloneFrames}F・うち画面の外${offscreen}F）で、本人どうし・分身と相手が地上で重ならず、本人は画面の中`);
+  // 相手を画面端に追い詰めて分身を出し、相手を飛び越すと、影と分身が同じ端に来る。そのとき分身は相手をはさんで反対側へ移る
+  {
+    const jo = newGame(1, ["kage", "kagetsu"]);
+    const wall = SF.constants.STAGE_WIDTH - SF.constants.STAGE_MARGIN - CH.kagetsu.width / 2;
+    jo.fighters[0].x = (wall - 60) * S;
+    jo.fighters[1].x = wall * S;
+    jo.fighters[0].gauge = SF.game.GAUGE_FULL;
+    for (let i = 0; i < 50; i++) SF.game.step(jo, [i === 0 ? BUTTON.HEAVY | BUTTON.SPECIAL : 0, 0]);
+    for (let i = 0; i < 60; i++) SF.game.step(jo, [i < 40 ? BUTTON.JUMP | BUTTON.RIGHT : 0, 0]);
+    const [k, o] = jo.fighters;
+    assert.ok(k.x > o.x, "端に追い詰めた相手を飛び越せていない（テストの前提）");
+    assert.ok(k.clone.x < o.x && o.x - k.clone.x >= gap("kage", "kagetsu"), `飛び越したあと影と分身が重なる（影${k.x / S}・相手${o.x / S}・分身${k.clone.x / S}）`);
+  }
+  console.log(`OK 画面端の重なり: カゲが出る${pairs.length}組×12試合（${frames}F、分身がいた${cloneFrames}F・うち画面の外${offscreen}F）で、本人どうし・分身と相手・影と分身が地上で重ならず、本人は画面の中。端に追い詰めて飛び越すと分身は反対側へ`);
 }
 
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める
