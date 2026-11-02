@@ -327,7 +327,7 @@
       clone: { frames: 360, damageRate: 50, swapCooldown: 15 },
       // カゲだけの性質：
       //   emergeInvincible: 朧月を出してからそのフレームまで、攻撃も投げも飛び道具も当たらない（影から飛び出す間）
-      //   dive: 空中から斜め下へ飛び込む技（1Fに speed ピクセル、45度）。発生から着地まで当たり、着地すると landingLag フレーム動けない
+      //   dive: 空中から斜め下へ飛び込む技（1Fに前へ forward ピクセル・下へ fall ピクセル）。発生から着地まで当たり、着地すると landingLag フレーム動けない
       //   stagger: 投げで相手を立ち眩みにする（ダメージなし）。相手は stagger フレーム動けず、投げた側は finish フレームで動ける
       moves: {
         standLight: { name: "影突き", startup: 5, active: 2, recovery: 9, hitAdv: 3, blockAdv: 1, damage: 35, guard: "mid", hitbox: { x1: 15, x2: 72, y1: 80, y2: 128 }, push: 16 },
@@ -344,7 +344,7 @@
         // 影潜り → 朧月（S＋O を押して潜り、O を離すと飛び出す昇り技）。発生は離してから数える
         crouchSpecial: { name: "朧月", kind: "special", startup: 5, active: 5, recovery: 34, hitAdv: "down", blockAdv: -28, damage: 110, guard: "mid", hitbox: { x1: -10, x2: 85, y1: 40, y2: 240 }, hurtExtend: { x1: 0, x2: 60, y1: 40, y2: 170 }, push: 14, emergeInvincible: 4 },
         // 影落ち（ジャンプ中 S＋O）：影になって斜め下へ飛び込む。飛んでいる間は飛び道具をすり抜ける。外すと着地後16F動けない
-        airCrouchSpecial: { name: "影落ち", kind: "special", startup: 8, active: 60, recovery: null, hitAdv: "down", blockAdv: -6, damage: 90, guard: "air", hitbox: { x1: -10, x2: 62, y1: -30, y2: 60 }, push: 14, dive: { speed: 10 }, landingLag: 16, projectileInvincible: 99 },
+        airCrouchSpecial: { name: "影落ち", kind: "special", startup: 8, active: 60, recovery: null, hitAdv: "down", blockAdv: -6, damage: 90, guard: "air", hitbox: { x1: -10, x2: 62, y1: -30, y2: 60 }, push: 14, dive: { forward: 10, fall: 7.07 }, landingLag: 16, projectileInvincible: 99 },
         // 影縛り（投げ）：ダメージはなく、相手を立ち眩みにする。投げた側が先に動けて、連続技を入れられる（続く技は連続技の2発目として数える）
         throw: { name: "影縛り", kind: "throw", startup: 5, active: 2, recovery: 22, damage: 0, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 }, stagger: 30, finish: 12 },
         // ゲージ技「分身」：相手の後ろ（今の影と相手の距離と同じだけ後ろ）に分身を出す。分身は影と同じ入力で動き、攻撃は影の半分のダメージ。
