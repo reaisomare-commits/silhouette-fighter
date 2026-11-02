@@ -1468,6 +1468,14 @@ require("../src/core/learned-data.js");
     assert.ok(w / n >= 0.8, `${LV[hi].label}が${LV[lo].label}に勝てていない（${w}/${n}）`);
   }
 
+  // 学習AIの反射神経は、様子見だけを選ぶ頭脳で測る（学んだ立ち回りで先に技を出して動けないと、反射神経が測れないため）
+  const waitBrain = SF.learn.createBrain();
+  for (const pair of [["kagetsu", "rin"], ["rin", "kagetsu"]]) {
+    const waitTable = SF.learn.tableFor(waitBrain, ...pair);
+    waitTable.q.fill(0);
+    for (let k = 0; k < waitTable.q.length; k += SF.learn.ACTIONS.length) waitTable.q[k] = 1;
+  }
+
   // 近づいてきて弱攻撃（下段も）をくり返す相手に、CPUがどれだけガードできるか。
   // CPUが自分の技などで動けないときに来た攻撃は数えない
   function guardRate(lv, low) {
@@ -1475,7 +1483,7 @@ require("../src/core/learned-data.js");
     let block = 0;
     for (let seed = 1; seed <= 8; seed++) {
       const st = newGame(seed, ["rin", "kagetsu"]);
-      const cpu = SF.cpu.createCpu(lv, seed);
+      const cpu = SF.cpu.createCpu(lv, seed, { brain: waitBrain });
       const [a, b] = st.fighters;
       let wait = 0;
       let counted = false;
@@ -1521,7 +1529,7 @@ require("../src/core/learned-data.js");
       const st = newGame(seed, ["rin", "kagetsu"]);
       st.fighters[0].x = 420 * S;
       st.fighters[1].x = 470 * S;
-      const cpu = SF.cpu.createCpu(lv, seed);
+      const cpu = SF.cpu.createCpu(lv, seed, { brain: waitBrain });
       let grabbed = false;
       for (let i = 0; i < 60; i++) {
         // 投げ抜け以外でCPUがU＋Iを押さないよう、掴まれている間の入力だけ使う
@@ -1543,12 +1551,6 @@ require("../src/core/learned-data.js");
 
   // 前ジャンプで跳び込んでくる相手に、CPUがどれだけ対空技を出すか
   // 学習AIは、様子見を選ぶ頭脳で測る（学んだ立ち回りで先に技を出して動けないと、反射神経が測れないため）
-  const waitBrain = SF.learn.createBrain();
-  for (const pair of [["kagetsu", "rin"], ["rin", "kagetsu"]]) {
-    const waitTable = SF.learn.tableFor(waitBrain, ...pair);
-    waitTable.q.fill(0);
-    for (let k = 0; k < waitTable.q.length; k += SF.learn.ACTIONS.length) waitTable.q[k] = 1;
-  }
   function antiAirRate(lv) {
     let jumps = 0;
     let aa = 0;
