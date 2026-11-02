@@ -1,7 +1,11 @@
 // CPU（コンピューターの対戦相手）。強さは「よわい・ふつう・つよい」の3段階。
 // プレイヤーと同じ「キー入力（ボタンのビット）」を作って渡すだけで、特別な動きはしない。
 // 相手の様子は「反応の速さ」のフレーム数だけ前のものしか見えない（人間が見てから動くのと同じ）。
-// ただしガードだけは、発生の速い技を見てからでは間に合わないので、「ガードできる確率」で読んで構える。
+// ガード・投げ抜け・ヒット確認も人間と同じく「見えてから」しか正しく反応できない：
+//   ・相手の技は「見てから反応」のフレーム数がたってから種類（中段・下段）がわかる。それより速い技は、
+//     その時の構え（立ちガード・しゃがみガード・投げ抜け狙いのどれで待っていたか）で受ける。読みが外れたら当たる
+//   ・投げ抜けは、投げ抜けを狙って待っていたときだけ。そのかわり、その間は打撃をガードしそこないやすい
+//   ・連続技は、当たったのを見てから次をつなぐ。見る前に技が終わってしまう弱攻撃からは、当たったか見ずに出しきるか止めるかを決める
 // 乱数はCPUごとに自分の種を持つので、同じ種なら同じ試合になる。
 (function (root) {
   const SF = (root.SF = root.SF || {});
@@ -11,18 +15,20 @@
 
   // 強さの数字。調整するときはここを書き換える（確率は%）
   //   reaction: 反応の速さ（相手の位置やジャンプが何フレーム遅れて見えるか。様子見の考え直しの間隔もこれ）
-  //   guard: ガードできる確率（相手の技1つごとに決める）
+  //   see: 相手の技の種類（中段・下段）や、自分の技が当たったかガードされたかが、何フレームたつと見えるか
+  //   guard: ガードできる確率（相手の技1つごとに決める）。見えていない速い技は、構えが合っていないと防げない
   //   antiAir: 相手が跳んできたときに対空技（S+O）を出す確率（1回のジャンプごとに決める）
   //   combo: 連続技を最後までつなぐ確率（失敗すると途中で止める）
-  //   tech: 投げ抜けする確率
+  //   commit: 当たったかを見る前に技が終わってしまうとき（弱攻撃から）、見ずに連続技を出しきる確率
+  //   tech: 投げ抜けを狙って待つ割合（構えを決めるたびに。投げ抜けできるのはこのときだけ）
   //   superUse: ゲージが満タンのとき、ゲージ技を使う確率（連続技の締め・切り返しなど、場面ごとに決める）
   const LEVELS = [
-    { id: "easy", label: "よわい", reaction: 30, guard: 30, antiAir: 20, combo: 30, tech: 0, superUse: 20 },
-    { id: "normal", label: "ふつう", reaction: 18, guard: 60, antiAir: 50, combo: 70, tech: 30, superUse: 50 },
-    { id: "hard", label: "つよい", reaction: 10, guard: 85, antiAir: 80, combo: 95, tech: 60, superUse: 80 },
+    { id: "easy", label: "よわい", reaction: 30, see: 30, guard: 30, antiAir: 20, combo: 30, commit: 20, tech: 0, superUse: 20 },
+    { id: "normal", label: "ふつう", reaction: 18, see: 20, guard: 60, antiAir: 50, combo: 70, commit: 35, tech: 25, superUse: 50 },
+    { id: "hard", label: "つよい", reaction: 10, see: 15, guard: 85, antiAir: 80, combo: 95, commit: 50, tech: 40, superUse: 80 },
     // 学習AI：反射神経（反応・ガード・対空・連続技・投げ抜け）は「つよい」と同じで、
     // 様子見で何をするかだけを機械学習（src/core/learn.js）の表で決める
-    { id: "learn", label: "学習AI", reaction: 10, guard: 85, antiAir: 80, combo: 95, tech: 60, superUse: 80, learned: true },
+    { id: "learn", label: "学習AI", reaction: 10, see: 15, guard: 85, antiAir: 80, combo: 95, commit: 50, tech: 40, superUse: 80, learned: true },
   ];
   const LEARN_LEVEL = LEVELS.findIndex((lv) => lv.learned);
 
@@ -86,6 +92,9 @@
   const FLOAT_CHANCE = 60;
   const AIR_SHOT_CHANCE = 60;
 
+  // 構えを決めるとき、投げ抜け狙いでなければ、しゃがみガードで待つ割合（%）。下段と中段を防げるので多め。
+  // 立ちガードで待つと、中段（リンの回し蹴り）と跳び込みを防げる
+  const CROUCH_GUESS = 65;
   const PROJECTILE_ALERT = 260; // 飛び道具がこれより近づいたらガードを考える（ピクセル）
   const ANTI_AIR_RANGE = 130; // 跳んできた相手がこれより近づいたら対空技を出す（ピクセル、横の距離）
   const HISTORY = 64;
@@ -132,7 +141,10 @@
       oppProjCount: 0,
       projId: 0,
       guardKey: null,
-      guardOk: false,
+      guardOk: false, // 見えていない間に、構えで受けられるか（技1つごとに決める）
+      seenOk: null, // 見えてから、正しい種類でガードできるか（見えたときに決める）
+      stance: "stand", // 構え（読み）："stand"＝立ちガード、"crouch"＝しゃがみガード、"tech"＝投げ抜け狙い
+      stanceTimer: 0, // 次に構えを決め直すまでのフレーム
       // 相手のジャンプにも番号をつけて、1回ごとに対空を出すかを決める
       jumpId: 0,
       oppWasAir: false,
@@ -147,6 +159,10 @@
       comboStop: null, // 今の連続技で何回つないだら止めるか
       comboPressedFor: -1, // どの技のときにつなぎのボタンを押したか
       comboSuper: false, // 今の連続技の締めをゲージ技にするか
+      contactFor: -1, // どの技（自分の技の番号）が当たったかガードされたのを、もう数えたか
+      contactAt: 0, // 連続技の1発目が当たった（ガードされた）フレーム
+      blind: false, // 当たったかを見る前に今の技が終わるので、見ずに決めるか
+      blindGo: null, // 見ずに決めるとき、つなぐか（連続技1回ごとに決める）
       confirmKey: null, // 相手の技を見てゲージ技を撃つかを決めた、相手の技の番号
       chargeLeft: 0, // ためる技（リンの突進拳）で、あと何フレーム O を押し続けるか
       rising: false, // このジャンプで、跳んですぐ（上りで）空中攻撃を出すか
@@ -219,13 +235,37 @@
     return cpu.history[i];
   }
 
+  // delay フレーム前の相手の様子
+  function seenAgo(cpu, delay) {
+    return cpu.history[Math.max(0, cpu.history.length - 1 - delay)];
+  }
+
+  // 今の脅威（相手の技・飛び道具）が、見てから反応のフレーム数より前から出ていた（＝もう見えている）か
+  function visibleThreat(cpu, lv, t) {
+    const ov = seenAgo(cpu, lv.see);
+    if (t.kind === "p") return ov.projId >= t.id && ov.projs.length > 0;
+    return ov.moveId === t.id && !!ov.move;
+  }
+
+  // 構え（読み）を決め直す：反応の速さごとに、立ちガード・しゃがみガード・投げ抜け狙いのどれで待つか。
+  // 学習AIや様子見で後ろ（ガード）を押しているときは、その構え
+  function updateStance(cpu, lv, back) {
+    if (cpu.stanceTimer > 0) {
+      cpu.stanceTimer -= 1;
+      return;
+    }
+    cpu.stanceTimer = lv.reaction;
+    if (cpu.hold & back) cpu.stance = cpu.hold & BUTTON.DOWN ? "crouch" : "stand";
+    else cpu.stance = chance(cpu, lv.tech) ? "tech" : chance(cpu, CROUCH_GUESS) ? "crouch" : "stand";
+  }
+
   // 見えている相手の技が、自分に届きそうなら { key, guard } を返す（ガードの種類 "mid"・"low"・"high"・"air"）
   function threat(cpu, me, opp, o) {
     const dist = Math.abs(me.x - o.x) / S;
     // 飛び道具がこちらに向かってきている
     for (const p of o.projs) {
       const toward = Math.sign(me.x - p.x) === Math.sign(p.vx);
-      if (toward && Math.abs(me.x - p.x) / S < PROJECTILE_ALERT) return { key: "p" + o.projId, guard: "mid" };
+      if (toward && Math.abs(me.x - p.x) / S < PROJECTILE_ALERT) return { key: "p" + o.projId, kind: "p", id: o.projId, guard: "mid" };
     }
     if (!o.move || o.moveHit) return null;
     const m = CHARACTERS[opp.charId].moves[o.move];
@@ -234,7 +274,7 @@
     if (m && m.kind === "throw" && o.move !== "throw" && !m.antiAir && !m.catchAfterFreeze && o.moveFrame < m.startup) {
       let grabReach = m.hitbox.x2 + CHARACTERS[me.charId].width / 2 + 10;
       if (m.lunge) grabReach += (m.lunge.to - m.lunge.from + 1) * m.lunge.speed;
-      return dist <= grabReach ? { key: "m" + o.moveId, guard: "grab", lunge: !!m.lunge } : null;
+      return dist <= grabReach ? { key: "m" + o.moveId, kind: "m", id: o.moveId, guard: "grab", lunge: !!m.lunge } : null;
     }
     if (!m || m.kind === "throw" || !m.hitbox) return null;
     // 当たる時間が終わった技はもう怖くない
@@ -242,7 +282,7 @@
     let reach = m.hitbox.x2 + CHARACTERS[me.charId].width / 2 + 30;
     if (m.lunge) reach += (m.lunge.to - m.lunge.from + 1) * m.lunge.speed;
     if (dist > reach) return null;
-    return { key: "m" + o.moveId, guard: m.guard };
+    return { key: "m" + o.moveId, kind: "m", id: o.moveId, guard: m.guard };
   }
 
   // 自分の技の届く距離（体の中心どうしの距離、ピクセル）
@@ -288,13 +328,14 @@
     cpu.myLastMove = me.move;
     cpu.myLastFrame = me.moveFrame;
 
-    // 掴まれた：投げ抜けするかを1回だけ決め、するなら少し遅れてU＋I
+    // 掴まれた：投げ抜けを狙って待っていたときだけ、少し遅れてU＋I（投げを読んでいなければ抜けられない）
+    updateStance(cpu, lv, back);
     if (me.pose === POSE.THROWN) {
       cpu.queue = [];
       cpu.hold = 0;
       if (!cpu.grabbed) {
         cpu.grabbed = state.frame;
-        cpu.techAt = chance(cpu, lv.tech) ? state.frame + 2 + SF.rng.nextInt(cpu.rng, 5) : -1;
+        cpu.techAt = cpu.stance === "tech" ? state.frame + 2 + SF.rng.nextInt(cpu.rng, 5) : -1;
       }
       if (state.frame === cpu.techAt) out = BUTTON.LIGHT | BUTTON.HEAVY;
       return finish(cpu, out);
@@ -316,11 +357,32 @@
 
     // 連続技：自分の技が当たったら、決めた確率で次のボタンを押す
     //   ガードされたときは、ガードされても続ける連続技（BLOCK_COMBOS、リンの練気の間は BUFF_COMBOS）だけ
-    const blocked = opp.pose === POSE.BLOCK;
-    if (me.move && me.moveHit && (opp.pose === POSE.HIT || blocked) && cpu.comboPressedFor !== cpu.myMoveId) {
+    //   ヒット確認：当たったかガードされたかは「見てから反応」のフレーム数がたってからわかる。
+    //   それより前に技が終わってしまう（弱攻撃など）ときは、見ずに次をつなぐか（commit の確率、連続技1回ごとに決める）、そこで止めるかを決める。
+    //   見ずにつなぐと、ガードされていてもつないでしまう（隙をさらす）。つないでいる間に見えたら、そこからは見て決める
+    if (me.move && me.moveHit && (opp.pose === POSE.HIT || opp.pose === POSE.BLOCK) && cpu.contactFor !== cpu.myMoveId) {
+      cpu.contactFor = cpu.myMoveId;
+      // 連続技の1発目が当たった（ガードされた）時から数える。2発目・3発目の間に見えれば、そこで確認できる
+      if (cpu.comboStep === 0) {
+        cpu.contactAt = state.frame;
+        cpu.blindGo = null;
+      }
+      // この技が終わるまでに見えるか（当たった瞬間に止まる時間は、ガードされたときの短い方で数える。どちらかはまだわからないので）
+      const mm = CHARACTERS[me.charId].moves[me.move];
+      const left = mm.startup - 1 + mm.active + mm.recovery - me.moveFrame + SF.characters.BATTLE.hitstopBlock;
+      cpu.blind = state.frame - cpu.contactAt + left < lv.see;
+      if (cpu.blind && cpu.blindGo === null) cpu.blindGo = chance(cpu, lv.commit);
+    }
+    const confirmed = state.frame - cpu.contactAt >= lv.see;
+    const blocked = opp.pose === POSE.BLOCK && !(cpu.blind && cpu.blindGo);
+    if (me.move && me.moveHit && (opp.pose === POSE.HIT || opp.pose === POSE.BLOCK) && cpu.comboPressedFor !== cpu.myMoveId && (confirmed || cpu.blind)) {
       const buffed = SF.game.cancelAllActive(me);
       const routes = buffed && BUFF_COMBOS[me.charId] ? BUFF_COMBOS[me.charId] : blocked ? BLOCK_COMBOS[me.charId] : COMBOS[me.charId];
-      const route = (routes || {})[cpu.comboFrom];
+      // 見ずに止めると決めたら、つながない。ただし弱攻撃へのつなぎ（ガードされても隙が少ない）は、見る時間をかせぐためにつなぐ。
+      // リンの練気の間は、ガードされても続けられるのでつなぐ
+      let route = (routes || {})[cpu.comboFrom];
+      const nextMove = route && route[cpu.comboStep];
+      if (cpu.blind && !cpu.blindGo && !buffed && nextMove !== "light" && nextMove !== "crouchLight") route = null;
       if (route && cpu.comboStep < route.length) {
         // 最後までつなぐかを1回だけ決める。失敗するときは途中のどこかで止める（1回もつながないこともある）
         if (cpu.comboStop === null) {
@@ -347,17 +409,24 @@
       }
     }
 
-    // ガード：相手が技を出したら、技1つごとにガードするかを決める。
-    // 発生の速い技は見てからでは間に合わないので、ここは今の相手を見る（読んで構えるかどうかを確率で表す）
+    // ガード：相手が技を出したら、技1つごとに決める。
+    //   見えるまで（see フレーム）は、構え（読み）で受ける：構えが合っていて guardOk なら防げる。下段に立ちガード、中段（上から）にしゃがみガードは外れ。
+    //     投げ抜け狙いで待っていたときは、しゃがみガードで受けるが、打撃をガードできる確率が半分
+    //   見えてからは、正しい種類のガードをする（技1つごとに guard の確率）。発生の遅い技なら間に合う
     const t = threat(cpu, me, opp, cpu.history[cpu.history.length - 1]);
     if (t) {
       if (cpu.guardKey !== t.key) {
         cpu.guardKey = t.key;
-        // 投げの技を読んで逃げる確率は、投げ抜けする確率と同じ
-        cpu.guardOk = chance(cpu, t.guard === "grab" ? lv.tech : lv.guard);
-        // 切り返し：ゲージが満タンで、出だしが無敵のゲージ技があれば、相手の技（飛び道具でないもの）にゲージ技を合わせるかを決める
+        cpu.guardOk = chance(cpu, cpu.stance === "tech" ? lv.guard / 2 : lv.guard);
+        cpu.seenOk = null;
+        cpu.reversalOk = false;
+      }
+      const visible = visibleThreat(cpu, lv, t);
+      if (visible && cpu.seenOk === null) {
+        cpu.seenOk = chance(cpu, lv.guard);
+        // 切り返し：ゲージが満タンで、出だしが無敵のゲージ技があれば、見えた相手の技（飛び道具でないもの）にゲージ技を合わせるかを決める
         const sup = CHARACTERS[me.charId].moves.super;
-        cpu.reversalOk = !!(sup && sup.invincible) && t.key[0] === "m" && SF.game.gaugeFull(me) && chance(cpu, lv.superUse / 2);
+        cpu.reversalOk = !!(sup && sup.invincible) && t.kind === "m" && SF.game.gaugeFull(me) && chance(cpu, lv.superUse / 2);
       }
       if (cpu.reversalOk && isFree(me) && me.onGround && me.landingTimer === 0) {
         cpu.reversalOk = false;
@@ -365,10 +434,16 @@
         cpu.thinkTimer = 0;
         return finish(cpu, SUPER);
       }
+      // 跳んでいる相手の空中攻撃は、跳んだのが見えていれば立ちガードで待てる
+      const airSeen = t.guard === "air" && !seenAgo(cpu, lv.see).onGround;
+      let guardAs = null; // "stand"・"crouch"・null（ガードしない）
       if (t.guard === "grab") {
+        // ガードできない投げの技：見えてから（突進するもの）か、投げ抜け狙いで待っていたときだけ逃げられる
+        const dodge = visible ? cpu.seenOk : cpu.stance === "tech" && cpu.guardOk;
         // 突進して掴む技（大地落とし）は後ろへ跳んで避け、その場で掴む技（岩落とし）は弱攻撃で止める
-        if (cpu.guardOk && isFree(me) && me.onGround && me.landingTimer === 0) {
+        if (dodge && isFree(me) && me.onGround && me.landingTimer === 0) {
           cpu.guardOk = false;
+          cpu.seenOk = false;
           cpu.hold = 0;
           cpu.thinkTimer = 0;
           if (t.lunge) {
@@ -378,11 +453,17 @@
           }
           return finish(cpu, BUTTON.LIGHT);
         }
-      } else if (cpu.guardOk && me.onGround) {
+      } else if (visible || airSeen) {
+        if (visible ? cpu.seenOk : cpu.guardOk) guardAs = t.guard === "low" ? "crouch" : t.guard === "mid" && cpu.stance !== "stand" ? "crouch" : "stand";
+      } else if (cpu.guardOk) {
+        // 投げ抜け狙いのときは、しゃがみガードしながら投げに備える
+        guardAs = cpu.stance === "stand" ? "stand" : "crouch";
+      }
+      if (t.guard !== "grab" && guardAs && me.onGround) {
         cpu.hold = 0;
         cpu.thinkTimer = 0;
-        return finish(cpu, back | (t.guard === "low" ? BUTTON.DOWN : 0));
-      } else {
+        return finish(cpu, back | (guardAs === "crouch" ? BUTTON.DOWN : 0));
+      } else if (t.guard !== "grab") {
         // ガードしないと決めた技の間は、何をしていても後ろを押さない（構えない）。
         // 学習AIが「下がる」「しゃがみガード」を選ぶと、決めた確率より多くガードできてしまうため
         cpu.noGuard = back;

@@ -1501,10 +1501,16 @@ require("../src/core/learned-data.js");
     }
     return Math.round((100 * block) / (hit + block));
   }
+  // 発生の速い弱攻撃は見てからでは間に合わないので、構え（読み）で受ける。
+  //   投げ抜け狙い（tech %）のときはガードできる確率が半分、それ以外はしゃがみガード 65%・立ちガード 35% で待つ。
+  //   中段はどちらの構えでも防げるが、下段は立ちガードで待っていると当たる
   const guards = LV.map((_, i) => [guardRate(i, false), guardRate(i, true)]);
   guards.forEach(([mid, lowRate], i) => {
-    assert.ok(Math.abs(mid - LV[i].guard) <= 15, `${LV[i].label}のガード率（中段）が表とずれている: ${mid}%`);
-    assert.ok(Math.abs(lowRate - LV[i].guard) <= 15, `${LV[i].label}のガード率（下段）が表とずれている: ${lowRate}%`);
+    const { guard, tech } = LV[i];
+    const midNeed = (guard * (100 - tech / 2)) / 100;
+    const lowNeed = (guard * ((100 - tech) * 0.65 + tech / 2)) / 100;
+    assert.ok(Math.abs(mid - midNeed) <= 15, `${LV[i].label}のガード率（中段）が表とずれている: ${mid}%（${midNeed.toFixed(0)}%くらいのはず）`);
+    assert.ok(Math.abs(lowRate - lowNeed) <= 15, `${LV[i].label}のガード率（下段）が表とずれている: ${lowRate}%（${lowNeed.toFixed(0)}%くらいのはず）`);
   });
 
   // 投げをくり返す相手に、CPUがどれだけ投げ抜けできるか
@@ -1562,32 +1568,48 @@ require("../src/core/learned-data.js");
   const aas = LV.map((_, i) => antiAirRate(i));
   aas.forEach((r, i) => assert.ok(Math.abs(r - LV[i].antiAir) <= 20, `${LV[i].label}の対空を出す率が表とずれている: ${r}%`));
 
-  // 連続技：ジャブが当たったあと、どれだけ最後（突進拳）までつなぐか
-  function comboRate(lv) {
+  // 連続技：弱攻撃が当たったあと、どれだけ次の技（move）までつなぐか。block＝相手が立ちガードしているとき
+  //   リンのジャブ → ジャブ → 回し蹴り → 突進拳：ジャブ2発の間に当たったのが見えるので、見てから最後までつなぐ
+  //   カゲツの柄打ち → 大振り斬り：柄打ちが終わる前には見えないので、見ずにつなぐか（commit）を決める
+  function comboRate(lv, chars, move, block = false) {
     let full = 0;
     const N = 40;
     for (let seed = 1; seed <= N; seed++) {
-      const st = newGame(seed, ["rin", "kagetsu"]);
+      const st = newGame(seed, chars);
       st.fighters[0].x = 440 * S;
       st.fighters[1].x = 500 * S;
       const cpu = SF.cpu.createCpu(lv, seed);
-      // CPUを左に置いて、何もしない相手にジャブを当てさせる
-      let usedSpecial = false;
+      // CPUを左に置いて、何もしない（block なら立ちガードする）相手に弱攻撃を当てさせる
+      let used = false;
       for (let i = 0; i < 120; i++) {
         const cin = SF.cpu.input(cpu, st, 0);
-        SF.game.step(st, [i === 0 ? U : cin & ~(BUTTON.LEFT | BUTTON.RIGHT) & (i < 3 ? 0 : 127), 0]);
-        if (st.fighters[0].move === "special") usedSpecial = true;
+        SF.game.step(st, [i === 0 ? U : cin & ~(BUTTON.LEFT | BUTTON.RIGHT) & (i < 3 ? 0 : 127), block ? BUTTON.RIGHT : 0]);
+        if (i < 50 && st.fighters[0].move === move) used = true; // つなぎだけを数える（あとで様子見から出した技は数えない）
       }
-      if (usedSpecial) full++;
+      if (used) full++;
     }
     return Math.round((100 * full) / N);
   }
-  const combos = LV.map((_, i) => comboRate(i));
-  combos.forEach((r, i) => assert.ok(Math.abs(r - LV[i].combo) <= 20, `${LV[i].label}の連続技を最後までつなぐ率が表とずれている: ${r}%`));
+  const combos = LV.map((_, i) => comboRate(i, ["rin", "kagetsu"], "special"));
+  const blindHit = LV.map((_, i) => comboRate(i, ["kagetsu", "rin"], "standHeavy"));
+  const blindBlock = LV.map((_, i) => comboRate(i, ["kagetsu", "rin"], "standHeavy", true));
+  const rinBlock = comboRate(2, ["rin", "kagetsu"], "special", true);
+  const HARD = 2;
+  assert.ok(combos[HARD] >= 75, `つよいCPUが連続技を最後までつながない: ${combos[HARD]}%`);
+  assert.ok(combos[0] <= combos[1] && combos[1] <= combos[HARD], `連続技をつなぐ率が強さの順になっていない: ${combos}`);
+  assert.ok(rinBlock <= 10, `ジャブ2発で見えているのに、ガードされた連続技を突進拳まで出している: ${rinBlock}%`);
+  // 柄打ちは当たってから16Fで終わる。それより見るのが遅い強さは、見ずにつなぐか決める（当たっていてもガードされていても commit の確率）。
+  // 間に合う強さ（つよい・学習AI）は見てから：当たったらつなぎ、ガードされたらつながない
+  blindHit.forEach((r, i) => {
+    const blind = LV[i].see > 16;
+    const hitNeed = blind ? LV[i].commit : LV[i].combo;
+    const blockNeed = blind ? LV[i].commit : 0;
+    assert.ok(Math.abs(r - hitNeed) <= 20 && Math.abs(blindBlock[i] - blockNeed) <= 20, `${LV[i].label}の柄打ちからのつなぎがおかしい: 当たり ${r}%・ガード ${blindBlock[i]}%`);
+  });
 
   const show = (arr) => arr.map((r, i) => `${LV[i].label}${r}%`).join("・");
   console.log(`OK CPU: 同じ種なら同じ試合、勝率 ${Object.entries(wins).map(([k, v]) => `${k} ${v}%`).join("・")}`);
-  console.log(`OK CPUの強さ: ガード（中段/下段） ${guards.map((g, i) => `${LV[i].label}${g[0]}/${g[1]}%`).join("・")}、投げ抜け ${show(techs)}、対空 ${show(aas)}、連続技を最後まで ${show(combos)}`);
+  console.log(`OK CPUの強さ: ガード（中段/下段） ${guards.map((g, i) => `${LV[i].label}${g[0]}/${g[1]}%`).join("・")}、投げ抜け ${show(techs)}、対空 ${show(aas)}、連続技 リンのジャブから最後まで ${show(combos)}（ガードされたら つよい${rinBlock}%）・カゲツの柄打ちから大振り斬り 当たり ${show(blindHit)}／ガード ${show(blindBlock)}`);
 }
 
 // メニュー：タイトル → モード選択 → キャラと強さの選択 → 試合の設定が正しく作られるか
