@@ -1488,7 +1488,10 @@
   function spawnClone(state, f, opp) {
     const i = state.fighters.indexOf(f);
     const lim = stageLimits(f);
-    const x = Math.max(lim.min, Math.min(lim.max, opp.x + (opp.x - f.x)));
+    // 相手の向こう側（相手と同じ側にいるときは、相手の前に出ないよう相手の体の幅だけは離す）
+    const side = Math.sign(opp.x - f.x) || f.facing;
+    const gap = Math.max(Math.abs(opp.x - f.x), cloneGap(f, opp));
+    const x = Math.max(lim.min, Math.min(lim.max, opp.x + side * gap));
     f.clone = {
       cloneOf: i,
       charId: f.charId,
@@ -1515,7 +1518,35 @@
       timer: CHARACTERS[f.charId].clone.frames,
     };
     f.swapCool = 0;
+    // 画面端で相手の後ろに入る場所がないときは、相手を押し出して分身の場所を空ける
+    separateClone(f.clone, opp, side, f);
     state.effects.push({ kind: "smoke", x: x / S, y: C.GROUND_Y - CHARACTERS[f.charId].height / 2, owner: i, life: 20 });
+  }
+
+  // 分身と相手の体が重ならない距離
+  function cloneGap(c, opp) {
+    return ((CHARACTERS[c.charId].width + CHARACTERS[opp.charId].width) / 2) * S;
+  }
+
+  // 分身と相手の体が重なっていたら離す。side は分身が相手のどちら側にいるか。
+  // ふだんは分身だけが下がるが、分身が画面端で下がれないときは相手を押し出す（相手と分身が重なったままにならない）。
+  // 押し出した相手が影（owner）に重なったら、影も押し下げる（相手が影と分身にはさまれたとき）
+  function separateClone(c, opp, side, owner) {
+    const gap = cloneGap(c, opp);
+    if (Math.abs(c.x - opp.x) >= gap && Math.sign(c.x - opp.x) === side) return;
+    c.x = opp.x + side * gap;
+    clampToStage(c);
+    if (Math.abs(c.x - opp.x) < gap) {
+      opp.x = c.x - side * gap;
+      clampToStage(opp);
+      if (owner && owner.action !== POSE.SHADOW && Math.sign(owner.x - opp.x) === -side) {
+        const g2 = cloneGap(owner, opp);
+        if (Math.abs(owner.x - opp.x) < g2) {
+          owner.x = opp.x - side * g2;
+          clampToStage(owner);
+        }
+      }
+    }
   }
 
   // 分身を消す
@@ -1568,6 +1599,7 @@
         }
       }
       c.pose = c.onGround ? POSE.STAND : POSE.JUMP;
+      if (c.onGround) c.facing = Math.sign(opp.x - c.x) || c.facing; // 待っている間も相手の方を向く
       c.lastMove = null;
     } else {
       if (f.move !== c.lastMove || f.moveFrame < c.lastFrame) c.moveHit = false;
@@ -1585,8 +1617,9 @@
       c.vy = f.vy;
       // 影が前に進んだ分だけ、分身も自分の前（相手の方）に進む
       if (!f.swapped) c.x += (f.x - preX) * f.facing * c.facing;
-      // 向き：影が向き直れるとき・技を出した瞬間・潜っている間は、相手の方を向く
-      if (canTurn(f) || f.action === POSE.SHADOW || (f.move && f.moveFrame === 1)) c.facing = Math.sign(opp.x - c.x) || c.facing;
+      // 向き：影が向き直れるとき・技を出した瞬間・潜っている間・分身が地上で技を出していないときは、相手の方を向く
+      // （分身だけが相手を飛び越したときも、着地したら向き直る）
+      if (canTurn(f) || f.action === POSE.SHADOW || (f.move && f.moveFrame === 1) || (c.onGround && !c.move)) c.facing = Math.sign(opp.x - c.x) || c.facing;
       // 飛び道具も同じ時に撃つ（分身の飛び道具は画面に1つまで）
       const m = moveData(c);
       if (m && m.projectile && c.moveFrame === m.startup && !state.projectiles.some((p) => p.clone && p.owner === c.cloneOf)) spawnProjectile(state, c, m);
@@ -1598,10 +1631,12 @@
     if (c.action !== POSE.SHADOW && opp.action !== POSE.SHADOW) {
       const cTop = c.y - Math.round(fighterHeight(c) * PUSH_HEIGHT_RATIO) * S;
       const oTop = opp.y - Math.round(fighterHeight(opp) * PUSH_HEIGHT_RATIO) * S;
-      const minDist = ((CHARACTERS[c.charId].width + CHARACTERS[opp.charId].width) / 2) * S;
-      if (!(c.y <= oTop || opp.y <= cTop) && Math.abs(c.x - opp.x) < minDist) {
-        const side = Math.sign(c.x - opp.x) || -c.facing;
-        c.x = opp.x + side * minDist;
+      clampToStage(c);
+      if (!(c.y <= oTop || opp.y <= cTop) && Math.abs(c.x - opp.x) < cloneGap(c, opp)) {
+        // 分身が相手のどちら側にいるか。ぴったり重なったら、画面の広い方
+        const lim = stageLimits(opp);
+        const side = Math.sign(c.x - opp.x) || (lim.max - opp.x >= opp.x - lim.min ? 1 : -1);
+        separateClone(c, opp, side, f);
       }
     }
     clampToStage(c);
