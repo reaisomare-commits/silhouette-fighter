@@ -60,6 +60,12 @@
       standLight: ["heavy"],
       crouchLight: ["special"],
     },
+    // カゲ：影突き → 影突き → 影薙ぎ → 影苦無、影這い → 影這い → 影払い、影薙ぎ → 影苦無
+    kage: {
+      standLight: ["light", "heavy", "special"],
+      standHeavy: ["special"],
+      crouchLight: ["crouchLight", "crouchHeavy"],
+    },
   };
   // ガードされても続ける連続技（隙の少ないキャンセル）。カゲツの大振り斬り → 飛刃
   const BLOCK_COMBOS = {
@@ -97,6 +103,12 @@
       mid: { special: 30, dash: 25, crouchLight: 10, wait: 15, guardLow: 10, light: 10 },
       far: { special: 30, dash: 40, wait: 15, forward: 15 },
     },
+    // カゲ：影走り（前2回）で近づき、弱攻撃と投げ（影縛りから連続技）で崩す。離れたら影苦無とジャンプ（空中で影球）
+    kage: {
+      near: { light: 25, crouchLight: 20, throw: 25, heavy: 10, back: 10, wait: 10 },
+      mid: { heavy: 20, dash: 30, special: 15, forward: 20, jump: 10, wait: 5 },
+      far: { special: 30, dash: 30, forward: 25, jump: 10, wait: 5 },
+    },
   };
 
   // 浮遊できるキャラ（ゲンマ）が、1回のジャンプで浮くか・空中の飛び道具を撃つかを決める確率（%）
@@ -122,7 +134,11 @@
     gou: { confirm: true, maxDist: 240, grab: true },
     // ムクロの大口：どこからでも（ジャンプでかわせない）。頭が離れていれば、攻められている最中の切り返しにも使う
     mukuro: { bands: ["near", "mid", "far"], maxDist: 999, rate: 3 },
+    // カゲの分身：近い〜中くらいで出して、挟んで攻める（攻撃の出だしで入れ替えて表裏の択）
+    kage: { bands: ["near", "mid"], maxDist: 999, rate: 2 },
   };
+  // カゲ（CPU）：分身がいる間、自分の攻撃が当たる少し前に入れ替える確率（%。強さの combo に掛ける）
+  const KAGE_SWAP = 50;
   // ムクロの頭の動き（CPU）
   //   BITE_RANGE：頭から相手までがこれより近ければ噛みつく（ピクセル）
   //   MIX：噛みつきを当てた・ガードさせたあとの崩しの選びやすさ（振り下ろし＝中段、足元引っかき＝下段、投げ）
@@ -197,6 +213,8 @@
       bitePlan: false, // ムクロ：噛みつきを出したので、当たった・ガードさせたら崩しに行く
       headSuperKey: null, // ムクロ：どの相手の技のときに、頭からの大口で切り返すかを決めたか
       headHitKey: null, // 相手（ムクロ）の頭を叩くかを決めた時（32フレームごとに1回）
+      swapKey: null, // カゲ：どの自分の技のときに、分身と入れ替えるかを決めたか
+      dizzyKey: null, // カゲ：どの立ち眩みのときに、連続技を入れるかを決めたか
     };
   }
 
@@ -444,6 +462,15 @@
       }
     }
 
+    // カゲ：分身がいる間は、自分の攻撃が当たる少し前に入れ替えて、相手の後ろから当てる（技1つごとに決める）
+    if (me.clone && me.move && me.onGround && me.swapCool === 0 && cpu.swapKey !== cpu.myMoveId) {
+      const mm = CHARACTERS[me.charId].moves[me.move];
+      if (mm && mm.hitbox && me.moveFrame >= Math.max(1, mm.startup - 4)) {
+        cpu.swapKey = cpu.myMoveId;
+        if (chance(cpu, (lv.combo * KAGE_SWAP) / 100)) return finish(cpu, SUPER);
+      }
+    }
+
     // ガード：相手が技を出したら、技1つごとに決める。
     //   見えるまで（see フレーム）は、構え（読み）で受ける：構えが合っていて guardOk なら防げる。下段に立ちガード、中段（上から）にしゃがみガードは外れ。
     //     投げ抜け狙いで待っていたときは、しゃがみガードで受けるが、打撃をガードできる確率が半分
@@ -649,6 +676,16 @@
         }
         cpu.queue.push(BUTTON.DOWN | (chance(cpu, 50) ? BUTTON.LIGHT : BUTTON.HEAVY), BUTTON.DOWN);
         return finish(cpu, BUTTON.DOWN);
+      }
+    }
+
+    // カゲ：影縛りで相手が立ち眩みになったら、影薙ぎから連続技（立ち眩み1回ごとに決める）
+    if (me.charId === "kage" && opp.dizzy && opp.stun > 0 && cpu.dizzyKey !== opp.stun + state.frame) {
+      cpu.dizzyKey = opp.stun + state.frame;
+      if (chance(cpu, lv.combo)) {
+        cpu.hold = 0;
+        cpu.thinkTimer = lv.reaction;
+        return finish(cpu, BUTTON.HEAVY);
       }
     }
 

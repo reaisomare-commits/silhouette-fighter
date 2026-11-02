@@ -7,8 +7,12 @@
   const { CHARACTERS, BATTLE } = SF.characters;
 
   // 差し色：カゲツは刃が青、リンは鉢巻が赤。同じキャラ同士のときは右側を別の色にする
-  const ACCENT = { kagetsu: "#4da6ff", rin: "#ff4d4d", genma: "#b25cff", gou: "#ff8c2a", mukuro: "#9ad84a" };
-  const ACCENT_MIRROR = { kagetsu: "#5cff8a", rin: "#ffd24d", genma: "#ff7ad9", gou: "#5fe0d0", mukuro: "#e0d24a" };
+  const ACCENT = { kagetsu: "#4da6ff", rin: "#ff4d4d", genma: "#b25cff", gou: "#ff8c2a", mukuro: "#9ad84a", kage: "#b9b4d6" };
+  const ACCENT_MIRROR = { kagetsu: "#5cff8a", rin: "#ffd24d", genma: "#ff7ad9", gou: "#5fe0d0", mukuro: "#e0d24a", kage: "#f4f4f8" };
+  // カゲ（隠しキャラ）の体の色：差し色はなく、完全なシルエット。黒よりうっすら明るい。同キャラ対戦の2Pは真っ白
+  const KAGE_BODY = "#2e2a36";
+  const KAGE_BODY_MIRROR = "#f4f4f6";
+  const kageBody = (accent) => (accent === ACCENT_MIRROR.kage ? KAGE_BODY_MIRROR : KAGE_BODY);
 
   // 画面まわりの色と文字（墨と朱）。明朝は Windows・Mac・Linux それぞれにある書体を順に探す
   const SHU = "#c42c1e"; // 朱
@@ -38,6 +42,7 @@
     [POSE.THROW]: "投げ",
     [POSE.THROWN]: "投げられている（弱＋強で投げ抜け）",
     [POSE.TECH]: "投げ抜け",
+    [POSE.SHADOW]: "影潜り（無敵）",
   };
 
   const KC = SF.keyconfig;
@@ -72,17 +77,32 @@
     sky.addColorStop(0.8, "#f6a95c");
     sky.addColorStop(1, "#fbd78a");
 
-    function drawBackground() {
+    // sun＝夕日の沈み具合（0〜1。タイトル画面だけ）。沈むほど太陽が地平線の下へ下がり、空と地面が暗くなる
+    function drawBackground(sun = 0) {
       ctx.fillStyle = sky;
       ctx.fillRect(0, 0, C.STAGE_WIDTH, C.GROUND_Y);
-      // 沈む太陽
+      // 沈む太陽（地平線より下は見えない）
+      const horizon = C.GROUND_Y - 20;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, C.STAGE_WIDTH, horizon);
+      ctx.clip();
       ctx.fillStyle = "rgba(255, 236, 170, 0.85)";
       ctx.beginPath();
-      ctx.arc(C.STAGE_WIDTH / 2, C.GROUND_Y - 20, 70, Math.PI, 0);
+      ctx.arc(C.STAGE_WIDTH / 2, horizon + sun * 76, 70, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
+      if (sun > 0) {
+        ctx.fillStyle = `rgba(12, 6, 26, ${0.78 * sun})`;
+        ctx.fillRect(0, 0, C.STAGE_WIDTH, C.GROUND_Y);
+      }
       // 地面
       ctx.fillStyle = "#2a1a1a";
       ctx.fillRect(0, C.GROUND_Y, C.STAGE_WIDTH, C.STAGE_HEIGHT - C.GROUND_Y);
+      if (sun > 0) {
+        ctx.fillStyle = `rgba(6, 3, 12, ${0.6 * sun})`;
+        ctx.fillRect(0, C.GROUND_Y, C.STAGE_WIDTH, C.STAGE_HEIGHT - C.GROUND_Y);
+      }
     }
 
     // 太さのある線（手足や刀）を描く
@@ -154,6 +174,21 @@
         ctx.fillStyle = accent;
         ctx.fillRect(len * 0.02, -18, 10, 16);
         ctx.fillStyle = "#000";
+        return;
+      }
+      if (f.charId === "kage") {
+        // カゲ：細い体をあお向けに投げ出す。襟巻きの端が地面に流れる
+        const len = CHARACTERS.kage.height * 0.75;
+        ctx.fillStyle = kageBody(accent);
+        ctx.strokeStyle = kageBody(accent);
+        limb(-len * 0.45, -10, len * 0.15, -10, 18);
+        circle(-len * 0.45 - 13, -12, 12);
+        limb(len * 0.15, -8, len * 0.55, -5, 11);
+        limb(len * 0.15, -12, len * 0.5, -16, 11);
+        limb(-len * 0.4, -14, -len * 0.4 - 30, -4, 4);
+        limb(-len * 0.38, -12, -len * 0.38 - 24, 2, 3);
+        ctx.fillStyle = "#000";
+        ctx.strokeStyle = "#000";
         return;
       }
       const isKagetsu = f.charId === "kagetsu";
@@ -749,6 +784,214 @@
     }
 
     // 外れているムクロの頭を描く（体とは別に、地面の上・空中に）
+    // カゲ（隠しキャラ）：差し色のない完全なシルエット。頭巾の先と襟巻きが後ろへなびく細身の忍び。手刀・蹴り・影の刃で戦う
+    //   影潜りの間は地面の影（足元の黒い溜まり）になり、潜り始めは体が地面へ沈んでいく
+    function drawKage(f, state, o) {
+      const body = kageBody(o.accent);
+      ctx.fillStyle = body;
+      ctx.strokeStyle = body;
+      if (o.p === POSE.SHADOW) {
+        const sd = CHARACTERS.kage.shadowDive;
+        const t = f.dive ? f.dive.t : sd.sink;
+        const sink = Math.min(1, t / sd.sink);
+        // 地面の影の溜まり（揺らめく）
+        ctx.save();
+        ctx.globalAlpha *= 0.9;
+        ctx.beginPath();
+        ctx.ellipse(0, -2, 26 + 18 * sink, 5 + 1.5 * Math.sin(state.frame * 0.3), 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        if (sink < 1) {
+          // 沈んでいく体：足元へつぶれていく
+          ctx.save();
+          ctx.scale(1, 1 - sink);
+          drawKageFigure(f, state, { ...o, p: POSE.CROUCH, crouching: true, atk: null, move: null, guarding: false, hurt: false });
+          ctx.restore();
+        } else {
+          // 潜っている間は、影の中に目だけ光る（相手の方を向いている）
+          ctx.save();
+          ctx.fillStyle = o.accent;
+          ctx.globalAlpha *= 0.5 + 0.3 * Math.sin(state.frame * 0.2);
+          ctx.fillRect(8, -5, 5, 2);
+          ctx.fillRect(16, -5, 5, 2);
+          ctx.restore();
+        }
+        return;
+      }
+      drawKageFigure(f, state, o);
+    }
+
+    function drawKageFigure(f, state, o) {
+      const { p, crouching, guarding, hurt, throwFollow, atk, move, airborne } = o;
+      const h = o.h;
+      const frame = state.frame;
+      const m = atk && atk.m;
+      const ext = atk ? atk.ext : 0;
+      const wind = atk ? atk.wind : 0;
+      const headR = 12;
+      // 影落ち：体を前へ倒して斜め下へ飛び込む
+      if (move === "airCrouchSpecial" && f.moveFrame >= m.startup) {
+        ctx.translate(0, -h * 0.45);
+        ctx.rotate(0.75);
+        ctx.translate(0, h * 0.45);
+      }
+      // 朧月：伸び上がる
+      const rise = move === "crouchSpecial" ? 22 * Math.max(ext, atk.rec ? 0.3 : 0) : 0;
+      ctx.translate(0, -rise);
+      const headY = -h + headR;
+      const shoulderY = headY + headR + 5;
+      const hipY = airborne ? -h * 0.46 : crouching ? -h * 0.4 : -h * 0.48;
+      const LEAN = { [POSE.GUARD_STAND]: -4, [POSE.GUARD_CROUCH]: -4, [POSE.BLOCK]: -6, [POSE.WALK_FORWARD]: 6, [POSE.STEP]: 18, [POSE.BACKSTEP]: -10, [POSE.HIT]: -14, [POSE.LAUNCH]: -10, [POSE.THROWN]: -12, [POSE.TECH]: -12, [POSE.THROW]: 10, [POSE.DASH_RECOVERY]: 4 };
+      let lean = LEAN[p] || 2;
+      if (atk) {
+        const fwd = { standLight: 8, standHeavy: 14, crouchLight: 10, crouchHeavy: 6, special: 10, airSpecial: 6, crouchSpecial: 2, throw: 10, super: -2, airLight: 4, airHeavy: 4, airCrouchSpecial: 0 }[move] || 4;
+        lean = lerp(-4 * wind, fwd, ext);
+      }
+      if (f.grab) lean = 12;
+      const legW = 10;
+      // 足
+      let kickFoot = null;
+      if (atk) {
+        if (move === "crouchHeavy") kickFoot = { x: lerp(18, m.hitbox.x2 - 6, ext), y: -6 };
+        if (move === "airHeavy") kickFoot = { x: lerp(16, 82, ext), y: lerp(hipY + 38, hipY + 72, ext) };
+        if (move === "airCrouchSpecial") kickFoot = { x: 34, y: hipY + 66 };
+      }
+      const stride = Math.sin(frame * 0.3) * 9;
+      if (airborne) {
+        limb(-5, hipY, -14, hipY + 22, legW);
+        limb(-14, hipY + 22, -4, hipY + 40, legW);
+        if (kickFoot) limb(5, hipY, kickFoot.x, kickFoot.y, legW);
+        else {
+          limb(5, hipY, 16, hipY + 18, legW);
+          limb(16, hipY + 18, 10, hipY + 38, legW);
+        }
+      } else if (crouching) {
+        limb(-5, hipY, -22, -16, legW);
+        limb(-22, -16, -16, 0, legW);
+        if (kickFoot) limb(5, hipY, kickFoot.x, kickFoot.y, legW);
+        else {
+          limb(5, hipY, 20, -20, legW);
+          limb(20, -20, 18, 0, legW);
+        }
+      } else if (p === POSE.STEP || p === POSE.BACKSTEP || (atk && (move === "standHeavy" || move === "special" || move === "throw"))) {
+        limb(-5, hipY, -28, 0, legW);
+        limb(5, hipY, 24, 0, legW);
+      } else {
+        const s2 = p === POSE.WALK_FORWARD || p === POSE.GUARD_STAND ? stride : 0;
+        limb(-5, hipY, -12 - s2, 0, legW);
+        limb(5, hipY, 12 + s2, 0, legW);
+      }
+      // 胴体
+      const bodyW = o.w * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(lean - bodyW / 2, shoulderY);
+      ctx.lineTo(lean + bodyW / 2, shoulderY);
+      ctx.lineTo(bodyW / 2 - 3, hipY + 4);
+      ctx.lineTo(-bodyW / 2 + 3, hipY + 4);
+      ctx.closePath();
+      ctx.fill();
+      // 頭と頭巾の先（後ろへ尖る）
+      circle(lean, headY, headR);
+      ctx.beginPath();
+      ctx.moveTo(lean - headR + 2, headY - 7);
+      ctx.lineTo(lean - headR - 14, headY - 13 + Math.sin(frame * 0.25) * 2);
+      ctx.lineTo(lean - headR + 4, headY + 4);
+      ctx.closePath();
+      ctx.fill();
+      // 襟巻き：首から後ろへ2本なびく
+      const wave = Math.sin(frame * 0.3) * 5;
+      const flap = airborne || p === POSE.STEP ? 10 : 0;
+      limb(lean - 4, shoulderY - 2, lean - 30, shoulderY + 4 + wave - flap, 4);
+      limb(lean - 4, shoulderY, lean - 24, shoulderY + 14 - wave - flap, 3);
+      // 腕：手刀（指先が尖る）
+      const sh = { x: lean + 2, y: shoulderY + 6 };
+      let front = { x: lean + 24, y: shoulderY + 22 };
+      let back = { x: lean + 14, y: shoulderY + 30 };
+      let blade = null; // 影の刃（弧）：{ cx, cy, r, a0, a1 }
+      if (guarding) {
+        front = { x: lean + 20, y: shoulderY - 4 };
+        back = { x: lean + 18, y: shoulderY + 8 };
+      } else if (hurt) {
+        front = { x: lean - 20, y: shoulderY - 8 };
+        back = { x: lean - 6, y: shoulderY + 30 };
+      } else if (throwFollow || (atk && move === "throw") || f.grab) {
+        const e = throwFollow || f.grab ? 1 : Math.max(ext, wind * 0.5);
+        front = { x: lean + lerp(24, 46, e), y: shoulderY + 10 };
+        back = { x: lean + lerp(14, 40, e), y: shoulderY + 20 };
+      } else if (atk) {
+        if (move === "standLight") front = { x: lean + lerp(24, m.hitbox.x2 - 6, ext), y: shoulderY + lerp(22, 12, ext) };
+        else if (move === "standHeavy") {
+          // 影薙ぎ：腕を後ろから前へ大きく振り、影の刃を弧に描く
+          front = ext > 0 || atk.rec ? { x: lean + lerp(40, 56, ext), y: shoulderY + 18 } : { x: lean + lerp(24, -26, wind), y: shoulderY + lerp(22, -16, wind) };
+          if (ext > 0) blade = { cx: lean, cy: shoulderY + 24, r: m.hitbox.x2 - 22, a0: -0.9, a1: 0.5 };
+        } else if (move === "crouchLight") front = { x: lean + lerp(24, m.hitbox.x2 - 6, ext), y: lerp(shoulderY + 22, -18, ext) };
+        else if (move === "airLight") {
+          // 月牙：斜め上前へ弧を描いて斬り上げる
+          front = { x: lean + lerp(20, 30, ext), y: shoulderY + lerp(20, -40, Math.max(ext, wind * 0.4)) };
+          if (ext > 0) blade = { cx: lean + 8, cy: shoulderY + 10, r: 92, a0: -2.1, a1: -0.25 };
+        } else if (move === "airHeavy") front = { x: lean + 22, y: shoulderY + 30 };
+        else if (move === "special" || move === "airSpecial") {
+          // 苦無・影球を投げる：腕を後ろへ引いてから前へ振り抜く
+          const t = ext > 0 || atk.rec ? 1 : wind;
+          front = { x: lean + lerp(-20, 50, t), y: shoulderY + (move === "airSpecial" ? lerp(4, 34, t) : lerp(4, 14, t)) };
+        } else if (move === "crouchSpecial") {
+          // 朧月：下から真上へ斬り上げ、三日月の刃を描く
+          front = { x: lean + lerp(22, 16, ext), y: shoulderY + lerp(26, -60, Math.max(ext, wind * 0.3)) };
+          if (ext > 0) blade = { cx: lean + 20, cy: shoulderY + 30, r: 110, a0: -1.9, a1: -0.5 };
+        } else if (move === "airCrouchSpecial") {
+          front = { x: lean + 30, y: shoulderY + 34 };
+          back = { x: lean - 20, y: shoulderY + 10 };
+        } else if (move === "super") {
+          // 分身：胸の前で印を結ぶ
+          front = { x: lean + 18, y: shoulderY + 4 };
+          back = { x: lean + 16, y: shoulderY + 12 };
+        }
+      } else if (airborne) {
+        front = { x: lean + 26, y: shoulderY + 10 };
+      }
+      limb(sh.x - 6, sh.y + 2, back.x, back.y, 7);
+      limb(sh.x, sh.y, front.x, front.y, 8);
+      for (const hand of [front, back]) {
+        ctx.beginPath();
+        ctx.moveTo(hand.x - 3, hand.y - 4);
+        ctx.lineTo(hand.x + 12, hand.y);
+        ctx.lineTo(hand.x - 3, hand.y + 4);
+        ctx.closePath();
+        ctx.fill();
+      }
+      if (blade) {
+        // 影の刃：体と同じ色の三日月（少し透ける）
+        ctx.save();
+        ctx.globalAlpha *= 0.75;
+        ctx.lineWidth = 9;
+        ctx.beginPath();
+        ctx.arc(blade.cx, blade.cy, blade.r, blade.a0, blade.a1);
+        ctx.stroke();
+        ctx.globalAlpha *= 0.45;
+        ctx.lineWidth = 18;
+        ctx.beginPath();
+        ctx.arc(blade.cx, blade.cy, blade.r - 10, blade.a0 + 0.15, blade.a1 - 0.1);
+        ctx.stroke();
+        ctx.restore();
+      }
+      // 影落ち：飛び込む後ろに残像
+      if (move === "airCrouchSpecial" && f.moveFrame >= m.startup) {
+        ctx.save();
+        ctx.globalAlpha *= 0.3;
+        ctx.fillRect(-60, hipY - 20, 50, 8);
+        ctx.fillRect(-48, hipY - 4, 40, 6);
+        ctx.restore();
+      }
+      if (guarding) {
+        ctx.strokeStyle = p === POSE.BLOCK ? "rgba(160, 220, 255, 0.9)" : "rgba(255, 255, 255, 0.55)";
+        ctx.lineWidth = p === POSE.BLOCK ? 5 : 3;
+        ctx.beginPath();
+        const midY = crouching ? -h * 0.45 : -h * 0.6;
+        ctx.arc(o.w / 2 + 10, midY, h * 0.45, -0.8, 0.8);
+        ctx.stroke();
+      }
+    }
+
     function drawHeads(state) {
       state.fighters.forEach((f, index) => {
         const h = f.head;
@@ -887,6 +1130,11 @@
       }
       if (f.charId === "mukuro") {
         drawMukuro(f, state, { h, w, p, crouching, guarding, hurt, throwFollow, airborne, atk, move, accent });
+        ctx.restore();
+        return;
+      }
+      if (f.charId === "kage") {
+        drawKage(f, state, { h, w, p, crouching, guarding, hurt, throwFollow, airborne, atk, move, accent });
         ctx.restore();
         return;
       }
@@ -1163,6 +1411,22 @@
       ctx.restore();
     }
 
+    // 立ち眩み（カゲの影縛りを受けた）：頭の上に回る星
+    function drawDizzy(state) {
+      for (const f of state.fighters) {
+        if (!f.dizzy) continue;
+        const x = f.x / C.SCALE;
+        const y = f.y / C.SCALE - SF.game.fighterHeight(f) - 14;
+        ctx.save();
+        ctx.fillStyle = "#ffd24d";
+        for (let k = 0; k < 3; k++) {
+          const a = state.frame * 0.18 + (k * Math.PI * 2) / 3;
+          circle(x + Math.cos(a) * 22, y + Math.sin(a) * 6, 4);
+        }
+        ctx.restore();
+      }
+    }
+
     // 飛び道具（飛刃）：差し色の三日月
     function drawProjectiles(state) {
       for (const p of state.projectiles) {
@@ -1225,6 +1489,34 @@
           ctx.restore();
           continue;
         }
+        if (owner.charId === "kage") {
+          // カゲ：影苦無（細い刃）と影球（斜め下へ飛ぶ影の玉）。体と同じ色で、縁だけ淡く光る。分身の飛び道具は少し透ける
+          const body = kageBody(accent);
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(Math.atan2(p.vy || 0, Math.abs(p.vx) || 1) * Math.sign(p.vx || 1));
+          ctx.scale(Math.sign(p.vx) || p.facing, 1);
+          ctx.globalAlpha = p.clone ? 0.6 : 1;
+          ctx.fillStyle = body;
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          if (p.move === "special") {
+            ctx.moveTo(p.w / 2, 0);
+            ctx.lineTo(-p.w / 6, -p.h / 2);
+            ctx.lineTo(-p.w / 2, 0);
+            ctx.lineTo(-p.w / 6, p.h / 2);
+          } else {
+            ctx.arc(0, 0, p.w / 2, 0, Math.PI * 2);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.globalAlpha *= 0.35;
+          ctx.fillRect(-p.w / 2 - 24, -2, 24, 4);
+          ctx.restore();
+          continue;
+        }
         if (owner.charId === "genma") {
           // 異空間弾：差し色に光る闇の玉。動く向きに尾を引く
           ctx.save();
@@ -1265,6 +1557,45 @@
     // 当たった火花（白とオレンジ）、ガードの火花（青白）、文字（投げ抜け）
     function drawEffects(state) {
       for (const e of state.effects) {
+        if (e.kind === "smoke") {
+          // 分身（カゲ）が出る・消える：影の煙が広がって消える
+          const t = 1 - e.life / 20;
+          const owner = state.fighters[e.owner];
+          const other = state.fighters[1 - e.owner];
+          const body = owner && other && e.owner === 1 && other.charId === owner.charId ? KAGE_BODY_MIRROR : KAGE_BODY;
+          ctx.save();
+          ctx.fillStyle = body;
+          ctx.globalAlpha = 0.6 * (1 - t);
+          for (let k = 0; k < 6; k++) {
+            const a = (k / 6) * Math.PI * 2 + t;
+            circle(e.x + Math.cos(a) * 30 * t, e.y + Math.sin(a) * 50 * t, 16 + 14 * t);
+          }
+          ctx.restore();
+          continue;
+        }
+        if (e.kind === "swap") {
+          // 入れ替え（カゲ）：入れ替わった2か所が一瞬光り、細い線で結ばれる
+          const t = e.life / 14;
+          ctx.save();
+          ctx.globalAlpha = t;
+          ctx.strokeStyle = "#e8e4ff";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 6]);
+          ctx.beginPath();
+          ctx.moveTo(e.x1, e.y);
+          ctx.lineTo(e.x2, e.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          for (const x of [e.x1, e.x2]) {
+            const g = ctx.createRadialGradient(x, e.y, 4, x, e.y, 90);
+            g.addColorStop(0, "rgba(232, 228, 255, 0.9)");
+            g.addColorStop(1, "rgba(232, 228, 255, 0)");
+            ctx.fillStyle = g;
+            ctx.fillRect(x - 90, e.y - 90, 180, 180);
+          }
+          ctx.restore();
+          continue;
+        }
         if (e.kind === "portal") {
           // 飛び道具が出てきた門が、少しの間残って閉じる
           const c = ACCENT[e.charId] || "#b25cff";
@@ -1365,7 +1696,7 @@
 
     // 当たり判定を見えるようにする（Hキー）。青＝やられる範囲、赤＝当たる範囲、緑＝投げの掴める範囲、黄色の点線＝影縫い範囲
     function drawBoxes(state) {
-      for (const f of state.fighters) {
+      for (const f of [...state.fighters, ...state.fighters.map((x) => x.clone).filter(Boolean)]) {
         for (const body of [SF.game.hurtbox(f), SF.game.limbHurtbox(f)]) {
           if (!body) continue;
           ctx.fillStyle = "rgba(60, 140, 255, 0.25)";
@@ -1821,11 +2152,11 @@
 
     // ---- メニュー（タイトル・モード選択・キャラ選択）と、試合の上に出す小さなメニュー ----
 
-    const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家", genma: "ワープと術で翻弄する悪役", gou: "近づいて投げる力自慢の大男", mukuro: "頭を外して挟み撃つゾンビ" };
+    const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家", genma: "ワープと術で翻弄する悪役", gou: "近づいて投げる力自慢の大男", mukuro: "頭を外して挟み撃つゾンビ", kage: "影に潜り分身で挟む隠しキャラ" };
     // キャラ一覧に出す短い説明
-    const CHAR_SHORT = { kagetsu: "飛び道具と対空", rin: "速さで攻める", genma: "離れて術で戦う", gou: "投げで大ダメージ", mukuro: "頭で有利を取る" };
+    const CHAR_SHORT = { kagetsu: "飛び道具と対空", rin: "速さで攻める", genma: "離れて術で戦う", gou: "投げで大ダメージ", mukuro: "頭で有利を取る", kage: "分身で表裏" };
     // 判子に使う1文字
-    const CHAR_SEAL = { kagetsu: "影", rin: "拳", genma: "冥", gou: "剛", mukuro: "骸" };
+    const CHAR_SEAL = { kagetsu: "影", rin: "拳", genma: "冥", gou: "剛", mukuro: "骸", kage: "朧" };
     const LEVEL_NOTE = ["はじめての人に", "慣れてきたら", "腕に自信がある人に", "対戦から学んだCPU"];
     const HINT_MENU = "↑↓：えらぶ　Enter：決定　Esc：もどる";
     const HINT_SELECT = "↑↓：項目をえらぶ　←→：変える　Enter：決定　Esc：もどる";
@@ -1849,9 +2180,36 @@
       return st;
     }
 
-    function drawTitle(tick) {
-      drawBackground();
+    // タイトル画面の真ん中に現れる影（隠しキャラ）。クリックできる範囲は main.js も使う
+    const TITLE_KAGE_BOX = { left: C.STAGE_WIDTH / 2 - 50, right: C.STAGE_WIDTH / 2 + 50, top: C.GROUND_Y - 190, bottom: C.GROUND_Y + 10 };
+    let titleKage = null;
+    function drawTitleKage(menu, sun, tick) {
+      // 日が半分ほど沈んだ頃から、うっすら浮かび上がる
+      const appear = Math.max(0, Math.min(1, (sun - 0.4) / 0.6));
+      if (appear <= 0) return;
+      if (!titleKage) {
+        titleKage = SF.game.createGame(1, ["kage", "kagetsu"]);
+        titleKage.fighters[0].x = (C.STAGE_WIDTH / 2) * C.SCALE;
+      }
+      titleKage.frame = tick;
+      const ready = SF.menu.kageReady(menu);
+      ctx.save();
+      ctx.globalAlpha = ready ? 0.5 + 0.15 * Math.sin(tick / 12) : menu.unlocked ? 0.6 * appear : 0.45 * appear * appear;
+      drawFighter(titleKage.fighters[0], 0, titleKage);
+      ctx.restore();
+      if (ready) {
+        ctx.save();
+        ctx.globalAlpha = 0.6 + 0.4 * Math.sin(tick / 12);
+        outlined("影をクリック（または Enter）", C.STAGE_WIDTH / 2, C.GROUND_Y + 30, 16, "#e8e4ff", "center", false);
+        ctx.restore();
+      }
+    }
+
+    function drawTitle(tick, menu) {
+      const sun = menu ? SF.menu.sunset(menu) : 0;
+      drawBackground(sun);
       drawPreview(["kagetsu", "rin"], [C.STAGE_WIDTH * 0.3, C.STAGE_WIDTH * 0.7], tick);
+      if (menu) drawTitleKage(menu, sun, tick);
       // 上を暗くして文字を読みやすく
       const shade = ctx.createLinearGradient(0, 0, 0, 290);
       shade.addColorStop(0, "rgba(10, 5, 20, 0.8)");
@@ -1878,6 +2236,15 @@
       ctx.restore();
       text(`ver ${C.VERSION}`, C.STAGE_WIDTH - 16, C.STAGE_HEIGHT - 22, 13, "rgba(243, 234, 216, 0.7)", "right", "normal");
       hint("（画面をクリックしてから操作してください）");
+      // 解禁した直後のお知らせ
+      if (menu && menu.unlockFlash > 0) {
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, menu.unlockFlash / 30);
+        inkPanel(C.STAGE_WIDTH / 2 - 210, 262, 420, 64, 0.85);
+        outlined("カゲが目覚めた", C.STAGE_WIDTH / 2, 284, 26, "#e8e4ff");
+        text("キャラ選択で 隠しキャラ「カゲ」を選べます", C.STAGE_WIDTH / 2, 312, 13, "#ffd8a0", "center", "normal");
+        ctx.restore();
+      }
     }
 
     function drawModeSelect(menu, tick) {
@@ -1937,7 +2304,7 @@
       heading("キャラと強さをえらぶ", 36, 28);
       text(mode.id === "training" ? "トレーニング" : `対戦：${SF.menu.VS_TYPES[p.type].label}`, C.STAGE_WIDTH / 2, 70, 13, "#ffd8a0", "center", "normal");
 
-      drawRoster(mode.id === "versus" && SF.menu.VS_TYPES[p.type].id === "cvc" ? "cvc" : "pvc", p, rows[menu.cursor], tick, 86);
+      drawRoster(mode.id === "versus" && SF.menu.VS_TYPES[p.type].id === "cvc" ? "cvc" : "pvc", p, rows[menu.cursor], tick, 86, SF.menu.charIds(menu));
 
       const w = 480;
       const x = (C.STAGE_WIDTH - w) / 2;
@@ -2010,12 +2377,11 @@
 
     // キャラ一覧：4人を大きなカードで並べて、今だれを選んでいるか（左右）を札で見せる。キャラの行を選んでいるときは、その側の枠を光らせる
     const rosterStates = {};
-    function drawRoster(kind, p, row, tick, top) {
-      const ids = Object.keys(CHARACTERS);
-      // 5人並んでも左右の名前と重ならない幅
-      const cw = ids.length > 4 ? 98 : 116;
+    function drawRoster(kind, p, row, tick, top, ids) {
+      // 5人・6人並んでも左右の名前と重ならない幅
+      const cw = ids.length > 5 ? 84 : ids.length > 4 ? 98 : 116;
       const ch = 136;
-      const gap = ids.length > 4 ? 6 : 10;
+      const gap = ids.length > 5 ? 5 : ids.length > 4 ? 6 : 10;
       const left = (C.STAGE_WIDTH - (ids.length * cw + (ids.length - 1) * gap)) / 2;
       const sideLabel = kind === "pvc" ? ["あなた", "相手"] : ["左", "右"];
       ids.forEach((id, k) => {
@@ -2067,7 +2433,7 @@
 
     function drawMenu(menu, tick) {
       ctx.textAlign = "left";
-      if (menu.screen === SF.menu.SCREEN.TITLE) drawTitle(tick);
+      if (menu.screen === SF.menu.SCREEN.TITLE) drawTitle(tick, menu);
       else if (menu.screen === SF.menu.SCREEN.MODE) drawModeSelect(menu, tick);
       else drawCharSelect(menu, tick);
       ctx.textAlign = "left";
@@ -2169,6 +2535,7 @@
       rin: "速い拳法家。突進拳は押してためて離す（最大ためで飛び道具をすり抜け、ガードされても+1）。前2回でダッシュ。練気は6秒間すべての攻撃がキャンセルできる。",
       genma: "術で戦う悪役。異空間弾は離れた所に開く門から出て、空中でも撃てる。前2回でワープ。ジャンプの頂上から押し続けると浮く。冥府球はガードされても押し続ける。",
       gou: "体力1300の投げの大男。張り手はリーチが長い。大張り手は1発だけ攻撃を受け止める（踏ん張り）。岩落とし・つかみ上げ・大地落としは投げ抜けできない。",
+      kage: "隠しキャラ。S＋O を押している間は地面の影に潜り（3F目から無敵・左右に動けて相手もすり抜ける）、O を離すと朧月、S を離すと攻撃せずに出る。投げの影縛りはダメージなしで立ち眩み（18F有利で連続技へ）。分身は相手の後ろに6秒出て同じ行動をする（ダメージ半分）。分身がいる間に I＋O で入れ替え（ガード中は不可）。",
       mukuro: "体力700のゾンビ。O で頭を転がし（下段）、相手の後ろに置く。頭が外れたら O で噛みつき（ガードされて+10）、S＋O で跳ね戻り（どちらも本人は止まらない）、I は中段の振り下ろし。自分が頭に重なると拾う。前2回の這い寄りは後ろでガード。大口は頭が離れていれば攻撃を受けている間も出せる。",
     };
     // 技の表に並べる順番と、出し方
@@ -2182,6 +2549,7 @@
       ["special", "{SPECIAL}"],
       ["airSpecial", "空中 {SPECIAL}"],
       ["crouchSpecial", "{DOWN}＋{SPECIAL}"],
+      ["airCrouchSpecial", "空中 {DOWN}＋{SPECIAL}"],
       ["throw", "{LIGHT}＋{HEAVY}"],
       ["headlessHeavy", "頭なし {HEAVY}"],
       ["headBite", "頭なし {SPECIAL}"],
@@ -2226,13 +2594,13 @@
         const name = m.name + (key === "super" ? "（ゲージ技）" : "");
         const vals = [
           name,
-          m.buff ? "−" : `${m.startup}F`,
-          m.buff || m.projectile ? "−" : `${m.active}F`,
+          (m.buff || m.clone) ? "−" : `${m.startup}F`,
+          (m.buff || m.clone) || m.projectile ? "−" : `${m.active}F`,
           m.recovery === null ? "着地まで" : `${m.recovery}F`,
-          isThrow || m.buff ? "−" : adv(m.hitAdv),
-          isThrow || m.buff ? "−" : adv(m.blockAdv),
+          isThrow || (m.buff || m.clone) ? "−" : adv(m.hitAdv),
+          isThrow || (m.buff || m.clone) ? "−" : adv(m.blockAdv),
           m.damage ? String(m.damage) : "−",
-          isThrow ? (m.noTech ? "投げ抜け不可" : "投げ抜け") : m.buff ? "−" : GUARD_LABEL[m.guard] || "",
+          isThrow ? (m.noTech ? "投げ抜け不可" : "投げ抜け") : (m.buff || m.clone) ? "−" : GUARD_LABEL[m.guard] || "",
         ];
         vals.forEach((v, k) => {
           const col = cols[k + 1];
@@ -2262,12 +2630,16 @@
       text("Enter：キーを変える", C.STAGE_WIDTH / 2, by + 20, 18, PAPER, "center", "bold", true);
     }
 
+    // 資料のページ。隠しキャラのページは解禁してから出す
+    let unlocked = false;
+    const libraryPages = () => LIBRARY_PAGES.filter((pg) => !pg.char || !CHARACTERS[pg.char].hidden || unlocked);
+
     function drawLibrary(page, tick) {
       drawBackground();
       dim(0.75);
       heading("資料", 30, 26);
       // ページの見出し（いま見ているページを朱で）
-      const pages = LIBRARY_PAGES;
+      const pages = libraryPages();
       setFont(13, "bold", true);
       const widths = pages.map((pg) => ctx.measureText(pg.title).width + 20);
       const total = widths.reduce((a, b) => a + b, 0) + (pages.length - 1) * 4;
@@ -2340,7 +2712,17 @@
           ctx.fillRect(0, 0, C.STAGE_WIDTH, C.STAGE_HEIGHT);
         }
         const order = state.superFreeze > 0 && state.superOwner >= 0 ? [1 - state.superOwner, state.superOwner] : [0, 1];
+        // 分身（カゲ）は本人より先に、少し透けて描く
+        order.forEach((i) => {
+          const c = state.fighters[i].clone;
+          if (!c) return;
+          ctx.save();
+          ctx.globalAlpha = c.timer < 60 && c.timer % 8 < 4 ? 0.3 : 0.6; // 消える前は点滅
+          drawFighter(c, i, state);
+          ctx.restore();
+        });
         order.forEach((i) => drawFighter(state.fighters[i], i, state));
+        drawDizzy(state);
         drawHeads(state);
         drawProjectiles(state);
         if (info.showBoxes) drawBoxes(state);
@@ -2355,7 +2737,12 @@
       drawMenu,
       drawKeyConfig,
       drawLibrary,
-      LIBRARY_PAGE_COUNT: LIBRARY_PAGES.length,
+      libraryPageCount: () => libraryPages().length,
+      TITLE_KAGE_BOX,
+      // 隠しキャラ（カゲ）を解禁したか（資料のページに出すか）
+      setUnlocked(v) {
+        unlocked = !!v;
+      },
       setBindings(b) {
         bindings = Object.assign({}, b);
       },

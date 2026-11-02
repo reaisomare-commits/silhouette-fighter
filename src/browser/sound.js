@@ -737,6 +737,7 @@
         } else if (e.kind === "block") play("block");
         else if (e.kind === "superName") play("superFlash");
         else if (e.kind === "portal") play("portal");
+        else if (e.kind === "swap" || e.kind === "smoke") play("warp");
         else if (e.kind === "text") {
           if (e.text.indexOf("投げ抜け") >= 0) play("tech");
           else if (e.text.indexOf("隙狩り") >= 0) play("counter");
@@ -748,7 +749,7 @@
       // 飛び道具が増えた（ゲンマのものは門の音で鳴らす）
       if (now.projectiles > prev.projectiles) {
         const p = state.projectiles[state.projectiles.length - 1];
-        if (p && state.fighters[p.owner] && state.fighters[p.owner].charId === "kagetsu") play("blade");
+        if (p && state.fighters[p.owner] && (state.fighters[p.owner].charId === "kagetsu" || state.fighters[p.owner].charId === "kage")) play("blade");
       }
 
       for (let i = 0; i < 2; i++) {
@@ -770,7 +771,7 @@
         if (a.pose !== b.pose) {
           if (b.pose === POSE.DOWN) play("down");
           else if (b.pose === POSE.THROW) play("grab");
-          else if (b.pose === POSE.WARP) play("warp");
+          else if (b.pose === POSE.WARP || b.pose === POSE.SHADOW) play("warp");
           else if (b.pose === POSE.STEP || b.pose === POSE.RUN || b.pose === POSE.BACKSTEP) play("dash");
         }
         if (a.onGround && !b.onGround && b.pose === POSE.JUMP) play("jump");

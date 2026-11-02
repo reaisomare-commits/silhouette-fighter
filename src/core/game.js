@@ -52,13 +52,14 @@
     THROW: "throw", // 相手を掴んでいる・投げている
     THROWN: "thrown", // 掴まれている（攻撃は当たらない。U＋Iで投げ抜け）
     TECH: "tech", // 投げ抜けして離れたところ（動けない）
+    SHADOW: "shadow", // 影潜り（カゲ）：地面の影に潜っている。潜り始めの少しあとから無敵
   });
 
   // 通常技（地上のU・I）か。必殺技キャンセル・連続技ができるのはこれだけ
   const GROUND_NORMALS = ["standLight", "standHeavy", "crouchLight", "crouchHeavy"];
   const isLightMove = (name) => name === "standLight" || name === "crouchLight";
   // 空中で出す技（1回のジャンプで1回だけ）
-  const isAirMove = (name) => name === "airLight" || name === "airHeavy" || name === "airSpecial";
+  const isAirMove = (name) => name === "airLight" || name === "airHeavy" || name === "airSpecial" || name === "airCrouchSpecial";
 
   // ラウンドの進み具合
   const PHASE = Object.freeze({
@@ -127,6 +128,11 @@
       superCatch: false, // 今出しているゲージ技（ゴウの大地落とし）が、暗転のあとで跳んだりよけたりした相手も掴むか（暗転したとき地上にいたか）
       armorUsed: false, // 今の技の踏ん張り（ゴウの大張り手）で、もう攻撃を受け止めたか（1回の技で1発だけ）
       head: null, // 外れている頭（ムクロ）。付いているときは null。{ state, x, y, vx, vy, timer, travel, dir, hit, stopX, queued }
+      dive: null, // 影潜りの最中（カゲ）。{ t: 潜ってからのフレーム, release: null・"attack"（朧月で出る）・"exit"（攻撃せずに出る） }
+      dizzy: false, // 立ち眩み中か（カゲの影縛りを受けた。描画用）
+      clone: null, // 分身（カゲのゲージ技）。いないときは null
+      swapCool: 0, // 分身と入れ替えたあと、次に入れ替えられるまでの残りフレーム
+      swapped: false, // このフレームで分身と入れ替えたか（分身がその分だけ動かないように）
     };
   }
 
@@ -221,9 +227,14 @@
   function record(state, f, name, field, amount = 1) {
     const log = state.log;
     if (!log || !name) return;
-    const side = log.moves[state.fighters.indexOf(f)];
+    const side = log.moves[sideOf(state, f)];
     const row = side[name] || (side[name] = { uses: 0, hits: 0, blocks: 0, techs: 0, damage: 0 });
     row[field] += amount;
+  }
+
+  // そのキャラが左右どちらか（0か1）。分身（カゲ）は、本人の側
+  function sideOf(state, f) {
+    return f.cloneOf !== undefined ? f.cloneOf : state.fighters.indexOf(f);
   }
 
   // chain＝連続技（通常技や必殺技からのつなぎ）として出したか
@@ -283,6 +294,7 @@
     }
     f.crouching = false;
     f.vx = 0;
+    if (m.clone) spawnClone(state, f, opp);
     startMove(state, f, "super", chain);
     // 暗転する前からガード（後ろ）を押していないと、ガードできない技（カゲツの月影斬）
     f.superGuardable = !m.guardBeforeFreeze || opp.holdBack;
@@ -292,7 +304,7 @@
 
   // 自分から動いているとみなす様子（歩く・走る・ステップ・バックステップ・ワープ・その止まり際・ジャンプ）。
   // 攻撃を受けて押された、ガードで下がった、相手に押された、などは数えない
-  const SELF_MOVE_POSES = new Set([POSE.WALK_FORWARD, POSE.GUARD_STAND, POSE.RUN, POSE.STEP, POSE.BACKSTEP, POSE.WARP, POSE.DASH_RECOVERY, POSE.JUMP]);
+  const SELF_MOVE_POSES = new Set([POSE.WALK_FORWARD, POSE.GUARD_STAND, POSE.RUN, POSE.STEP, POSE.BACKSTEP, POSE.WARP, POSE.DASH_RECOVERY, POSE.JUMP, POSE.SHADOW]);
   const BUSY_POSES = new Set([POSE.BLOCK, POSE.HIT, POSE.DOWN, POSE.LAUNCH, POSE.THROWN, POSE.TECH]);
 
   // 消極的な動きのペナルティと、積極的な動きのボーナス。
@@ -349,6 +361,18 @@
     return !!m.invincible && f.moveFrame <= m.invincible;
   }
 
+  // 影から飛び出す技（カゲの朧月）の出だしの無敵中か
+  function emergeInvincible(f) {
+    const m = moveData(f);
+    return !!(m && m.emergeInvincible && f.moveFrame <= m.emergeInvincible);
+  }
+
+  // 影潜り（カゲ）で無敵になっているか（潜り始めの少しあとから、出るまで）
+  function diveInvincible(f) {
+    if (f.action !== POSE.SHADOW || !f.dive) return false;
+    return f.dive.t >= CHARACTERS[f.charId].shadowDive.invincibleFrom;
+  }
+
   // 最大までためた技（リンの突進拳）を出しているか。ためている間に最大になったときから、技が終わるまで
   function fullCharge(f) {
     const m = moveData(f);
@@ -381,9 +405,9 @@
     return !!(f.grab && CHARACTERS[f.charId].moves[f.grab.move].noTech);
   }
 
-  // 自分の飛び道具がまだ画面にあるか（飛刃は画面に1つまで）
+  // 自分の飛び道具がまだ画面にあるか（飛刃は画面に1つまで）。分身（カゲ）の飛び道具は数えない
   function hasProjectile(state, f) {
-    return state.projectiles.some((p) => p.owner === state.fighters.indexOf(f));
+    return state.projectiles.some((p) => p.owner === state.fighters.indexOf(f) && !p.clone);
   }
 
   // Oで出る必殺技の名前。しゃがみながらなら S+O の技。出せないときは null
@@ -483,7 +507,8 @@
     const win = BATTLE.throwInputWindow;
     const both = (light && f.heavyAge <= win) || (heavy && f.lightAge <= win);
     // IとOを（ほぼ）同時に押したらゲージ技。ゲージが満タンでないときは、ふつうに強攻撃・必殺技として扱う
-    const superPress = gaugeFull(f) && CHARACTERS[f.charId].moves.super && ((heavy && f.specialAge <= win) || (special && f.heavyAge <= win));
+    //   分身（カゲ）がいる間は、ゲージがなくても I＋O で入れ替え
+    const superPress = (gaugeFull(f) || !!f.clone) && CHARACTERS[f.charId].moves.super && ((heavy && f.specialAge <= win) || (special && f.heavyAge <= win));
     if (superPress) {
       f.buffer = "super";
       f.heavyAge = 99;
@@ -524,6 +549,12 @@
     // 攻撃・ジャンプ・2回押しは先行入力として覚える（動けるならこのフレームですぐ出る）
     registerPresses(f, input);
     if (f.buffTimer > 0) f.buffTimer -= 1;
+    if (f.swapCool > 0) f.swapCool -= 1;
+    // 分身（カゲ）がいる間の I＋O は入れ替え。ガード中・攻撃を受けている間・投げている間はできない（入力は捨てる）
+    if (f.buffer === "super" && f.clone) {
+      f.buffer = null;
+      if (f.swapCool === 0 && f.stun === 0 && !f.grab && !BUSY_POSES.has(f.pose) && f.pose !== POSE.THROW) swapClone(state, f);
+    }
     // 頭から出るゲージ技（ムクロの大口）は、頭が離れていれば、本人が攻撃を受けている間も倒れている間も出せる
     if (f.buffer === "super" && headSuperReady(f)) {
       f.buffer = null;
@@ -570,6 +601,7 @@
       f.vx = 0;
       if (f.stun === 0) {
         f.pose = f.crouching ? POSE.CROUCH : POSE.STAND;
+        f.dizzy = false;
       }
     } else if (f.onGround && f.buffer === "super" && f.move && f.move !== "super") {
       // ゲージ技は、どんな技の途中でも（当たっていなくても、硬直中でも）キャンセルして出せる。
@@ -591,7 +623,7 @@
         startSuper(state, f, true);
       } else if (next) {
         f.crouching = next === "crouchLight" || next === "crouchHeavy";
-        startMove(state, f, next, true);
+        startSpecialMove(state, f, next, true);
       } else if (
         f.buffer === "throw" &&
         GROUND_NORMALS.includes(f.move) &&
@@ -624,6 +656,9 @@
         const speed = cur.lunge.speed + (cur.charge && f.move === "special" ? f.chargeFrames * cur.charge.speedPerFrame : 0);
         f.vx = f.facing * Math.trunc(speed * S);
       }
+    } else if (f.onGround && f.action === POSE.SHADOW) {
+      // 影潜り（カゲ）の最中
+      updateDive(state, f, input);
     } else if (f.onGround && f.action === POSE.STEP && whiffCancelTo(f, "step", down)) {
       // 踏み込みの最中から出せる技（ゴウの四股踏み）
       const next = whiffCancelTo(f, "step", down);
@@ -647,6 +682,16 @@
       f.moveFrame += 1;
       const m = moveData(f);
       if (m.projectile && f.moveFrame === m.startup) spawnProjectile(state, f, m);
+      // 斜め下へ飛び込む技（カゲの影落ち）：発生から着地まで、45度で同じ速さで進む
+      if (m.dive && f.moveFrame >= m.startup) {
+        const v = Math.round((m.dive.speed * S) / Math.SQRT2);
+        f.vx = f.facing * v;
+        f.vy = v;
+      }
+    } else if (wantAttack === "special" && down && !f.airAttackUsed && CHARACTERS[f.charId].moves.airCrouchSpecial) {
+      // 空中の S＋O（カゲの影落ち）。空中攻撃と合わせて1回のジャンプで1回
+      f.buffer = null;
+      startMove(state, f, "airCrouchSpecial");
     } else if ((wantAttack === "light" || wantAttack === "heavy" || wantAttack === "throw") && !f.airAttackUsed) {
       // 空中攻撃は1回のジャンプで1回だけ（空中でU＋Iは強攻撃になる）
       startMove(state, f, wantAttack === "light" ? "airLight" : "airHeavy");
@@ -706,7 +751,7 @@
         f.buffer = null;
         if (name) {
           f.crouching = false;
-          startMove(state, f, name);
+          startSpecialMove(state, f, name);
         } else {
           f.crouching = down;
           f.pose = down ? POSE.CROUCH : POSE.STAND;
@@ -755,7 +800,8 @@
     }
 
     // 空中では横の速さはそのまま、重力で落ちる。ガードはできない。浮いている間は落ちず、横の速さも遅くなる
-    if (!f.onGround && !f.floating) {
+    // 斜め下へ飛び込んでいる間（カゲの影落ち）は重力を受けない
+    if (!f.onGround && !f.floating && !diving(f)) {
       f.vy += st.gravity;
     }
 
@@ -776,9 +822,10 @@
       if (f.pose === POSE.LAUNCH) {
         knockDown(f);
       } else {
-        // 空中攻撃も着地で終わる
+        // 空中攻撃も着地で終わる。着地の硬直が長い技（カゲの影落ち）はその長さ
+        const lm = moveData(f);
         f.move = null;
-        f.landingTimer = st.landingLag;
+        f.landingTimer = lm && lm.landingLag ? lm.landingLag : st.landingLag;
         f.pose = POSE.LANDING;
       }
     }
@@ -926,7 +973,7 @@
 
   function hurtbox(f) {
     if (f.pose === POSE.DOWN || f.pose === POSE.LAUNCH || f.pose === POSE.THROWN) return null;
-    if (backstepInvincible(f) || stepInvincible(f) || f.action === POSE.WARP || superInvincible(f) || holdingSlam(f)) return null;
+    if (backstepInvincible(f) || stepInvincible(f) || f.action === POSE.WARP || superInvincible(f) || holdingSlam(f) || diveInvincible(f) || emergeInvincible(f)) return null;
     const w = CHARACTERS[f.charId].width;
     const x = f.x / S;
     const y = f.y / S;
@@ -1011,7 +1058,8 @@
   function spawnProjectile(state, f, m) {
     const pr = m.projectile;
     state.projectiles.push({
-      owner: state.fighters.indexOf(f),
+      owner: sideOf(state, f),
+      clone: f.cloneOf !== undefined, // 分身（カゲ）が撃った飛び道具（ダメージ半分）
       move: f.move,
       x: f.x + f.facing * pr.spawnX * S,
       y: f.y - pr.y * S,
@@ -1033,7 +1081,7 @@
     });
     // 異空間の門から出る飛び道具（ゲンマ）は、出た所に門の絵を少し残す（描画用）
     if (pr.portal) {
-      const i = state.fighters.indexOf(f);
+      const i = sideOf(state, f);
       const mirror = i === 1 && state.fighters[0].charId === f.charId;
       state.effects.push({ kind: "portal", charId: f.charId, mirror, x: (f.x + f.facing * pr.spawnX * S) / S, y: (f.y - pr.y * S) / S, h: pr.height, life: 16 });
     }
@@ -1375,6 +1423,233 @@
     }
   }
 
+
+  // ---- カゲ（影潜り・分身） ----
+
+  // 必殺技を出す。S＋O の技が影潜り（カゲ）なら、技ではなく潜り始める
+  function startSpecialMove(state, f, name, chain = false) {
+    if (name === "crouchSpecial" && CHARACTERS[f.charId].shadowDive) startDive(f);
+    else startMove(state, f, name, chain);
+  }
+
+  // 影潜りを始める：地面の影に潜る（潜り始めの少しあとから無敵）
+  function startDive(f) {
+    f.move = null;
+    f.buffer = null;
+    f.charging = false;
+    f.action = POSE.SHADOW;
+    f.pose = POSE.SHADOW;
+    f.dive = { t: 0, release: null };
+    f.vx = 0;
+    f.crouching = true;
+  }
+
+  // 影潜りを1フレーム進める。
+  //   O を離したら朧月で飛び出し、S を離したら攻撃せずに出る（潜り始めの間に離したら、潜り終わってから）。
+  //   潜っている間は左右のキーで動ける（相手もすり抜ける）。長く潜りすぎたら自動で朧月
+  function updateDive(state, f, input) {
+    const sd = CHARACTERS[f.charId].shadowDive;
+    const opp = state.fighters[1 - state.fighters.indexOf(f)];
+    const d = f.dive;
+    d.t += 1;
+    if (f.buffer !== "super") f.buffer = null; // 潜っている間に押した攻撃は出さない
+    if (!d.release) {
+      if (!isDown(input, BUTTON.SPECIAL)) d.release = "attack";
+      else if (!isDown(input, BUTTON.DOWN)) d.release = "exit";
+      else if (d.t >= sd.sink + sd.maxFrames) d.release = "attack";
+    }
+    if (d.t < sd.sink) {
+      f.vx = 0;
+      return;
+    }
+    if (d.release) {
+      // 出るときは相手の方を向く
+      f.facing = Math.sign(opp.x - f.x) || f.facing;
+      f.action = null;
+      f.dive = null;
+      f.crouching = false;
+      if (d.release === "attack") startMove(state, f, "crouchSpecial");
+      else startRecovery(f, sd.emerge, false);
+      return;
+    }
+    const right = isDown(input, BUTTON.RIGHT);
+    const left = isDown(input, BUTTON.LEFT);
+    const dir = right && !left ? 1 : left && !right ? -1 : 0;
+    f.vx = dir * Math.round(sd.speed * S);
+    f.facing = Math.sign(opp.x - f.x) || f.facing;
+  }
+
+  // 斜め下へ飛び込んでいる最中か（カゲの影落ち。重力を受けない）
+  function diving(f) {
+    const m = moveData(f);
+    return !!(m && m.dive && f.moveFrame >= m.startup && !f.onGround);
+  }
+
+  // 分身を出す：相手を挟んで反対側（今の影と相手の距離と同じだけ後ろ）。画面の外になるときは画面端
+  function spawnClone(state, f, opp) {
+    const i = state.fighters.indexOf(f);
+    const lim = stageLimits(f);
+    const x = Math.max(lim.min, Math.min(lim.max, opp.x + (opp.x - f.x)));
+    f.clone = {
+      cloneOf: i,
+      charId: f.charId,
+      x,
+      y: C.GROUND_Y * S,
+      vy: 0,
+      facing: Math.sign(opp.x - x) || -f.facing,
+      onGround: true,
+      pose: POSE.STAND,
+      crouching: false,
+      move: null,
+      moveFrame: 0,
+      moveHit: false,
+      lastMove: null,
+      lastFrame: 0,
+      action: null,
+      actionTimer: 0,
+      dive: null,
+      head: null,
+      grab: null,
+      floating: false,
+      gauge: 0, // 分身の攻撃で溜まったゲージ（影のゲージにはならない）
+      pushVx: 0,
+      timer: CHARACTERS[f.charId].clone.frames,
+    };
+    f.swapCool = 0;
+    state.effects.push({ kind: "smoke", x: x / S, y: C.GROUND_Y - CHARACTERS[f.charId].height / 2, owner: i, life: 20 });
+  }
+
+  // 分身を消す
+  function vanishClone(state, f) {
+    const c = f.clone;
+    if (!c) return;
+    state.effects.push({ kind: "smoke", x: c.x / S, y: c.y / S - fighterHeight(c) / 2, owner: c.cloneOf, life: 20 });
+    f.clone = null;
+  }
+
+  // 影と分身の位置を入れ替える。技の進み具合はそのまま（両方とも同じ行動をしているので途切れない）
+  function swapClone(state, f) {
+    const c = f.clone;
+    const i = state.fighters.indexOf(f);
+    const opp = state.fighters[1 - i];
+    const x = f.x;
+    f.x = c.x;
+    c.x = x;
+    f.facing = Math.sign(opp.x - f.x) || f.facing;
+    c.facing = Math.sign(opp.x - c.x) || c.facing;
+    f.swapCool = CHARACTERS[f.charId].clone.swapCooldown;
+    f.swapped = true;
+    state.effects.push({ kind: "swap", x1: c.x / S, x2: f.x / S, y: f.y / S - fighterHeight(f) / 2, owner: i, life: 14 });
+  }
+
+  // 分身を1フレーム進める（影が動いたあと）。preX は影が動く前の位置
+  //   ・影が自分で動ける（技・歩き・ジャンプ・影潜りなど）なら、同じ行動をする。前後の動きは「相手に向かう向き」で同じだけ
+  //   ・影が攻撃を受けている・ガードしている・倒れている・投げている間は、その場で止まって待つ
+  function updateClone(state, f, opp, preX) {
+    const c = f.clone;
+    if (!c) return;
+    c.timer -= 1;
+    if (c.timer <= 0) {
+      vanishClone(state, f);
+      return;
+    }
+    const busy = f.stun > 0 || !!f.grab || BUSY_POSES.has(f.pose) || f.pose === POSE.THROW;
+    if (busy) {
+      c.move = null;
+      c.action = null;
+      c.dive = null;
+      c.crouching = false;
+      if (!c.onGround) {
+        c.vy += toStats(c.charId).gravity;
+        c.y += c.vy;
+        if (c.y >= C.GROUND_Y * S) {
+          c.y = C.GROUND_Y * S;
+          c.vy = 0;
+          c.onGround = true;
+        }
+      }
+      c.pose = c.onGround ? POSE.STAND : POSE.JUMP;
+      c.lastMove = null;
+    } else {
+      if (f.move !== c.lastMove || f.moveFrame < c.lastFrame) c.moveHit = false;
+      c.lastMove = f.move;
+      c.lastFrame = f.moveFrame;
+      c.pose = f.pose;
+      c.move = f.move;
+      c.moveFrame = f.moveFrame;
+      c.crouching = f.crouching;
+      c.action = f.action;
+      c.actionTimer = f.actionTimer;
+      c.dive = f.dive ? { ...f.dive } : null;
+      c.onGround = f.onGround;
+      c.y = f.y;
+      c.vy = f.vy;
+      // 影が前に進んだ分だけ、分身も自分の前（相手の方）に進む
+      if (!f.swapped) c.x += (f.x - preX) * f.facing * c.facing;
+      // 向き：影が向き直れるとき・技を出した瞬間・潜っている間は、相手の方を向く
+      if (canTurn(f) || f.action === POSE.SHADOW || (f.move && f.moveFrame === 1)) c.facing = Math.sign(opp.x - c.x) || c.facing;
+      // 飛び道具も同じ時に撃つ（分身の飛び道具は画面に1つまで）
+      const m = moveData(c);
+      if (m && m.projectile && c.moveFrame === m.startup && !state.projectiles.some((p) => p.clone && p.owner === c.cloneOf)) spawnProjectile(state, c, m);
+    }
+    f.swapped = false;
+    c.x += c.pushVx;
+    c.pushVx = Math.trunc((c.pushVx * 4) / 5);
+    // 相手の体には重ならない（分身だけが押し戻される）。潜っている間はすり抜ける
+    if (c.action !== POSE.SHADOW && opp.action !== POSE.SHADOW) {
+      const cTop = c.y - Math.round(fighterHeight(c) * PUSH_HEIGHT_RATIO) * S;
+      const oTop = opp.y - Math.round(fighterHeight(opp) * PUSH_HEIGHT_RATIO) * S;
+      const minDist = ((CHARACTERS[c.charId].width + CHARACTERS[opp.charId].width) / 2) * S;
+      if (!(c.y <= oTop || opp.y <= cTop) && Math.abs(c.x - opp.x) < minDist) {
+        const side = Math.sign(c.x - opp.x) || -c.facing;
+        c.x = opp.x + side * minDist;
+      }
+    }
+    clampToStage(c);
+  }
+
+  // 分身の技：ダメージだけ影の damageRate %
+  function cloneMove(charId, name) {
+    const m = CHARACTERS[charId].moves[name];
+    return { ...m, damage: Math.floor((m.damage * CHARACTERS[charId].clone.damageRate) / 100) };
+  }
+
+  // 分身の飛び道具を撃った者（分身が消えていても当たるように、飛び道具から作る）
+  function cloneShooter(state, p) {
+    const owner = state.fighters[p.owner];
+    return { cloneOf: p.owner, charId: owner.charId, facing: p.facing, x: p.x, y: p.y, vy: 0, onGround: true, gauge: 0, pushVx: 0, move: p.move, moveFrame: 0 };
+  }
+
+  // 相手の攻撃・飛び道具が分身に当たったら、分身は消える（1発で消える）
+  function checkCloneHurt(state) {
+    for (let i = 0; i < 2; i++) {
+      const owner = state.fighters[i];
+      const c = owner.clone;
+      if (!c) continue;
+      const opp = state.fighters[1 - i];
+      const hbs = hurtboxes(c);
+      if (!hbs.length) continue;
+      let hit = false;
+      const strike = hitbox(opp);
+      if (strike && hbs.some((b) => overlap(strike, b))) {
+        opp.moveHit = true;
+        hit = true;
+      }
+      if (!hit) {
+        const p = state.projectiles.find((q) => q.owner === 1 - i && !q.dead && hbs.some((b) => overlap(projectileBox(q), b)));
+        if (p) {
+          if (!p.strong) p.dead = true;
+          hit = true;
+        }
+      }
+      if (hit) {
+        state.hitstop = Math.max(state.hitstop, BATTLE.hitstopBlock);
+        state.effects.push({ kind: "hit", x: c.x / S, y: c.y / S - fighterHeight(c) / 2, life: 14 });
+        vanishClone(state, owner);
+      }
+    }
+  }
+
   // 飛び道具を進める。画面の外に出たら消える。飛び道具同士がぶつかったら両方消える
   function moveProjectiles(state) {
     for (const p of state.projectiles) {
@@ -1473,6 +1748,8 @@
 
   // 空中にいるキャラが、あと何フレームで着地するか
   function framesUntilLanding(f) {
+    // 斜め下へ飛び込んでいる間（カゲの影落ち）は同じ速さで落ちる
+    if (diving(f) && f.vy > 0) return Math.ceil((C.GROUND_Y * S - f.y) / f.vy);
     const g = toStats(f.charId).gravity;
     let y = f.y;
     let vy = f.vy;
@@ -1503,7 +1780,7 @@
     def.health = Math.max(0, def.health - dmg);
     def.comboDamage += dmg;
     gaugeForDamage(state, att, def, before - def.health, name);
-    state.comboInfo[state.fighters.indexOf(att)] = { hits: def.combo, damage: def.comboDamage, timer: 90 };
+    state.comboInfo[sideOf(state, att)] = { hits: def.combo, damage: def.comboDamage, timer: 90 };
     return before - def.health; // 実際に減った体力（記録用。体力が0より下には減らない）
   }
 
@@ -1543,7 +1820,7 @@
       : air
         ? // 空中攻撃：着地の airHitLow フレーム前より低い所で当てたら表どおりの有利。
           // それより高い所（上りや頂上）で当てると、早く当てた分だけ有利が減る
-          Math.min(framesUntilLanding(att), BATTLE.airHitLow) + toStats(att.charId).landingLag
+          Math.min(framesUntilLanding(att), BATTLE.airHitLow) + (m.landingLag || toStats(att.charId).landingLag)
         : attackerRemaining(att, m);
     const dir = att.facing;
     // 火花は当たる範囲と体が重なった所の真ん中に出す
@@ -1585,6 +1862,8 @@
       releaseGrab(state, def);
       def.move = null;
       def.action = null;
+      def.dive = null;
+      def.dizzy = false;
       def.landingTimer = 0;
       def.buffer = null; // 当たる前の入力は捨てる（のけぞり中に押したものは出る）
       state.hitstop = Math.max(state.hitstop, BATTLE.hitstopHit);
@@ -1663,9 +1942,14 @@
       // つかみ上げ（ゴウ）の出だしは、空中の相手の攻撃が当たらない
       if (body && !att.onGround && airInvincible(def)) continue;
       if (body) hits.push({ att, def, m: moveData(att), box, body, p: null, rank: hitRank(att.move), name: att.move });
+      // 分身（カゲ）の攻撃：影の半分のダメージ
+      const c = att.clone;
+      const cbox = c && hitbox(c);
+      const cbody = cbox && touching(cbox, def);
+      if (cbody && !(!c.onGround && airInvincible(def))) hits.push({ att: c, def, m: cloneMove(c.charId, c.move), box: cbox, body: cbody, p: null, rank: hitRank(c.move), name: c.move });
     }
     for (const p of state.projectiles) {
-      const att = state.fighters[p.owner];
+      const att = p.clone ? cloneShooter(state, p) : state.fighters[p.owner];
       const def = state.fighters[1 - p.owner];
       // 最大までためた突進拳・ゴウの踏み込みや大地落としの出だしは、飛び道具をすり抜ける（飛び道具は消えずにそのまま飛ぶ）
       if (projectileImmune(def)) continue;
@@ -1674,18 +1958,19 @@
       // 何回も当たる飛び道具は、空中でやられている相手（ふつうは攻撃が当たらない）にも当たり続ける
       const juggled = p.strong && def.pose === POSE.LAUNCH ? launchBox(def) : null;
       const body = touching(box, def) || (juggled && overlap(box, juggled) ? juggled : null);
-      if (body) hits.push({ att, def, m: CHARACTERS[att.charId].moves[p.move], box, body, p, rank: hitRank(p.move), name: p.move });
+      if (body) hits.push({ att, def, m: p.clone ? cloneMove(att.charId, p.move) : CHARACTERS[att.charId].moves[p.move], box, body, p, rank: hitRank(p.move), name: p.move });
     }
     // 両方が当てていたら、相手より弱い方の当たりは消す
-    const best = [0, 1].map((i) => Math.max(-1, ...hits.filter((h) => h.att === state.fighters[i]).map((h) => h.rank)));
+    const best = [0, 1].map((i) => Math.max(-1, ...hits.filter((h) => sideOf(state, h.att) === i).map((h) => h.rank)));
     const win = hits.filter((h) => {
-      const other = best[1 - state.fighters.indexOf(h.att)];
+      const other = best[1 - sideOf(state, h.att)];
       return other < 0 || h.rank >= other;
     });
     for (const h of win) {
       applyHit(state, h.att, h.def, h.m, h.box, h.body, h.p, h.name);
       if (h.p && h.p.hitsLeft <= 0) h.p.dead = true;
     }
+    checkCloneHurt(state);
     state.projectiles = state.projectiles.filter((p) => !p.dead);
     checkHeadHits(state);
     checkThrows(state);
@@ -1742,6 +2027,7 @@
       def.pose = POSE.THROWN;
       def.move = null;
       def.action = null;
+      def.dive = null;
       def.landingTimer = 0;
       def.crouching = false;
       def.vx = 0;
@@ -1842,6 +2128,16 @@
     const damage = hl ? hl.throwDamage : m.damage;
     record(state, att, name, "damage", dealDamage(state, att, def, damage, def.punishedGrab, name));
     def.punishedGrab = false;
+    if (m.stagger) {
+      // 立ち眩み（カゲの影縛り）：倒さずに、その場でしばらく動けなくする。続く攻撃は連続技の2発目から数える
+      def.pose = POSE.HIT;
+      def.stun = m.stagger;
+      def.dizzy = true;
+      def.pushVx = (att.facing * 20 * S) / 5;
+      state.hitstop = Math.max(state.hitstop, BATTLE.hitstopHit);
+      state.effects.push({ kind: "text", text: "立ち眩み！", x: def.x / S, y: def.y / S - fighterHeight(def) - 30, life: 45 });
+      return;
+    }
     knockDown(def);
     def.pushVx = (att.facing * (m.noTech ? 30 : 60) * S) / 5;
     state.hitstop = Math.max(state.hitstop, BATTLE.hitstopHit);
@@ -1856,6 +2152,8 @@
   const PUSH_HEIGHT_RATIO = 0.6;
 
   function pushApart(a, b) {
+    // 影潜り（カゲ）の最中は相手をすり抜ける
+    if (a.action === POSE.SHADOW || b.action === POSE.SHADOW) return;
     const aTop = a.y - Math.round(fighterHeight(a) * PUSH_HEIGHT_RATIO) * S;
     const bTop = b.y - Math.round(fighterHeight(b) * PUSH_HEIGHT_RATIO) * S;
     if (a.y <= bTop || b.y <= aTop) return; // 上下が重なっていない
@@ -2020,10 +2318,15 @@
       const body = hurtbox(state.fighters[i]);
       state.fighters[i].pinned = !!(zone && body && overlap(zone, body));
     }
+    const preX = [a.x, b.x]; // 分身（カゲ）が、影の動いた分だけ動くため
     updateFighter(state, a, fighting ? inputs[0] | 0 : 0);
     updateFighter(state, b, fighting ? inputs[1] | 0 : 0);
     if (fighting) updateThrows(state);
     pushApart(a, b);
+    if (fighting) {
+      updateClone(state, a, b, preX[0]);
+      updateClone(state, b, a, preX[1]);
+    }
     moveProjectiles(state);
     if (fighting) state.fighters.forEach((f) => updateHead(state, f));
     if (fighting) checkHits(state);
@@ -2085,6 +2388,7 @@
     gaugeFull,
     GAUGE_FULL,
     superInvincible,
+    diveInvincible,
     cancelAllActive,
     fullCharge,
     comboRate,
