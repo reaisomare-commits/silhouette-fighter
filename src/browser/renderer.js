@@ -7,8 +7,8 @@
   const { CHARACTERS, BATTLE } = SF.characters;
 
   // 差し色：カゲツは刃が青、リンは鉢巻が赤。同じキャラ同士のときは右側を別の色にする
-  const ACCENT = { kagetsu: "#4da6ff", rin: "#ff4d4d", genma: "#b25cff", gou: "#ff8c2a" };
-  const ACCENT_MIRROR = { kagetsu: "#5cff8a", rin: "#ffd24d", genma: "#ff7ad9", gou: "#5fe0d0" };
+  const ACCENT = { kagetsu: "#4da6ff", rin: "#ff4d4d", genma: "#b25cff", gou: "#ff8c2a", mukuro: "#9ad84a" };
+  const ACCENT_MIRROR = { kagetsu: "#5cff8a", rin: "#ffd24d", genma: "#ff7ad9", gou: "#5fe0d0", mukuro: "#e0d24a" };
 
   // 画面まわりの色と文字（墨と朱）。明朝は Windows・Mac・Linux それぞれにある書体を順に探す
   const SHU = "#c42c1e"; // 朱
@@ -140,6 +140,19 @@
         limb(len * 0.12, -20, len * 0.5, -26, 18);
         ctx.fillStyle = accent;
         ctx.fillRect(len * 0.02, -34, 12, 34);
+        ctx.fillStyle = "#000";
+        return;
+      }
+      if (f.charId === "mukuro") {
+        // ムクロ：うつ伏せに崩れ落ちる。頭が外れていれば首の切り口だけ
+        const len = CHARACTERS.mukuro.height * 0.72;
+        limb(-len * 0.42, -10, len * 0.12, -10, 16);
+        if (!f.head) drawMukuroHead(-len * 0.42 - 14, -13, 14, accent, { dir: -1 });
+        limb(len * 0.12, -8, len * 0.55, -4, 10);
+        limb(len * 0.12, -12, len * 0.5, -16, 10);
+        limb(-len * 0.3, -12, -len * 0.05, -30, 8);
+        ctx.fillStyle = accent;
+        ctx.fillRect(len * 0.02, -18, 10, 16);
         ctx.fillStyle = "#000";
         return;
       }
@@ -531,6 +544,261 @@
       }
     }
 
+    // ムクロ：前かがみのゾンビ。細い手足を前に垂らし、ぼろ布（差し色）を腰に巻く。頭が外れていれば首の切り口だけ
+    function drawMukuro(f, state, o) {
+      const { p, crouching, guarding, hurt, throwFollow, atk, move, accent } = o;
+      const h = o.h;
+      const frame = state.frame;
+      const airborne = o.airborne;
+      const m = atk && atk.m;
+      const headless = !!f.head;
+      const headR = 14;
+      // 首伸ばしは首が上に伸びる。頭突きは頭を前へ突き出す
+      const neckUp = move === "crouchSpecial" ? 90 * Math.max(atk.ext, atk.rec ? 0 : atk.wind * 0.3) : 0;
+      const sway = Math.sin(frame * 0.12) * 3; // ふらふら揺れる
+      let lean = { [POSE.GUARD_STAND]: 2, [POSE.GUARD_CROUCH]: 2, [POSE.BLOCK]: 0, [POSE.WALK_FORWARD]: 14, [POSE.STEP]: 34, [POSE.BACKSTEP]: -4, [POSE.HIT]: -10, [POSE.LAUNCH]: -10, [POSE.THROWN]: -12, [POSE.TECH]: -10, [POSE.THROW]: 14 }[p];
+      if (lean === undefined) lean = 10 + sway;
+      if (atk) {
+        const fwd = { standLight: 18, standHeavy: 34, headlessHeavy: 20, crouchLight: 14, crouchHeavy: 24, special: 12, crouchSpecial: 0, throw: 16, super: -8, headBite: 14, headHop: 6 }[move] || 10;
+        lean = lerp(6 - 6 * atk.wind, fwd, atk.ext);
+        if (move === "headlessHeavy" && !atk.ext && !atk.rec) lean = -8 * atk.wind; // 両腕を振りかぶる間は反る
+      }
+      if (f.grab) lean = 18;
+      const topY = -h; // 体のいちばん上（頭があれば頭のてっぺん）
+      const shoulderY = headless ? topY + 14 : topY + headR * 2 + 4;
+      const hipY = airborne ? -h * 0.42 : crouching ? -h * 0.36 : p === POSE.STEP ? -h * 0.34 : -h * 0.45;
+      const legW = 11;
+      // 足：引きずるように歩く。這い寄りは低く前へ伸びる
+      if (airborne) {
+        limb(-6, hipY, -16, hipY + 22, legW);
+        limb(-16, hipY + 22, -6, hipY + 40, legW);
+        limb(6, hipY, 18, hipY + 20, legW);
+        limb(18, hipY + 20, 12, hipY + 38, legW);
+      } else if (move === "crouchHeavy" && atk) {
+        // 屍転がし：前の足を地面すれすれに投げ出す
+        limb(-6, hipY, -22, -16, legW);
+        limb(-22, -16, -16, 0, legW);
+        limb(6, hipY, lerp(24, 116, atk.ext), lerp(-14, -8, atk.ext), legW);
+      } else if (crouching) {
+        limb(-6, hipY, -22, -18, legW);
+        limb(-22, -18, -16, 0, legW);
+        limb(6, hipY, 22, -22, legW);
+        limb(22, -22, 20, 0, legW);
+      } else if (p === POSE.STEP) {
+        limb(-6, hipY, -40, -6, legW);
+        limb(6, hipY, 26, -18, legW);
+        limb(26, -18, 30, 0, legW);
+      } else {
+        const s = p === POSE.WALK_FORWARD || p === POSE.GUARD_STAND ? Math.sin(frame * 0.12) * 7 : 0;
+        limb(-6, hipY, -12 - s, -h * 0.22, legW);
+        limb(-12 - s, -h * 0.22, -16 - s, 0, legW);
+        limb(6, hipY, 12 + s, -h * 0.22, legW);
+        limb(12 + s, -h * 0.22, 18 + s * 0.5, 0, legW);
+      }
+      // 胴体：細く、前に曲がっている
+      const bodyW = o.w * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(lean - bodyW / 2, shoulderY);
+      ctx.lineTo(lean + bodyW / 2, shoulderY);
+      ctx.lineTo(bodyW / 2, hipY + 4);
+      ctx.lineTo(-bodyW / 2, hipY + 4);
+      ctx.closePath();
+      ctx.fill();
+      // 腰のぼろ布（差し色）：垂れた布が揺れる
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      ctx.moveTo(-bodyW / 2 - 2, hipY - 4);
+      ctx.lineTo(bodyW / 2 + 2, hipY - 4);
+      ctx.lineTo(bodyW / 2, hipY + 6);
+      ctx.lineTo(-4 + Math.sin(frame * 0.2) * 3, hipY + 26);
+      ctx.lineTo(-8, hipY + 8);
+      ctx.lineTo(-bodyW / 2 - 6 + Math.sin(frame * 0.17) * 3, hipY + 20);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#000";
+      // 頭（付いているとき）。頭突きは前へ、首伸ばしは上へ
+      if (!headless) {
+        const hx = lean + 6 + (move === "standHeavy" && atk ? 22 * atk.ext : 0) + (move === "crouchSpecial" ? 18 * (neckUp / 90) : 0);
+        const hy = topY + headR - neckUp;
+        if (neckUp > 4) limb(lean + 2, shoulderY, hx, hy + headR, 9);
+        drawMukuroHead(hx, hy, headR, accent, { open: move === "crouchSpecial" || move === "throw" || f.grab ? 1 : 0, dir: 1, frame });
+      } else {
+        // 首の切り口：短い首と、差し色の筋
+        limb(lean - 4, shoulderY + 2, lean + 4, shoulderY - 8, 10);
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(lean - 6, shoulderY - 6);
+        ctx.lineTo(lean + 8, shoulderY - 10);
+        ctx.stroke();
+        ctx.strokeStyle = "#000";
+      }
+      // 腕：細長い腕を前に垂らす（ゾンビの手つき）
+      const sh = { x: lean + 6, y: shoulderY + 8 };
+      const sh2 = { x: lean - 6, y: shoulderY + 10 };
+      let front = { x: lean + 44, y: shoulderY + 24 + sway };
+      let back = { x: lean + 36, y: shoulderY + 34 - sway };
+      if (f.grab) {
+        front = { x: lean + 46, y: shoulderY + 20 };
+        back = { x: lean + 40, y: shoulderY + 34 };
+      } else if (guarding) {
+        front = { x: lean + 24, y: shoulderY - 10 };
+        back = { x: lean + 30, y: shoulderY + 10 };
+      } else if (hurt) {
+        front = { x: lean - 22, y: shoulderY - 6 };
+        back = { x: lean - 26, y: shoulderY + 22 };
+      } else if (throwFollow) {
+        front = { x: lean + 50, y: shoulderY + 40 };
+        back = { x: lean + 44, y: shoulderY + 48 };
+      } else if (atk) {
+        const { wind, ext } = atk;
+        if (move === "standLight") {
+          front = { x: lean + lerp(40, m.hitbox.x2 - 6, ext), y: lerp(shoulderY + 24, -110, ext) };
+        } else if (move === "headlessHeavy") {
+          // 振り下ろし：両腕を頭の上に振り上げてから、前へ叩き下ろす
+          const up = { x: lean + 6, y: topY - 50 };
+          const down = { x: lean + m.hitbox.x2 - 14, y: -82 };
+          front = ext > 0 || atk.rec ? { x: lerp(up.x, down.x, Math.max(ext, atk.rec ? 1 : 0)), y: lerp(up.y, down.y, Math.max(ext, atk.rec ? 1 : 0)) } : { x: lerp(lean + 44, up.x, wind), y: lerp(shoulderY + 24, up.y, wind) };
+          back = { x: front.x - 10, y: front.y + 10 };
+        } else if (move === "crouchLight") {
+          front = { x: lean + lerp(40, m.hitbox.x2 - 6, ext), y: lerp(shoulderY + 30, -16, ext) };
+        } else if (move === "special") {
+          // 頭転がし：下手で後ろから前へ振る（発生で頭が手から離れる）
+          const t = ext > 0 || atk.rec ? 1 : wind;
+          front = { x: lean + lerp(-34, 46, t), y: lerp(shoulderY + 30, -24, t) };
+        } else if (move === "headBite" || move === "headHop" || move === "super") {
+          // 頭に合図する：腕を前へ突き出す（大口は両腕を広げて吠える）
+          front = move === "super" ? { x: lean + 30, y: topY - 20 } : { x: lean + 52, y: shoulderY + 4 };
+          back = move === "super" ? { x: lean - 20, y: topY - 10 } : back;
+        } else if (move === "throw") {
+          front = { x: lean + 50, y: shoulderY + 18 };
+          back = { x: lean + 44, y: shoulderY + 30 };
+        } else if (move === "airLight" || move === "airHeavy") {
+          front = { x: lean + lerp(30, move === "airHeavy" ? 80 : 60, ext), y: shoulderY + lerp(20, 54, ext) };
+        }
+      }
+      limb(sh2.x, sh2.y, back.x, back.y, 8);
+      limb(sh.x, sh.y, front.x, front.y, 9);
+      // 指（爪）
+      ctx.strokeStyle = "#000";
+      for (const hand of [front, back]) {
+        limb(hand.x, hand.y, hand.x + 8, hand.y + 4, 3);
+        limb(hand.x, hand.y, hand.x + 7, hand.y + 9, 3);
+      }
+      if (guarding) {
+        ctx.strokeStyle = p === POSE.BLOCK ? "rgba(160, 220, 255, 0.9)" : "rgba(255, 255, 255, 0.55)";
+        ctx.lineWidth = p === POSE.BLOCK ? 5 : 3;
+        ctx.beginPath();
+        const midY = crouching ? -h * 0.45 : -h * 0.6;
+        ctx.arc(o.w / 2 + 10, midY, h * 0.45, -0.8, 0.8);
+        ctx.stroke();
+      }
+    }
+
+    // ムクロの頭（体に付いていても外れていても同じ描き方）。open＝口の開き具合（0〜1）、dir＝向き、dizzy＝目が×（転がって動けない）
+    function drawMukuroHead(x, y, r, accent, { open = 0, dir = 1, frame = 0, dizzy = false, spin = 0 } = {}) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(spin);
+      ctx.scale(dir, 1);
+      ctx.fillStyle = "#000";
+      // 頭（少しいびつな丸）と、開く下あご
+      const jaw = open * 0.9;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, -Math.PI * 0.85 + jaw * 0.3, Math.PI * 0.15 - jaw * 0.5);
+      ctx.lineTo(0, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(0, 0, r, Math.PI * 0.15 + jaw * 0.25, Math.PI * 1.15);
+      ctx.lineTo(0, 0);
+      ctx.closePath();
+      ctx.fill();
+      // 乱れた髪
+      limb(-r * 0.6, -r * 0.8, -r * 1.3, -r * 1.2 + Math.sin(frame * 0.2) * 2, 3);
+      limb(-r * 0.2, -r, -r * 0.7, -r * 1.6, 3);
+      // 口を開けたら歯
+      if (jaw > 0.2) {
+        ctx.fillStyle = "#f3ead8";
+        for (let k = 0; k < 3; k++) {
+          ctx.beginPath();
+          ctx.moveTo(r * (0.35 + k * 0.2), r * 0.05);
+          ctx.lineTo(r * (0.42 + k * 0.2), r * 0.3);
+          ctx.lineTo(r * (0.49 + k * 0.2), r * 0.05);
+          ctx.fill();
+        }
+      }
+      // 目：差し色に光る。転がって動けないときは×
+      ctx.strokeStyle = accent;
+      ctx.fillStyle = accent;
+      if (dizzy) {
+        ctx.lineWidth = 2;
+        limb(r * 0.2, -r * 0.5, r * 0.6, -r * 0.1, 2);
+        limb(r * 0.6, -r * 0.5, r * 0.2, -r * 0.1, 2);
+      } else {
+        ctx.beginPath();
+        ctx.arc(r * 0.45, -r * 0.3, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+      ctx.fillStyle = "#000";
+      ctx.strokeStyle = "#000";
+    }
+
+    // 外れているムクロの頭を描く（体とは別に、地面の上・空中に）
+    function drawHeads(state) {
+      state.fighters.forEach((f, index) => {
+        const h = f.head;
+        if (!h || h.state === "super") return;
+        const other = state.fighters[1 - index];
+        const accent = index === 1 && other.charId === f.charId ? ACCENT_MIRROR[f.charId] : ACCENT[f.charId];
+        const size = CHARACTERS[f.charId].head.size;
+        const r = size / 2;
+        const x = h.x / C.SCALE;
+        const y = h.y / C.SCALE - r;
+        let opts = { dir: h.dir || f.facing, frame: state.frame };
+        if (h.state === "roll") opts.spin = (x / r) * (h.vx >= 0 ? 1 : -1);
+        if (h.state === "bite") opts = { ...opts, open: 1, spin: Math.atan2(h.vy, Math.abs(h.vx) || 1) * (h.dir || 1) };
+        if (h.state === "hop") opts = { ...opts, open: 1, spin: -0.9 * (h.dir || 1) };
+        if (h.state === "stunned") opts = { ...opts, dizzy: true, spin: Math.sin(state.frame * 0.3) * 0.4 + Math.PI * 0.5 };
+        // 地面の影
+        ctx.save();
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = "#000";
+        ctx.beginPath();
+        ctx.ellipse(x, C.GROUND_Y - 1, r * 1.1, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        // 跳ね戻り（無敵）の間は差し色の輪
+        if (h.state === "hop") {
+          ctx.save();
+          ctx.strokeStyle = accent;
+          ctx.globalAlpha = 0.6;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(x, y, r + 8, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+        // 転がって動けない間は、頭の上に回る星
+        if (h.state === "stunned") {
+          ctx.save();
+          ctx.fillStyle = "#ffd24d";
+          for (let k = 0; k < 3; k++) {
+            const a = state.frame * 0.15 + (k * Math.PI * 2) / 3;
+            ctx.beginPath();
+            ctx.arc(x + Math.cos(a) * 18, y - r - 8 + Math.sin(a) * 5, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+        // 噛んだあとで動けない間は少し薄く
+        if (h.state === "recover") ctx.globalAlpha = 0.85;
+        drawMukuroHead(x, y, r, accent, opts);
+        ctx.globalAlpha = 1;
+      });
+    }
+
     // キャラのシルエットを描く。
     // 足元を(0,0)、前（相手の方）を+x、上を-yとした向きで描き、左向きのときは左右反転する
     function drawFighter(f, index, state) {
@@ -611,6 +879,11 @@
       }
       if (f.charId === "gou") {
         drawGou(f, state, { h, w, p, crouching, guarding, hurt, throwFollow, airborne, atk, move, accent });
+        ctx.restore();
+        return;
+      }
+      if (f.charId === "mukuro") {
+        drawMukuro(f, state, { h, w, p, crouching, guarding, hurt, throwFollow, airborne, atk, move, accent });
         ctx.restore();
         return;
       }
@@ -895,6 +1168,59 @@
         const accent = p.owner === 1 && other.charId === owner.charId ? ACCENT_MIRROR[owner.charId] : ACCENT[owner.charId];
         const x = p.x / C.SCALE;
         const y = p.y / C.SCALE;
+        if (p.headSuper) {
+          // 大口（ムクロ）：床から天井まで届く大きな口。上あごと下あごが開いたり閉じたりする
+          const bite = (Math.sin(p.age * 0.9) + 1) / 2;
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.scale(p.facing, 1);
+          const hw = p.w / 2;
+          const hh = p.h / 2;
+          ctx.globalAlpha = 0.9;
+          ctx.fillStyle = "#000";
+          // 上あご
+          ctx.beginPath();
+          ctx.moveTo(-hw, -hh * 0.1 - bite * hh * 0.25);
+          ctx.quadraticCurveTo(-hw * 0.6, -hh * 1.05, hw, -hh * 0.7 - bite * hh * 0.25);
+          ctx.lineTo(hw * 0.9, -hh * 0.05 - bite * hh * 0.25);
+          ctx.closePath();
+          ctx.fill();
+          // 下あご
+          ctx.beginPath();
+          ctx.moveTo(-hw, hh * 0.1 + bite * hh * 0.25);
+          ctx.quadraticCurveTo(-hw * 0.6, hh * 1.0, hw, hh * 0.95);
+          ctx.lineTo(hw * 0.9, hh * 0.05 + bite * hh * 0.25);
+          ctx.closePath();
+          ctx.fill();
+          // 歯
+          ctx.fillStyle = "#f3ead8";
+          for (let k = 0; k < 5; k++) {
+            const tx = -hw * 0.5 + k * hw * 0.32;
+            const top = -hh * 0.1 - bite * hh * 0.25 + k * 6;
+            const bot = hh * 0.1 + bite * hh * 0.25 - k * 4;
+            ctx.beginPath();
+            ctx.moveTo(tx, top);
+            ctx.lineTo(tx + 8, top + 26);
+            ctx.lineTo(tx + 16, top);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(tx, bot);
+            ctx.lineTo(tx + 8, bot - 22);
+            ctx.lineTo(tx + 16, bot);
+            ctx.fill();
+          }
+          // 差し色の目と、口の中の光
+          ctx.fillStyle = accent;
+          ctx.beginPath();
+          ctx.arc(-hw * 0.2, -hh * 0.62, 9, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 0.25 + 0.2 * bite;
+          ctx.beginPath();
+          ctx.ellipse(hw * 0.1, 0, hw * 0.7, hh * 0.08 + bite * hh * 0.2, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          continue;
+        }
         if (owner.charId === "genma") {
           // 異空間弾：差し色に光る闇の玉。動く向きに尾を引く
           ctx.save();
@@ -1066,6 +1392,23 @@
           ctx.strokeStyle = "rgba(60, 230, 120, 1)";
           ctx.fillRect(grab.left, grab.top, grab.right - grab.left, grab.bottom - grab.top);
           ctx.strokeRect(grab.left, grab.top, grab.right - grab.left, grab.bottom - grab.top);
+        }
+      }
+      for (const f of state.fighters) {
+        // 外れている頭（ムクロ）：やられる範囲（青）と当たる範囲（赤）
+        const hb = SF.game.headHurtbox(f);
+        if (hb) {
+          ctx.fillStyle = "rgba(60, 140, 255, 0.25)";
+          ctx.strokeStyle = "rgba(60, 140, 255, 0.9)";
+          ctx.fillRect(hb.left, hb.top, hb.right - hb.left, hb.bottom - hb.top);
+          ctx.strokeRect(hb.left, hb.top, hb.right - hb.left, hb.bottom - hb.top);
+        }
+        const ha = SF.game.headHitbox(f);
+        if (ha) {
+          ctx.fillStyle = "rgba(255, 40, 40, 0.35)";
+          ctx.strokeStyle = "rgba(255, 40, 40, 1)";
+          ctx.fillRect(ha.left, ha.top, ha.right - ha.left, ha.bottom - ha.top);
+          ctx.strokeRect(ha.left, ha.top, ha.right - ha.left, ha.bottom - ha.top);
         }
       }
       for (const p of state.projectiles) {
@@ -1297,6 +1640,12 @@
       if (f.buffTimer > 0 && sup && sup.buff) note = `${sup.name} のこり${Math.ceil(f.buffTimer / C.FPS)}秒`;
       else if (full) note = `ゲージ技 ${keyOf(BUTTON.HEAVY)}＋${keyOf(BUTTON.SPECIAL)}`;
       if (note) outlined(note, i === 0 ? x : x + w, y - 12, 15, full ? "#ffcf6b" : PAPER, i === 0 ? "left" : "right", false);
+      // ムクロの頭の様子（ゲージの下）
+      if (CHARACTERS[f.charId].head) {
+        const hd = f.head;
+        const label = !hd ? "頭：付いている" : hd.state === "stunned" ? `頭：転がっている（あと${Math.ceil(hd.timer / C.FPS)}秒）` : hd.state === "recover" ? "頭：外れている（少し動けない）" : "頭：外れている";
+        outlined(label, i === 0 ? x + 28 : x + w - 28, y + h + 12, 12, hd && hd.state === "stunned" ? "#ff9a7a" : hd ? "#d8f0a0" : "rgba(243,234,216,0.7)", i === 0 ? "left" : "right", false);
+      }
     }
 
     // 体力の「減ったばかりの分」を朱で少し残してから縮める（どれだけ減ったか目で追えるように）
@@ -1468,11 +1817,11 @@
 
     // ---- メニュー（タイトル・モード選択・キャラ選択）と、試合の上に出す小さなメニュー ----
 
-    const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家", genma: "ワープと術で翻弄する悪役", gou: "近づいて投げる力自慢の大男" };
+    const CHAR_NOTE = { kagetsu: "リーチが長く一撃が重い剣士", rin: "速くて手数で攻める拳法家", genma: "ワープと術で翻弄する悪役", gou: "近づいて投げる力自慢の大男", mukuro: "頭を外して挟み撃つゾンビ" };
     // キャラ一覧に出す短い説明
-    const CHAR_SHORT = { kagetsu: "飛び道具と対空", rin: "速さで攻める", genma: "離れて術で戦う", gou: "投げで大ダメージ" };
+    const CHAR_SHORT = { kagetsu: "飛び道具と対空", rin: "速さで攻める", genma: "離れて術で戦う", gou: "投げで大ダメージ", mukuro: "頭で有利を取る" };
     // 判子に使う1文字
-    const CHAR_SEAL = { kagetsu: "影", rin: "拳", genma: "冥", gou: "剛" };
+    const CHAR_SEAL = { kagetsu: "影", rin: "拳", genma: "冥", gou: "剛", mukuro: "骸" };
     const LEVEL_NOTE = ["はじめての人に", "慣れてきたら", "腕に自信がある人に", "対戦から学んだCPU"];
     const HINT_MENU = "↑↓：えらぶ　Enter：決定　Esc：もどる";
     const HINT_SELECT = "↑↓：項目をえらぶ　←→：変える　Enter：決定　Esc：もどる";
@@ -1659,9 +2008,10 @@
     const rosterStates = {};
     function drawRoster(kind, p, row, tick, top) {
       const ids = Object.keys(CHARACTERS);
-      const cw = 116;
+      // 5人並んでも左右の名前と重ならない幅
+      const cw = ids.length > 4 ? 98 : 116;
       const ch = 136;
-      const gap = 10;
+      const gap = ids.length > 4 ? 6 : 10;
       const left = (C.STAGE_WIDTH - (ids.length * cw + (ids.length - 1) * gap)) / 2;
       const sideLabel = kind === "pvc" ? ["あなた", "相手"] : ["左", "右"];
       ids.forEach((id, k) => {
@@ -1815,6 +2165,7 @@
       rin: "速い拳法家。突進拳は押してためて離す（最大ためで飛び道具をすり抜け、ガードされても+1）。前2回でダッシュ。練気は6秒間すべての攻撃がキャンセルできる。",
       genma: "術で戦う悪役。異空間弾は離れた所に開く門から出て、空中でも撃てる。前2回でワープ。ジャンプの頂上から押し続けると浮く。冥府球はガードされても押し続ける。",
       gou: "体力1300の投げの大男。張り手はリーチが長い。大張り手は1発だけ攻撃を受け止める（踏ん張り）。岩落とし・つかみ上げ・大地落としは投げ抜けできない。",
+      mukuro: "体力700のゾンビ。O で頭を転がし（下段）、相手の後ろに置く。頭が外れたら O で噛みつき（ガードされて+10）、S＋O で跳ね戻り、I は中段の振り下ろし。自分が頭に重なると拾う。前2回の這い寄りは後ろでガード。大口は頭が離れていれば攻撃を受けている間も出せる。",
     };
     // 技の表に並べる順番と、出し方
     const MOVE_ORDER = [
@@ -1828,6 +2179,9 @@
       ["airSpecial", "空中 {SPECIAL}"],
       ["crouchSpecial", "{DOWN}＋{SPECIAL}"],
       ["throw", "{LIGHT}＋{HEAVY}"],
+      ["headlessHeavy", "頭なし {HEAVY}"],
+      ["headBite", "頭なし {SPECIAL}"],
+      ["headHop", "頭なし {DOWN}＋{SPECIAL}"],
       ["super", "{HEAVY}＋{SPECIAL}"],
     ];
     const GUARD_LABEL = { mid: "上下どちらでも", high: "中段（立ち）", low: "下段（しゃがみ）", air: "立ちガード" };
@@ -1983,6 +2337,7 @@
         }
         const order = state.superFreeze > 0 && state.superOwner >= 0 ? [1 - state.superOwner, state.superOwner] : [0, 1];
         order.forEach((i) => drawFighter(state.fighters[i], i, state));
+        drawHeads(state);
         drawProjectiles(state);
         if (info.showBoxes) drawBoxes(state);
         drawEffects(state);

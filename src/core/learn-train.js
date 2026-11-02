@@ -81,6 +81,18 @@
       { dist: [1], act: { heavy: 2, forward: 2, light: 1, special: 1 } },
       { dist: [0], act: { special: 4, throw: 1, light: 1 } },
     ],
+    // ムクロ：頭転がし（O）を相手の後ろに置き、噛みつき（頭が外れているときの O）をガードさせて有利を取ってから、
+    //   這い寄り（前2回）で近づいて振り下ろし（I・中段）・下段・投げで崩す。跳んできたら首伸ばし・跳ね戻り（S＋O）。
+    //   ゲージ技（大口）は、頭が離れていれば攻められている最中でも出せる（cpu.js）
+    mukuro: [
+      { gauge: true, opp: [2, 3, 4], dist: [0, 1, 2, 3, 4], act: { super: 3, special: 1 } },
+      { opp: [6], dist: [0, 1, 2, 3], act: { okiLow: 2, okiThrow: 2, okiStrike: 1, special: 1 } },
+      { opp: [5], dist: [0, 1, 2, 3], act: { crouchSpecial: 4, back: 1 } },
+      { opp: [1, 4], dist: [0, 1], act: { throw: 2, heavy: 2, crouchLight: 2 } },
+      { dist: [4, 5], act: { dash: 3, special: 2, forward: 1 } },
+      { dist: [2, 3], act: { special: 3, dash: 2, guardLow: 1 } },
+      { dist: [0, 1], act: { light: 2, crouchLight: 2, special: 1, throw: 1 } },
+    ],
   };
   const POLICY_GUIDE = 0.6; // 探検のとき、方針の行動から選ぶ割合
   const POLICY_PRIOR = 0.03; // 何も覚えていない表で、方針の行動の数字をどれだけ高くしておくか（いちばん重い行動がこの値）

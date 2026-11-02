@@ -233,6 +233,67 @@
         super: { name: "大地落とし", kind: "throw", noTech: true, catchAfterFreeze: true, startup: 3, active: 13, recovery: 70, damage: 320, hitbox: { x1: 0, x2: 70, y1: 0, y2: 180 }, lunge: { from: 2, to: 15, speed: 14 }, invincible: 16, projectileInvincible: 16, hold: 50, finish: 30 },
       },
     },
+    // ムクロ（骸）：頭を外して転がし、離れた頭と体の2か所から攻めるゾンビ。体力が少なく歩きも遅いが、這い寄り（前ステップ）がとても長い。
+    //   頭で攻撃をガードさせて有利を取り、中段（振り下ろし）・下段・投げの択で崩す
+    mukuro: {
+      name: "ムクロ",
+      width: 58,
+      height: 175,
+      crouchHeight: 108,
+      // 歩きはとても遅い（ゴウより遅い）
+      walkForward: 1.8,
+      walkBack: 1.5,
+      jumpVelocity: 13.4,
+      jumpForward: 3.6,
+      gravity: 0.8,
+      // → 高さ約112ピクセル。前ジャンプで約120ピクセル進む
+      landingLag: 4,
+      // 前を素早く2回：這い寄り（約160ピクセル）。guardCancel: 進んでいる間に後ろを押すと、その場で止まってガードになる
+      forwardDash: { type: "step", frames: 20, speed: 8, recovery: 6, guardCancel: true },
+      backDash: { frames: 12, speed: 5, recovery: 12, invincible: 6 }, // 約60ピクセル下がる
+      health: 700,
+      lightChainMax: 1,
+      // 頭が外れているときの体：背が低く（頭の分）、少し速く歩ける。投げのダメージが減る
+      headless: { height: 150, crouchHeight: 92, walkForward: 2.1, walkBack: 1.7, throwDamage: 110, throwName: "締めつけ" },
+      // 頭（本体とは別に動く2体目）の数値（ピクセル・フレーム）
+      //   size: 頭の大きさ（やられる範囲の一辺）
+      //   rollSpeed / rollDistance: 頭転がしの速さと、何にも当たらなかったときに転がる距離
+      //   behind / passBoost: 頭転がしが相手に当たる（ガードされる）と、passBoost 倍の速さで相手の足の下をすり抜け、背中からこの距離だけ後ろで止まる
+      //   biteSpeed / biteRange / biteSize / biteRecover: 噛みつきの飛ぶ速さ・届く距離・当たる範囲の大きさ・噛んだあと動けない時間
+      //   hopVelocity / hopDistance / hopSize / hopRecover: 跳ね戻りの跳ぶ速さ・ムクロの方へ寄る距離・当たる範囲の大きさ・着地してから動けない時間
+      //   stunFrames / knockback: 頭が攻撃を受けたら転がって動けない時間と、飛ばされる距離
+      //   pickup: ムクロ本人の体の端から、これだけの距離に頭があれば拾う（体に戻る）
+      head: { size: 30, rollSpeed: 8, rollDistance: 300, behind: 40, passBoost: 2, biteSpeed: 14, biteRange: 250, biteSize: 40, biteRecover: 30, hopVelocity: 13, hopDistance: 100, hopSize: 56, hopRecover: 20, stunFrames: 180, knockback: 40, pickup: 12 },
+      // ムクロだけの性質：
+      //   headRoll / headBite / headHop: 発生のフレームに、頭が転がる・噛みつく・跳ね戻る（体の技は合図だけで、当たる範囲を持たない）
+      //   頭の技の硬直差（hitAdv / blockAdv）は、ムクロ本人が動けるようになったときから数える（頭転がしは、頭が相手の後ろで止まったときから）
+      //   headSuper: ゲージ技は頭から出る飛び道具（頭が離れていれば、本人が攻撃を受けている間も倒れている間も出せる）
+      moves: {
+        standLight: { name: "腐れ爪", startup: 6, active: 2, recovery: 10, hitAdv: 3, blockAdv: 1, damage: 45, guard: "mid", hitbox: { x1: 15, x2: 80, y1: 80, y2: 135 }, push: 16 },
+        // 頭突き（頭が付いているときだけ）
+        standHeavy: { name: "頭突き", startup: 13, active: 3, recovery: 22, hitAdv: 2, blockAdv: -7, damage: 110, guard: "mid", hitbox: { x1: 20, x2: 105, y1: 120, y2: 175 }, push: 26 },
+        crouchLight: { name: "足元引っかき", startup: 7, active: 2, recovery: 11, hitAdv: 2, blockAdv: 0, damage: 40, guard: "low", hitbox: { x1: 15, x2: 95, y1: 0, y2: 35 }, push: 16 },
+        crouchHeavy: { name: "屍転がし", startup: 15, active: 3, recovery: 24, hitAdv: "down", blockAdv: -11, damage: 100, guard: "low", hitbox: { x1: 20, x2: 125, y1: 0, y2: 30 }, push: 22, noCancel: true },
+        airLight: { name: "空中攻撃（弱）", startup: 7, active: 6, recovery: null, hitAdv: 10, blockAdv: 3, damage: 35, guard: "air", hitbox: { x1: 0, x2: 70, y1: -15, y2: 55 }, push: 10 },
+        airHeavy: { name: "空中攻撃（強）", startup: 11, active: 6, recovery: null, hitAdv: 14, blockAdv: 4, damage: 90, guard: "air", hitbox: { x1: -5, x2: 92, y1: -25, y2: 50 }, push: 14 },
+        // 頭転がし（頭が付いているとき O）：頭を下手で地面に転がす。下段。当たってもガードされても、頭は相手をすり抜けて背中の後ろで止まる
+        special: { name: "頭転がし", kind: "special", startup: 12, active: 1, recovery: 16, hitAdv: 12, blockAdv: 8, damage: 50, guard: "low", hitbox: null, hurtExtend: { x1: 0, x2: 40, y1: 60, y2: 120 }, push: 0, headRoll: true },
+        // 首伸ばし（頭が付いているとき S＋O）：首が上に伸びて噛みつく対空技
+        crouchSpecial: { name: "首伸ばし", kind: "special", startup: 9, active: 5, recovery: 26, hitAdv: "down", blockAdv: -20, damage: 90, guard: "mid", hitbox: { x1: -10, x2: 60, y1: 120, y2: 265 }, hurtExtend: { x1: 0, x2: 40, y1: 120, y2: 230 }, push: 14 },
+        // 投げ：噛みちぎり（頭が外れているときは締めつけ、ダメージは headless.throwDamage）
+        throw: { name: "噛みちぎり", kind: "throw", startup: 5, active: 2, recovery: 22, damage: 125, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 } },
+        // ---- 頭が外れているときの技 ----
+        // 振り下ろし（I）：頭のない体で両腕を振り下ろす中段
+        headlessHeavy: { name: "振り下ろし", startup: 16, active: 3, recovery: 20, hitAdv: 2, blockAdv: -6, damage: 90, guard: "high", hitbox: { x1: 15, x2: 100, y1: 60, y2: 150 }, push: 24 },
+        // 噛みつき（O）：頭がいる所から相手に飛びかかって噛む。ガードさせて大きく有利
+        headBite: { name: "噛みつき", kind: "special", startup: 3, active: 1, recovery: 8, hitAdv: 14, blockAdv: 10, damage: 60, guard: "mid", hitbox: null, push: 0, headBite: true },
+        // 跳ね戻り（S＋O）：頭がその場で跳ねながらムクロの方へ寄る対空技。跳ねている間、頭は無敵
+        headHop: { name: "跳ね戻り", kind: "special", startup: 3, active: 1, recovery: 10, hitAdv: "down", blockAdv: 2, damage: 70, guard: "mid", hitbox: null, push: 0, headHop: true },
+        // ゲージ技「大口」：頭が大きく膨らみ、床から天井まで届く大きな口で相手に向かって進み、6回噛みつく（ジャンプでかわせない）。
+        //   頭が付いていれば体の前から、外れていれば頭のいる所から出る
+        super: { name: "大口", kind: "special", startup: 1, active: 1, recovery: 30, hitAdv: "down", blockAdv: -12, damage: 52, guard: "mid", hitbox: null, push: 10, headSuper: true, projectile: { speed: 6, width: 110, height: 330, multi: { hits: 6, interval: 7, hitAdv: 0, push: 12, airLift: 2 } } },
+      },
+    },
   };
 
   // 方向キーを2回押したとみなす間隔（1回目を押してから何フレーム以内に2回目を押すか）

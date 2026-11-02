@@ -126,6 +126,7 @@
       superGuardable: true, // 今出しているゲージ技を、相手がガードできるか（暗転する前からガードを押していたか）
       superCatch: false, // 今出しているゲージ技（ゴウの大地落とし）が、暗転のあとで跳んだりよけたりした相手も掴むか（暗転したとき地上にいたか）
       armorUsed: false, // 今の技の踏ん張り（ゴウの大張り手）で、もう攻撃を受け止めたか（1回の技で1発だけ）
+      head: null, // 外れている頭（ムクロ）。付いているときは null。{ state, x, y, vx, vy, timer, travel, dir, hit, stopX, queued }
     };
   }
 
@@ -265,6 +266,10 @@
     state.superFreeze = BATTLE.superFreeze;
     state.superOwner = i;
     state.effects.push({ kind: "superName", owner: i, text: m.name, life: BATTLE.superFreeze + 30 });
+    if (m.headSuper) {
+      startHeadSuper(state, f, opp, m, chain);
+      return;
+    }
     if (m.buff) {
       // 強くなる技（リンの練気）：構えはなく、暗転が終わったらすぐ動ける。出しかけの技やためも取り消す
       record(state, f, "super", "uses");
@@ -383,6 +388,7 @@
 
   // Oで出る必殺技の名前。しゃがみながらなら S+O の技。出せないときは null
   function specialName(state, f, down) {
+    if (f.head) return headSpecialName(f, down);
     const name = down ? "crouchSpecial" : "special";
     const m = CHARACTERS[f.charId].moves[name];
     if (!m) return null;
@@ -404,7 +410,7 @@
     if (b === "super" && CHARACTERS[f.charId].moves.super) return "super";
     if (b === "special") return specialName(state, f, down);
     if (!isLightMove(f.move)) return null;
-    if (b === "heavy") return down ? "crouchHeavy" : "standHeavy";
+    if (b === "heavy") return variantMove(f, down ? "crouchHeavy" : "standHeavy");
     if (b === "light" && f.chainLights < CHARACTERS[f.charId].lightChainMax) {
       return down ? "crouchLight" : "standLight";
     }
@@ -497,6 +503,12 @@
 
   function updateFighter(state, f, input) {
     const st = toStats(f.charId);
+    // 頭が外れている体（ムクロ）は少し速く歩ける
+    const hl = f.head && CHARACTERS[f.charId].headless;
+    if (hl) {
+      st.walkForward = Math.round(hl.walkForward * S);
+      st.walkBack = Math.round(hl.walkBack * S);
+    }
     // 「前」と「後ろ」は向きで決まる。後ろ＝相手と反対の方向
     const forwardBtn = f.facing === 1 ? BUTTON.RIGHT : BUTTON.LEFT;
     const backBtn = f.facing === 1 ? BUTTON.LEFT : BUTTON.RIGHT;
@@ -512,6 +524,11 @@
     // 攻撃・ジャンプ・2回押しは先行入力として覚える（動けるならこのフレームですぐ出る）
     registerPresses(f, input);
     if (f.buffTimer > 0) f.buffTimer -= 1;
+    // 頭から出るゲージ技（ムクロの大口）は、頭が離れていれば、本人が攻撃を受けている間も倒れている間も出せる
+    if (f.buffer === "super" && headSuperReady(f)) {
+      f.buffer = null;
+      startSuper(state, f, !!f.move);
+    }
     const wantAttack = ["light", "heavy", "special", "throw", "super"].includes(f.buffer) ? f.buffer : null;
     const wantJump = f.buffer === "jump";
     const doubleForward = f.buffer === "dashForward";
@@ -585,6 +602,8 @@
       } else {
         f.moveFrame += 1;
         if (m.projectile && f.moveFrame === m.startup) spawnProjectile(state, f, m);
+        // 頭の技（ムクロ）：発生のフレームに頭が動き出す
+        if (f.moveFrame === m.startup) startHeadMove(state, f, m);
         // 地面を揺らす技：当たる時間の始めに、地面を伝う衝撃を出す（見た目だけ）
         if (m.shockwave && f.moveFrame === m.startup) state.effects.push({ kind: "quake", x: f.x / S, owner: state.fighters.indexOf(f), facing: f.facing, back: SF.constants.STAGE_WIDTH, reach: SF.constants.STAGE_WIDTH, life: 30, max: 30 });
       }
@@ -604,7 +623,7 @@
       startMove(state, f, next, true);
     } else if (f.onGround && f.action) {
       // ステップ・ダッシュ・バックステップの最中
-      updateAction(f, st, { forward, down, jump: wantJump });
+      updateAction(f, st, { forward, back, down, jump: wantJump });
     } else if (f.onGround) {
       groundControl();
     } else if (f.buffer === "super" && CHARACTERS[f.charId].moves.super && CHARACTERS[f.charId].moves.super.buff) {
@@ -686,7 +705,7 @@
         // しゃがみながら押すとしゃがみ技
         f.vx = 0;
         f.crouching = down;
-        const name = (down ? "crouch" : "stand") + (wantAttack === "heavy" ? "Heavy" : "Light");
+        const name = variantMove(f, (down ? "crouch" : "stand") + (wantAttack === "heavy" ? "Heavy" : "Light"));
         startMove(state, f, name);
       } else if ((doubleForward || doubleBack) && down) {
         // しゃがんでいるときはステップ類は出ない（覚えていた入力は捨てる）
@@ -794,7 +813,15 @@
 
   // ステップ・ダッシュ・バックステップを1フレーム進める。
   // 途中でガードや向きの切り替えはできない（ダッシュ中のジャンプだけはできる）
-  function updateAction(f, st, { forward, down, jump }) {
+  function updateAction(f, st, { forward, back, down, jump }) {
+    // 這い寄り（ムクロ）：進んでいる間に後ろを押すと、その場で止まってガードになる
+    if (f.action === POSE.STEP && st.forwardDash.guardCancel && back) {
+      f.action = null;
+      f.vx = 0;
+      f.crouching = down;
+      f.pose = down ? POSE.GUARD_CROUCH : POSE.GUARD_STAND;
+      return;
+    }
     if (f.action === POSE.WARP) {
       // 消えている間は動かない。時間が来たら distance だけ先（後ろ）に現れる。相手の体は通り抜ける
       f.vx = 0;
@@ -864,7 +891,9 @@
     if (f.pose === POSE.DOWN) return DOWN_HEIGHT;
     // 四股踏み（しゃがみ強だが、足を振り上げて立っている）は立っている高さ
     if (f.move && c.moves[f.move] && c.moves[f.move].shockwave) return c.height;
-    return f.crouching ? c.crouchHeight : c.height;
+    // 頭が外れている体（ムクロ）は頭の分だけ背が低い
+    const body = f.head && c.headless ? c.headless : c;
+    return f.crouching ? body.crouchHeight : body.height;
   }
 
   // やられる範囲（体）。ピクセルの四角 { left, right, top, bottom }。攻撃が当たらない状態なら null
@@ -997,6 +1026,325 @@
       const i = state.fighters.indexOf(f);
       const mirror = i === 1 && state.fighters[0].charId === f.charId;
       state.effects.push({ kind: "portal", charId: f.charId, mirror, x: (f.x + f.facing * pr.spawnX * S) / S, y: (f.y - pr.y * S) / S, h: pr.height, life: 16 });
+    }
+  }
+
+  // ---- ムクロの頭（本体とは別に動く2体目） ----
+  //   頭の様子（head.state）：
+  //     roll＝転がっている（頭転がし）、rest＝地面に置いてある、bite＝噛みつきで飛んでいる、hop＝跳ね戻りで跳ねている（無敵）、
+  //     recover＝噛みつき・跳ね戻りのあと動けない、stunned＝攻撃を受けて転がって動けない、super＝ゲージ技（大口）の飛び道具になっている
+  //   頭が攻撃を受けるのは rest と recover のときだけ。ムクロ本人が rest・recover・stunned の頭に重なると拾う（体に戻る）
+  const headSpec = (f) => CHARACTERS[f.charId].head;
+  const HEAD_HITTABLE = ["rest", "recover"];
+  const HEAD_PICKABLE = ["rest", "recover", "stunned"];
+
+  // 頭が外れているときに変わる技（ムクロの I は振り下ろし）
+  function variantMove(f, name) {
+    if (f.head && name === "standHeavy" && CHARACTERS[f.charId].moves.headlessHeavy) return "headlessHeavy";
+    return name;
+  }
+
+  // 頭が外れているときの O・S＋O：噛みつき・跳ね戻り。頭が地面に置いてあるときだけ出せる。
+  // 頭が転がっている最中に O を押したら、止まった瞬間に噛みつく（先行入力）
+  function headSpecialName(f, down) {
+    const h = f.head;
+    if (h.state === "rest") return down ? "headHop" : "headBite";
+    if (h.state === "roll" && !down) h.queued = "bite";
+    return null;
+  }
+
+  // 頭から出すゲージ技を、本人の様子に関係なく出せるか（頭が離れていて、攻撃を受けて転がっていない）
+  function headSuperReady(f) {
+    const sup = CHARACTERS[f.charId].moves.super;
+    return !!(sup && sup.headSuper && f.head && f.head.state !== "stunned" && f.head.state !== "super" && gaugeFull(f));
+  }
+
+  function restY() {
+    return C.GROUND_Y * S;
+  }
+  // 頭の位置（足元＝地面に置いたときの下の端）から、ピクセルの四角を作る
+  function headRect(h, size) {
+    const x = h.x / S;
+    const y = h.y / S;
+    return { left: x - size / 2, right: x + size / 2, top: y - size, bottom: y };
+  }
+  // 頭のやられる範囲。攻撃が当たらないときは null
+  function headHurtbox(f) {
+    if (!f.head || !HEAD_HITTABLE.includes(f.head.state)) return null;
+    return headRect(f.head, headSpec(f).size);
+  }
+  // 頭の当たる範囲。当たらないときは null
+  function headHitbox(f) {
+    const h = f.head;
+    if (!h || h.hit) return null;
+    const hs = headSpec(f);
+    if (h.state === "roll") return headRect(h, hs.size);
+    if (h.state === "bite") return headRect(h, hs.biteSize);
+    if (h.state === "hop") {
+      // 跳ねながら上へ噛みつく：頭の上に長い
+      const r = headRect(h, hs.hopSize);
+      return { ...r, top: r.top - 50 };
+    }
+    return null;
+  }
+  function headLimits(f) {
+    const half = headSpec(f).size / 2;
+    return { min: (C.STAGE_MARGIN + half) * S, max: (C.STAGE_WIDTH - C.STAGE_MARGIN - half) * S };
+  }
+  function newHead(f, state, x) {
+    return { state, x, y: restY(), vx: 0, vy: 0, timer: 0, travel: 0, dir: f.facing, hit: false, stopX: null, queued: null };
+  }
+
+  // 体の技の発生のフレームに、頭を動かす
+  function startHeadMove(state, f, m) {
+    const hs = headSpec(f);
+    if (!hs) return;
+    const opp = state.fighters[1 - state.fighters.indexOf(f)];
+    if (m.headRoll && !f.head) {
+      // 頭転がし：体の前の地面に頭を置いて、前へ転がす
+      f.head = newHead(f, "roll", f.x + f.facing * (CHARACTERS[f.charId].width / 2 + hs.size / 2) * S);
+      f.head.vx = f.facing * hs.rollSpeed * S;
+    } else if (m.headBite && f.head && f.head.state === "rest") {
+      startBite(f, opp);
+    } else if (m.headHop && f.head && f.head.state === "rest") {
+      // 跳ね戻り：上へ跳ねながらムクロの方へ寄る（跳んでいる時間で hopDistance だけ進む）
+      const h = f.head;
+      const g = toStats(f.charId).gravity;
+      const air = Math.max(1, Math.round((2 * hs.hopVelocity * S) / g));
+      const toward = Math.sign(f.x - h.x);
+      h.state = "hop";
+      h.hit = false;
+      h.vy = -hs.hopVelocity * S;
+      h.vx = toward * Math.round((hs.hopDistance * S) / air);
+      h.dir = toward || f.facing;
+    }
+  }
+
+  // 噛みつき：今いる所から、相手の体の真ん中へまっすぐ飛ぶ
+  function startBite(f, opp) {
+    const hs = headSpec(f);
+    const h = f.head;
+    const tx = opp.x;
+    const ty = opp.y - Math.round((fighterHeight(opp) / 2 - hs.biteSize / 2) * S);
+    const dx = tx - h.x;
+    const dy = ty - h.y;
+    const len = Math.max(1, Math.hypot(dx, dy));
+    h.state = "bite";
+    h.hit = false;
+    h.travel = 0;
+    h.queued = null;
+    h.vx = Math.round((dx / len) * hs.biteSpeed * S);
+    h.vy = Math.round((dy / len) * hs.biteSpeed * S);
+    h.dir = Math.sign(dx) || f.facing;
+  }
+
+  // 頭のゲージ技（ムクロの大口）：頭（付いていれば体の前）から、大きな口の飛び道具を相手に向かって出す
+  function startHeadSuper(state, f, opp, m, chain) {
+    const i = state.fighters.indexOf(f);
+    const pr = m.projectile;
+    const fromBody = !f.head;
+    const x = fromBody ? f.x + f.facing * 40 * S : f.head.x;
+    const dir = Math.sign(opp.x - x) || f.facing;
+    f.head = newHead(f, "super", x);
+    f.head.dir = dir;
+    state.projectiles.push({
+      owner: i,
+      move: "super",
+      x,
+      y: (C.GROUND_Y - pr.height / 2) * S,
+      hitsLeft: pr.multi.hits,
+      cooldown: 0,
+      strong: true,
+      vx: dir * pr.speed * S,
+      vy: 0,
+      homing: null,
+      speed: pr.speed * S,
+      turning: false,
+      turned: false,
+      vanishOnHit: false,
+      facing: dir,
+      w: pr.width,
+      h: pr.height,
+      age: 0,
+      headSuper: true,
+    });
+    // 体：のけぞり・ガード硬直はその場で終わる。倒れている・掴まれている・空中のときは体はそのまま（頭だけで出す）
+    if (f.stun > 0 && (f.pose === POSE.HIT || f.pose === POSE.BLOCK)) {
+      f.stun = 0;
+      f.pose = POSE.STAND;
+    }
+    const bodyFree = f.onGround && f.stun === 0 && f.pose !== POSE.DOWN && f.pose !== POSE.THROWN && f.pose !== POSE.LAUNCH && !f.grab;
+    if (bodyFree) {
+      f.crouching = false;
+      f.vx = 0;
+      f.action = null;
+      startMove(state, f, "super", chain);
+    } else {
+      record(state, f, "super", "uses");
+    }
+  }
+
+  // 頭を1フレーム進める
+  function updateHead(state, f) {
+    const h = f.head;
+    if (!h) return;
+    const hs = headSpec(f);
+    const g = toStats(f.charId).gravity;
+    const lim = headLimits(f);
+    const opp = state.fighters[1 - state.fighters.indexOf(f)];
+    const fall = () => {
+      if (h.y < restY()) {
+        h.vy += g;
+        h.y = Math.min(restY(), h.y + h.vy);
+      }
+      if (h.y >= restY()) {
+        h.y = restY();
+        h.vy = 0;
+      }
+    };
+    if (h.state === "roll") {
+      h.x += h.vx;
+      h.travel += Math.abs(h.vx);
+      let stop = h.travel >= hs.rollDistance * S;
+      // 当たった（ガードされた）あとは、相手の背中の後ろで止まる
+      if (h.stopX !== null && (h.x - h.stopX) * Math.sign(h.vx) >= 0) {
+        h.x = h.stopX;
+        stop = true;
+      }
+      if (h.x <= lim.min || h.x >= lim.max) {
+        h.x = Math.max(lim.min, Math.min(lim.max, h.x));
+        stop = true;
+      }
+      if (stop) {
+        h.state = "rest";
+        h.vx = 0;
+        h.hit = false;
+        if (h.queued === "bite") startBite(f, opp);
+      }
+    } else if (h.state === "bite") {
+      h.x += h.vx;
+      h.y = Math.min(restY(), h.y + h.vy);
+      h.travel += Math.hypot(h.vx, h.vy);
+      if (h.travel >= hs.biteRange * S || h.x <= lim.min || h.x >= lim.max) endHeadAttack(h, hs.biteRecover);
+    } else if (h.state === "hop") {
+      // 体の真上を越えたら横には進まない
+      if (h.vx && Math.sign(f.x - h.x) !== Math.sign(h.vx)) h.vx = 0;
+      h.x += h.vx;
+      h.vy += g;
+      h.y += h.vy;
+      if (h.y >= restY()) {
+        h.y = restY();
+        h.vy = 0;
+        h.vx = 0;
+        h.state = "recover";
+        h.timer = hs.hopRecover;
+        h.hit = false;
+      }
+    } else if (h.state === "recover" || h.state === "stunned") {
+      h.x += h.vx;
+      h.vx = Math.trunc((h.vx * 4) / 5);
+      fall();
+      h.timer -= 1;
+      if (h.timer <= 0) {
+        h.state = "rest";
+        h.vx = 0;
+      }
+    } else if (h.state === "rest") {
+      fall();
+    } else if (h.state === "super") {
+      const p = state.projectiles.find((q) => q.headSuper && q.owner === state.fighters.indexOf(f));
+      if (p && p.x > lim.min && p.x < lim.max) {
+        h.x = p.x;
+      } else {
+        // 噛みつき終わった（画面の端に着いた）ら、その場に落ちて少し動けない
+        if (p) p.dead = true;
+        h.x = Math.max(lim.min, Math.min(lim.max, p ? p.x : h.x));
+        h.y = restY();
+        h.state = "recover";
+        h.timer = hs.biteRecover;
+      }
+    }
+    h.x = Math.max(lim.min, Math.min(lim.max, h.x));
+    // 拾う：ムクロ本人が、地面にある頭に重なったら体に戻る
+    if (HEAD_PICKABLE.includes(h.state) && h.y >= restY() - 10 * S && f.pose !== POSE.THROWN && f.y >= (C.GROUND_Y - 40) * S) {
+      const reach = (CHARACTERS[f.charId].width / 2 + hs.pickup) * S;
+      if (Math.abs(f.x - h.x) <= reach) {
+        f.head = null;
+        state.effects.push({ kind: "block", x: f.x / S, y: f.y / S - fighterHeight(f), life: 10 });
+      }
+    }
+  }
+
+  // 噛みつき・跳ね戻りが終わったら、その場に落ちて少し動けない
+  function endHeadAttack(h, recover) {
+    h.state = "recover";
+    h.timer = recover;
+    h.vx = 0;
+    h.vy = 0;
+    h.hit = false;
+  }
+
+  // 頭の攻撃が当たった（ガードされた）。硬直差はムクロ本人が動けるようになったときから数える
+  //   wait＝これより短くしない（頭転がしは、頭が相手の背中の後ろで止まるまでのフレーム数から数える）
+  function applyHeadHit(state, att, def, name, box, body, wait = 0) {
+    const m0 = CHARACTERS[att.charId].moves[name];
+    const bodyLeft = Math.max(wait, att.move === name ? Math.max(0, moveTotal(m0) - att.moveFrame) : 0);
+    const m = { ...m0, startup: 1, active: 1, recovery: bodyLeft, projectile: {} };
+    const proj = { move: name, hitsLeft: 1, vx: 0 };
+    applyHit(state, att, def, m, box, body, proj, name);
+  }
+
+  // 頭の攻撃と、頭への攻撃を調べる（体どうしの当たりのあと）
+  function checkHeadHits(state) {
+    for (let i = 0; i < 2; i++) {
+      const att = state.fighters[i];
+      const def = state.fighters[1 - i];
+      const h = att.head;
+      if (!h) continue;
+      const hs = headSpec(att);
+      // 頭の攻撃
+      const box = headHitbox(att);
+      const body = box && touching(box, def);
+      if (body) {
+        const name = h.state === "roll" ? "special" : h.state === "bite" ? "headBite" : "headHop";
+        h.hit = true;
+        let wait = 0;
+        if (h.state === "roll") {
+          // 頭転がしは止まらずに相手の足の下をすり抜け（速く転がる）、背中の後ろで止まる。
+          // 相手ののけぞり・ガード硬直は、頭が止まってから数える（止まった頭からすぐ噛みつけば、続けてガードさせられる）
+          const dir = Math.sign(h.vx) || att.facing;
+          const lim = headLimits(att);
+          const stop = def.x + dir * (CHARACTERS[def.charId].width / 2 + hs.behind + hs.size / 2) * S;
+          h.stopX = Math.max(lim.min, Math.min(lim.max, stop));
+          h.vx = dir * hs.rollSpeed * hs.passBoost * S;
+          wait = Math.ceil(Math.abs(h.stopX - h.x) / Math.abs(h.vx));
+        }
+        applyHeadHit(state, att, def, name, box, body, wait);
+        if (h.state === "bite") endHeadAttack(h, hs.biteRecover);
+      }
+      // 相手の攻撃・飛び道具が頭に当たったら、頭は転がって動けなくなる
+      const hb = headHurtbox(att);
+      if (!hb) continue;
+      const strike = hitbox(def);
+      let hitBy = strike && overlap(strike, hb) ? { x: def.x } : null;
+      if (hitBy) def.moveHit = true;
+      if (!hitBy) {
+        const p = state.projectiles.find((q) => q.owner === 1 - i && !q.dead && overlap(projectileBox(q), hb));
+        if (p) {
+          if (!p.strong) p.dead = true;
+          hitBy = { x: p.x - p.vx };
+        }
+      }
+      if (hitBy) {
+        const dir = Math.sign(h.x - hitBy.x) || -att.facing;
+        h.state = "stunned";
+        h.timer = hs.stunFrames;
+        h.queued = null;
+        h.vx = Math.round((dir * hs.knockback * S) / 5);
+        state.hitstop = Math.max(state.hitstop, BATTLE.hitstopBlock);
+        state.effects.push({ kind: "hit", x: h.x / S, y: h.y / S - hs.size / 2, life: 14 });
+        state.effects.push({ kind: "text", text: "頭が転がった！", x: h.x / S, y: h.y / S - 70, life: 45 });
+      }
     }
   }
 
@@ -1308,6 +1656,7 @@
       if (h.p && h.p.hitsLeft <= 0) h.p.dead = true;
     }
     state.projectiles = state.projectiles.filter((p) => !p.dead);
+    checkHeadHits(state);
     checkThrows(state);
   }
 
@@ -1457,7 +1806,10 @@
       clampToStage(def);
     }
     record(state, att, name, "hits");
-    record(state, att, name, "damage", dealDamage(state, att, def, m.damage, def.punishedGrab, name));
+    // 頭が外れているときの投げ（ムクロの締めつけ）はダメージが違う
+    const hl = name === "throw" && att.head && CHARACTERS[att.charId].headless;
+    const damage = hl ? hl.throwDamage : m.damage;
+    record(state, att, name, "damage", dealDamage(state, att, def, damage, def.punishedGrab, name));
     def.punishedGrab = false;
     knockDown(def);
     def.pushVx = (att.facing * (m.noTech ? 30 : 60) * S) / 5;
@@ -1642,6 +1994,7 @@
     if (fighting) updateThrows(state);
     pushApart(a, b);
     moveProjectiles(state);
+    if (fighting) state.fighters.forEach((f) => updateHead(state, f));
     if (fighting) checkHits(state);
     // 撃った側が攻撃を受けたら消える飛び道具（ゲンマの異空間弾）
     for (const p of state.projectiles) {
@@ -1694,6 +2047,8 @@
     grabBox,
     projectileBox,
     shadowStitchBox,
+    headHurtbox,
+    headHitbox,
     isFree,
     moveData,
     gaugeFull,
