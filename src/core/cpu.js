@@ -166,6 +166,8 @@
       confirmKey: null, // 相手の技を見てゲージ技を撃つかを決めた、相手の技の番号
       chargeLeft: 0, // ためる技（リンの突進拳）で、あと何フレーム O を押し続けるか
       rising: false, // このジャンプで、跳んですぐ（上りで）空中攻撃を出すか
+      macro: null, // 学習AIのひとまとまりの攻め（起き攻め・ダッシュからの崩し）：{ kind, move, timer }
+      downWas: [false, false], // 前のフレームでダウンしていたか [自分, 相手]（学習AIの得点用に、ダウンした回数を数える）
       okiPlan: null, // ゴウの起き攻め：相手が倒れている間に決める（"grab"＝起き上がりに重ねて岩落とし、"watch"＝様子を見て対応）
       okiWatch: 0, // 起き上がりを見ている残りフレーム
       reversalOk: false, // 今の相手の技に、ゲージ技で切り返すか（無敵のあるゲージ技だけ）
@@ -303,6 +305,14 @@
     const opp = state.fighters[1 - index];
     observe(cpu, state, index);
     const o = seen(cpu);
+    // 学習AI：ダウンした回数を数える（学ぶ部分が、相手をダウンさせたら得点を足す）
+    if (cpu.learner) {
+      for (const k of [0, 1]) {
+        const down = state.fighters[k === 0 ? index : 1 - index].pose === SF.game.POSE.DOWN;
+        if (down && !cpu.downWas[k]) cpu.learner.downCount[k] += 1;
+        cpu.downWas[k] = down;
+      }
+    }
     const forward = me.facing === 1 ? BUTTON.RIGHT : BUTTON.LEFT;
     const back = me.facing === 1 ? BUTTON.LEFT : BUTTON.RIGHT;
 
@@ -313,6 +323,7 @@
       cpu.queue = [];
       cpu.hold = 0;
       cpu.thinkTimer = 0;
+      cpu.macro = null;
       return finish(cpu, 0);
     }
 
@@ -535,6 +546,12 @@
 
     if (!free) return finish(cpu, cpu.hold & ~(BUTTON.LIGHT | BUTTON.HEAVY | BUTTON.SPECIAL));
 
+    // 学習AIのひとまとまりの攻め（起き攻め・ダッシュからの崩し）の続き
+    if (cpu.macro) {
+      const out = runMacro(cpu, state, me, opp, forward);
+      if (out !== null) return finish(cpu, out);
+    }
+
     // ゲージ技を「相手が動いたのを見て」撃つ（カゲツの月影斬・ゴウの大地落とし）。飛び道具だけの技には撃たない
     const sp = SUPER_PLAN[me.charId];
     if (sp && sp.confirm && SF.game.gaugeFull(me) && o.move && o.onGround && cpu.confirmKey !== o.moveId) {
@@ -551,7 +568,8 @@
 
     // ゴウの起き攻め：相手が倒れている間に、起き上がりに岩落としを重ねるか、様子を見て対応するかを決める
     //   様子を見るとき：跳んだらつかみ上げ、バックステップしたら止まり際を張り手で叩き、何もしなければ岩落とし
-    if (me.charId === "gou" && opp.pose === POSE.DOWN && opp.health > 0) {
+    //   学習AIは、起き攻めも自分で選ぶ（行動の「起き攻め」）ので、ここは使わない
+    if (me.charId === "gou" && !cpu.learner && opp.pose === POSE.DOWN && opp.health > 0) {
       if (!cpu.okiPlan) cpu.okiPlan = chance(cpu, lv.combo) ? (chance(cpu, 50) ? "grab" : "watch") : "none";
       const grabReach = reachOf(me, opp, "special") - 6;
       const realDist = Math.abs(me.x - opp.x) / S;
@@ -603,8 +621,8 @@
       }
     }
 
-    // 相手が倒れている・投げられているときは、近づいて待つ
-    if (o.pose === POSE.DOWN || o.pose === POSE.LAUNCH) {
+    // 相手が倒れている・投げられているときは、近づいて待つ（学習AIは、倒れている間も表を見て選ぶ）
+    if ((o.pose === POSE.DOWN && !cpu.learner) || o.pose === POSE.LAUNCH) {
       cpu.hold = dist > reachOf(me, opp, "standLight") ? forward : 0;
       return finish(cpu, cpu.hold);
     }
@@ -639,6 +657,27 @@
     }
 
     switch (plan) {
+      case "okiStrike":
+      case "okiLow":
+      case "okiThrow": {
+        // 起き攻め：相手が倒れていれば、近づいて起き上がりに重ねる。倒れていなければ、ふつうの強攻撃・しゃがみ弱・投げ
+        const move = okiMove(st, plan);
+        if (opp.pose === POSE.DOWN && opp.health > 0) {
+          cpu.macro = { kind: "oki", move, timer: 0 };
+          const out = runMacro(cpu, state, me, opp, forward);
+          if (out !== null) return finish(cpu, out);
+          return finish(cpu, 0);
+        }
+        return pressMove(cpu, move);
+      }
+      case "dashThrow":
+      case "dashLow": {
+        // ダッシュで近づき、着いたら投げ（ゴウは岩落とし）・しゃがみ弱。届かなければ少し歩いてから
+        cpu.macro = { kind: "dash", move: plan === "dashThrow" ? okiMove(st, "okiThrow") : "crouchLight", timer: 40 };
+        cpu.queue.push(0, forward, forward, forward, forward, forward, forward, forward);
+        cpu.thinkTimer = 40;
+        return finish(cpu, forward);
+      }
       case "special":
         // ためる技（リンの突進拳）は、ためながら近づく：15〜30フレーム押し続けてから離す
         if (st.moves.special.charge) {
@@ -697,6 +736,75 @@
         return finish(cpu, 0);
     }
   }
+
+  // 起き攻め・ダッシュからの崩しで使う技の名前。投げは、コマンド投げ（ゴウの岩落とし）があればそちら
+  function okiMove(st, plan) {
+    if (plan === "okiStrike") return "standHeavy";
+    if (plan === "okiLow") return "crouchLight";
+    return st.moves.special.kind === "throw" ? "special" : "throw";
+  }
+
+  // 技を出す入力（しゃがみ技は、しゃがんでから押す）
+  function pressMove(cpu, move) {
+    if (move === "crouchLight" || move === "crouchHeavy") {
+      cpu.queue.push(BUTTON.DOWN | (move === "crouchLight" ? BUTTON.LIGHT : BUTTON.HEAVY), BUTTON.DOWN);
+      return finish(cpu, BUTTON.DOWN);
+    }
+    if (move === "throw") return finish(cpu, BUTTON.LIGHT | BUTTON.HEAVY);
+    return finish(cpu, { standLight: BUTTON.LIGHT, standHeavy: BUTTON.HEAVY, special: BUTTON.SPECIAL }[move]);
+  }
+
+  // ひとまとまりの攻めを1フレーム進める。このフレームの入力を返す（終わったら null）
+  //   oki：相手が倒れている間に、技が届く所まで歩き、起き上がりの瞬間に当たる（掴む）フレームで押す
+  //   dash：ダッシュのあと、技が届けば押す。届かなければ timer の間は歩いて近づく
+  function runMacro(cpu, state, me, opp, forward) {
+    const mc = cpu.macro;
+    const st = CHARACTERS[me.charId];
+    const m = st.moves[mc.move];
+    const reach = reachOf(me, opp, mc.move === "special" && m.kind === "throw" ? "special" : mc.move) - 6;
+    const realDist = Math.abs(me.x - opp.x) / S;
+    if (mc.kind === "oki") {
+      if (opp.pose !== POSE_DOWN() || opp.health <= 0) {
+        cpu.macro = null;
+        return null;
+      }
+      // 起き上がりの瞬間（downTimer が 0 になったフレームの次）に、技の当たる時間（投げは掴む時間）の始めが来るように押す
+      const crouch = mc.move === "crouchLight";
+      const pressAt = m.startup - 1 + (crouch ? 1 : 0);
+      if (realDist <= reach + 4 && opp.downTimer === pressAt) {
+        cpu.macro = null;
+        cpu.hold = 0;
+        cpu.thinkTimer = Math.max(cpu.thinkTimer, m.startup + 4);
+        if (crouch) {
+          cpu.queue.push(BUTTON.DOWN | BUTTON.LIGHT, BUTTON.DOWN);
+          return BUTTON.DOWN;
+        }
+        return mc.move === "throw" ? BUTTON.LIGHT | BUTTON.HEAVY : mc.move === "special" ? BUTTON.SPECIAL : BUTTON.HEAVY;
+      }
+      cpu.hold = realDist > reach - 10 ? forward : 0;
+      cpu.thinkTimer = Math.max(cpu.thinkTimer, 2);
+      return cpu.hold;
+    }
+    // dash
+    mc.timer -= 1;
+    if (realDist <= reach + 4 && (mc.move === "crouchLight" || opp.onGround)) {
+      cpu.macro = null;
+      cpu.hold = 0;
+      cpu.thinkTimer = Math.max(cpu.thinkTimer, m.startup + 4);
+      if (mc.move === "crouchLight") {
+        cpu.queue.push(BUTTON.DOWN | BUTTON.LIGHT, BUTTON.DOWN);
+        return BUTTON.DOWN;
+      }
+      return mc.move === "throw" ? BUTTON.LIGHT | BUTTON.HEAVY : BUTTON.SPECIAL;
+    }
+    if (mc.timer <= 0) {
+      cpu.macro = null;
+      return null;
+    }
+    cpu.hold = forward;
+    return forward;
+  }
+  const POSE_DOWN = () => SF.game.POSE.DOWN;
 
   // 前のフレームから押しっぱなしのボタンは、いったん離さないと「押した」にならない。
   // 方向キーは押しっぱなしでよいが、攻撃ボタンとジャンプは押しっぱなしにしない

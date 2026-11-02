@@ -3,6 +3,7 @@
 //   例: node tools/train.js 4000 4
 //   --watch をつけると、回ごとに学習AI同士の勝率を表示する（学習が落ち着いているかを見る）
 //   --matrix をつけると、最後に最近の6世代どうしを、ちがうキャラの組み合わせごとに総当たりで戦わせ、平均の勝率を出す（バランス調整はこの平均を見る）
+//   --out ファイル名 をつけると、学習データをそのファイルに保存する（ゲームに入っている学習データは変えない。試しに学習するとき）
 //   今の学習データの続きから学ぶ。回ごとに保存するので、途中で止めてもそれまでの回の学習は残る。--fresh をつけると、何も覚えていない状態から学び直す。
 //   「1回」の中で、組み合わせ（カゲツ対リン、リン対カゲツ、同キャラ同士）ごとに指定の試合数だけ学ぶ。
 //   相手は半分が「つよい」CPU、半分が「これまでの回の始めの学習AIのコピー」（学習しない）の中からでたらめに1つ。左右も入れ替える。
@@ -12,13 +13,15 @@
 const fs = require("node:fs");
 const path = require("node:path");
 for (const f of ["constants", "rng", "input", "characters", "game", "cpu", "autobattle", "learn", "learn-train"]) require(`../src/core/${f}.js`);
-const dataFile = path.join(__dirname, "../src/core/learned-data.js");
+const gameDataFile = path.join(__dirname, "../src/core/learned-data.js");
+const outAt = process.argv.indexOf("--out");
+const dataFile = outAt > 0 ? path.resolve(process.argv[outAt + 1]) : gameDataFile;
 const fresh = process.argv.includes("--fresh");
 if (!fresh && fs.existsSync(dataFile)) require(dataFile);
 const SF = globalThis.SF;
 const L = SF.learn;
 
-const nums = process.argv.slice(2).filter((a) => /^\d+$/.test(a)).map(Number);
+const nums = process.argv.slice(2).filter((a, i, all) => /^\d+$/.test(a) && all[i - 1] !== "--out").map(Number);
 const perBlock = nums[0] || 4000;
 const rounds = nums[1] || 4;
 const brain = fresh ? L.createBrain() : L.defaultBrain();

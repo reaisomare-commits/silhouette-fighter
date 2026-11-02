@@ -1544,8 +1544,11 @@ require("../src/core/learned-data.js");
   // 前ジャンプで跳び込んでくる相手に、CPUがどれだけ対空技を出すか
   // 学習AIは、様子見を選ぶ頭脳で測る（学んだ立ち回りで先に技を出して動けないと、反射神経が測れないため）
   const waitBrain = SF.learn.createBrain();
-  const waitTable = SF.learn.tableFor(waitBrain, "kagetsu", "rin");
-  for (let k = 0; k < waitTable.q.length; k += SF.learn.ACTIONS.length) waitTable.q[k] = 1;
+  for (const pair of [["kagetsu", "rin"], ["rin", "kagetsu"]]) {
+    const waitTable = SF.learn.tableFor(waitBrain, ...pair);
+    waitTable.q.fill(0);
+    for (let k = 0; k < waitTable.q.length; k += SF.learn.ACTIONS.length) waitTable.q[k] = 1;
+  }
   function antiAirRate(lv) {
     let jumps = 0;
     let aa = 0;
@@ -1578,7 +1581,7 @@ require("../src/core/learned-data.js");
       const st = newGame(seed, chars);
       st.fighters[0].x = 440 * S;
       st.fighters[1].x = 500 * S;
-      const cpu = SF.cpu.createCpu(lv, seed);
+      const cpu = SF.cpu.createCpu(lv, seed, { brain: waitBrain }); // 学習AIは様子見を選ぶ頭脳で（自分で選んだ技を数えないように）
       // CPUを左に置いて、何もしない（block なら立ちガードする）相手に弱攻撃を当てさせる
       let used = false;
       for (let i = 0; i < 120; i++) {

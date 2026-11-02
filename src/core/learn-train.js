@@ -8,9 +8,10 @@
   const SF = (root.SF = root.SF || {});
 
   // 学習の数字
-  const GAMMA = 0.95; // 先の得点をどれくらい大事にするか（1回考えるごとにこの割合ずつ小さく見る）
+  const GAMMA = 0.97; // 先の得点をどれくらい大事にするか（1回考えるごとにこの割合ずつ小さく見る。ダウンを取ってから起き攻めで取るまでを見通せるように）
   const MIN_ALPHA = 0.03; // 表を直す強さの下限（はじめは大きく、同じ場面を何度も経験すると小さくなる）
   const ROUND_REWARD = 1; // ラウンドの勝ち負けでもらう得点
+  const DOWN_REWARD = 0.03; // 相手をダウンさせたらもらう得点（自分がダウンしたら引く）。起き攻めの機会を取りにいくように
   const PLAYER_ALPHA = 0.2; // あなたとの対戦から学ぶときの、表を直す強さ（試合数が少なくても戦い方が変わるように大きめ）
   const PLAYER_EXPLORE = 0.05; // あなたとの対戦から学ぶときに、わざと別の行動を試す確率
 
@@ -22,11 +23,12 @@
   //   方針はあくまで手がかりで、試して損だった行動は学習で数字が下がり、選ばれなくなる。
   // 決まりは上から順に見て、最初に当てはまったものを使う。dist＝距離（DIST_LABELS の番号）、opp＝相手の様子（OPP_LABELS の番号、なければどれでも）
   //   距離：0 投げの距離、1 弱攻撃の距離、2 強攻撃の距離、3 少し遠い、4 遠い、5 とても遠い
-  //   相手：0 ふつう、1 しゃがみ・ガード、2 技を出している、3 技のスキ、4 のけぞり・ガード硬直、5 空中
+  //   相手：0 ふつう、1 しゃがみ・ガード、2 技を出している、3 技のスキ、4 のけぞり・ガード硬直、5 空中、6 倒れている
   const POLICY = {
     // カゲツ：基本は待ち。大振り斬り（I）→ 飛刃（O）のキャンセルは隙が少ないので、とりあえず振りやすい。ジャンプ強攻撃は攻めに使う。
     //   跳んできたら昇り斬り。ゲージ技（月影斬）は攻められているときの切り返しと、相手が牽制などで動いたのを見て撃つ（cpu.js）
     kagetsu: [
+      { opp: [6], dist: [0, 1, 2, 3], act: { okiStrike: 2, okiLow: 2, okiThrow: 2, wait: 1 } },
       { opp: [5], dist: [0, 1, 2, 3], act: { crouchSpecial: 4, back: 1 } },
       { opp: [3], dist: [0, 1, 2], act: { heavy: 3, special: 1 } },
       { dist: [4, 5], act: { wait: 3, special: 2, back: 1 } },
@@ -37,6 +39,8 @@
     // リン：ためた突進拳（O）も使いながら近づき、回し蹴り（I・中段）と下段で崩す。
     //   ゲージ技（練気）は攻めている最中に出し、I・S＋U・S＋I → O をくり返して攻め続ける（cpu.js）
     rin: [
+      { opp: [6], dist: [0, 1, 2, 3], act: { okiStrike: 2, okiLow: 2, okiThrow: 2, wait: 1 } },
+      { opp: [1], dist: [2, 3], act: { dashThrow: 2, dashLow: 2, heavy: 1 } },
       { opp: [5], dist: [0, 1, 2, 3], act: { crouchSpecial: 4, back: 1 } },
       { opp: [3], dist: [0, 1, 2, 3], act: { special: 3, heavy: 2 } },
       { dist: [4, 5], act: { special: 3, dash: 2, forward: 1 } },
@@ -47,6 +51,7 @@
     // ゲンマ：ジャンプと浮遊で逃げ回りながら異空間弾をまく。キャンセルの O は隙をさらしやすいので連続技には入れない。
     //   近づかれたら前後のワープで逃げる。ゲージ技（冥府球）をガードさせたら、上りの空中攻撃と下段で崩す（cpu.js）
     genma: [
+      { opp: [6], dist: [0, 1, 2], act: { okiLow: 2, okiThrow: 1, special: 1 } },
       { opp: [5], dist: [0, 1, 2], act: { backdash: 2, crouchSpecial: 1 } },
       { dist: [4, 5], act: { special: 3, jumpUp: 3, jumpBack: 1 } },
       { dist: [3], act: { special: 2, jumpUp: 2, jumpBack: 1, backdash: 1 } },
@@ -56,6 +61,8 @@
     // ゴウ：張り手（U）で牽制し、当たったら四股踏み（S＋I）へキャンセル。大張り手（I・踏ん張り）で近づいて岩落とし（O）を狙う。
     //   ダウンさせたら、起き上がりに岩落とし、跳んだらつかみ上げ、バックステップには攻撃で択をかける（cpu.js）。ゲージ技はカゲツと同じ使い方
     gou: [
+      { opp: [6], dist: [0, 1, 2, 3], act: { okiThrow: 3, okiStrike: 1, okiLow: 1, wait: 1 } },
+      { opp: [1], dist: [2, 3], act: { dashThrow: 3, heavy: 1 } },
       { opp: [5], dist: [0, 1, 2, 3], act: { crouchSpecial: 4 } },
       { opp: [1, 4], dist: [0, 1], act: { special: 3, throw: 2, light: 1 } },
       { opp: [3], dist: [0, 1, 2], act: { special: 2, heavy: 2 } },
@@ -114,12 +121,13 @@
     return best;
   }
 
-  // 前に考えたときから今までに「相手に与えたダメージ − 受けたダメージ」（体力の割合）
+  // 前に考えたときから今までに「相手に与えたダメージ − 受けたダメージ」（体力の割合）と、ダウンの得点
   function damageReward(L, me, opp) {
     const CH = SF.characters.CHARACTERS;
     const dealt = (L.hp[1] - opp.health) / CH[opp.charId].health;
     const taken = (L.hp[0] - me.health) / CH[me.charId].health;
-    return dealt - taken;
+    const downs = (L.downCount[1] - L.downs[1] - (L.downCount[0] - L.downs[0])) * DOWN_REWARD;
+    return dealt - taken + downs;
   }
 
   // 前の行動の表の数字を、もらった得点と「次の状況でいちばん良い数字」に近づける（Q学習）。nextS が -1 ならラウンドの終わり

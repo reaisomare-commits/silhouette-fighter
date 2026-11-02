@@ -4,8 +4,8 @@
 //   CPUが「様子見で次に何をするか」を決めるたびに、今の状況を1つの番号（状況番号）にまとめる。
 //   頭脳は「状況番号 × 行動」の表を持っていて、表の数字（Q値）は「その状況でその行動をとると、
 //   このあとどれくらい得をするか」の見積もり。いちばん数字の大きい行動を選ぶ。
-//   学習中は、行動したあと次に考えるときまでに「相手に与えたダメージ − 受けたダメージ」を得点として受け取り、
-//   ラウンドに勝てば +1、負ければ −1 をもらう。その得点で表の数字を少しずつ直していく。
+//   学習中は、行動したあと次に考えるときまでに「相手に与えたダメージ − 受けたダメージ」を得点として受け取り
+//   （相手をダウンさせたら少し足し、自分がダウンしたら少し引く）、ラウンドに勝てば +1、負ければ −1 をもらう。その得点で表の数字を少しずつ直していく。
 //   何千試合もくり返すと、「この距離・この状況ではこの行動が勝ちにつながる」が表に残っていく。
 //   ときどき（探検の確率）わざと別の行動も試すので、まだ知らない良い行動も見つけられる。
 //
@@ -40,16 +40,25 @@
     { id: "special", label: "必殺技 O" },
     { id: "crouchSpecial", label: "対空必殺技 S+O" },
     { id: "throw", label: "投げ U+I" },
+    // ひとまとまりの攻め（cpu.js が何フレームかかけて出しきる）
+    //   起き攻め：相手が倒れているとき、近づいて起き上がりの瞬間に技を重ねる（強攻撃・下段）か、起き上がりに投げる（ゴウは岩落とし）。
+    //   相手が倒れていなければ、ふつうの強攻撃・しゃがみ弱・投げと同じ
+    { id: "okiStrike", label: "起き攻め：強攻撃を重ねる" },
+    { id: "okiLow", label: "起き攻め：下段を重ねる" },
+    { id: "okiThrow", label: "起き攻め：起き上がりに投げ" },
+    // ダッシュで近づいて、着いたら投げ（ゴウは岩落とし）・しゃがみ弱（下段）。ガードを固める相手を崩す
+    { id: "dashThrow", label: "ダッシュして投げ" },
+    { id: "dashLow", label: "ダッシュして下段" },
   ];
   const ACTION_INDEX = Object.fromEntries(ACTIONS.map((a, i) => [a.id, i]));
 
   // 状況のまとめ方。数を変えたら STATE_VERSION を上げる（古い学習データは使わない）
-  //   距離 6 × 相手の様子 6 × 自分の飛び道具 2 × 相手の飛び道具 2 × 画面端 3
+  //   距離 6 × 相手の様子 7 × 自分の飛び道具 2 × 相手の飛び道具 2 × 画面端 3
   const DIST_LABELS = ["投げの距離", "弱攻撃の距離", "強攻撃の距離", "少し遠い", "遠い", "とても遠い"];
-  const OPP_LABELS = ["ふつう", "しゃがみ・ガード", "技を出している", "技のスキ", "のけぞり・ガード硬直", "空中"];
+  const OPP_LABELS = ["ふつう", "しゃがみ・ガード", "技を出している", "技のスキ", "のけぞり・ガード硬直", "空中", "倒れている"];
   const WALL_LABELS = ["端ではない", "自分が端", "相手が端"];
   const STATES = DIST_LABELS.length * OPP_LABELS.length * 2 * 2 * WALL_LABELS.length;
-  const STATE_VERSION = 1;
+  const STATE_VERSION = 2; // 2：相手の様子に「倒れている」、行動に起き攻めとダッシュからの崩しを足した
 
   const PLAY_EXPLORE = 0.04; // 学習していないとき（ふつうに戦うとき）にも少しだけ別の行動を混ぜる（毎回同じ動きにならないように）
   const WALL_NEAR = 120; // 画面端からこれ以内なら「端」（ピクセル）
@@ -156,7 +165,8 @@
     else d = 5;
 
     let os = 0;
-    if (!o.onGround) os = 5;
+    if (o.pose === POSE.DOWN) os = 6;
+    else if (!o.onGround) os = 5;
     else if (o.pose === POSE.HIT || o.pose === POSE.BLOCK) os = 4;
     else if (o.move) {
       const m = CH[opp.charId].moves[o.move];
@@ -225,6 +235,8 @@
       lastS: -1, // 前に考えたときの状況番号（まだなければ -1）
       lastA: -1,
       hp: [0, 0], // 前に考えたときの体力 [自分, 相手]
+      downCount: [0, 0], // このラウンドでダウンした回数 [自分, 相手]（cpu.js が数える）
+      downs: [0, 0], // 前に考えたときの downCount
       decisions: 0,
     };
   }
@@ -266,6 +278,7 @@
     L.lastS = s;
     L.lastA = a;
     L.hp = [me.health, opp.health];
+    L.downs = L.downCount.slice(); // このときまでにダウンした回数 [自分, 相手]（学ぶ部分の得点で使う）
     L.decisions += 1;
     return ACTIONS[a].id;
   }
@@ -293,6 +306,8 @@
     if (L.train && L.lastS >= 0 && L.table) SF.learnTrain.learnRoundEnd(L, state, index);
     L.lastS = -1;
     L.lastA = -1;
+    L.downCount = [0, 0];
+    L.downs = [0, 0];
   }
 
   SF.learn = {
