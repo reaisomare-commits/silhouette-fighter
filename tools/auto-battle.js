@@ -3,7 +3,7 @@
 //   例: node tools/auto-battle.js kagetsu rin 1 1 1000 result.csv
 //   キャラは kagetsu / rin、強さは 0（よわい）1（ふつう）2（つよい）3（学習AI）。左右を入れ替えた試合も半分ずつ行う
 const fs = require("node:fs");
-for (const f of ["constants", "rng", "input", "characters", "game", "cpu", "autobattle", "learn", "learned-data"]) require(`../src/core/${f}.js`);
+for (const f of ["constants", "rng", "input", "characters", "game", "cpu", "autobattle", "learn", "learn-train", "learned-data"]) require(`../src/core/${f}.js`);
 const SF = globalThis.SF;
 
 const [c0 = "kagetsu", c1 = "rin", l0 = "1", l1 = "1", n = "1000", out] = process.argv.slice(2);

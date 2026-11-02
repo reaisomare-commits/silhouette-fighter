@@ -1432,6 +1432,7 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
 // 6. CPU（よわい・ふつう・つよい・学習AI）
 require("../src/core/cpu.js");
 require("../src/core/learn.js");
+require("../src/core/learn-train.js");
 require("../src/core/learned-data.js");
 {
   const LV = SF.cpu.LEVELS;
@@ -1862,7 +1863,7 @@ require("../src/core/autobattle.js");
     for (let k = 0; k < 3; k++) {
       const st = SF.game.createGame(300 + k, ["rin", "kagetsu"]);
       const you = SF.cpu.createCpu(2, 400 + k);
-      const ai = SF.cpu.createCpu(LEARN, 500 + k, { brain: mine, train: true, explore: L.PLAYER_EXPLORE, alpha: L.PLAYER_ALPHA });
+      const ai = SF.cpu.createCpu(LEARN, 500 + k, { brain: mine, train: true, explore: SF.learnTrain.PLAYER_EXPLORE, alpha: SF.learnTrain.PLAYER_ALPHA });
       for (let n = 0; n < 60 * 60 * 6 && st.round.phase !== SF.game.PHASE.MATCH_END; n++) {
         SF.game.step(st, [SF.cpu.input(you, st, 0), SF.cpu.input(ai, st, 1)]);
       }
@@ -1896,7 +1897,7 @@ require("../src/core/autobattle.js");
   const before = winRate(fresh, 40);
   for (let i = 0; i < 400; i++) {
     const side = i % 2;
-    L.trainMatch(fresh, i + 1, side ? ["rin", "kagetsu"] : ["kagetsu", "rin"], side, 2, 0.3);
+    SF.learnTrain.trainMatch(fresh, i + 1, side ? ["rin", "kagetsu"] : ["kagetsu", "rin"], side, 2, 0.3);
   }
   const after = winRate(fresh, 40);
   const ms = Number(process.hrtime.bigint() - t1) / 1e6;
@@ -1907,7 +1908,7 @@ require("../src/core/autobattle.js");
   L.tableFor(guided, "kagetsu", "rin");
   const guidedRate = winRate(guided, 40);
   assert.ok(guidedRate > before, `方針の手がかりを入れても強くならない（${before}% → ${guidedRate}%）`);
-  for (const id of Object.keys(SF.characters.CHARACTERS)) assert.ok(L.POLICY[id], `${id} の方針がない`);
+  for (const id of Object.keys(SF.characters.CHARACTERS)) assert.ok(SF.learnTrain.POLICY[id], `${id} の方針がない`);
 
   // ゲームに入っている学習データの学習AIは「つよい」CPUにしっかり勝つ（どの組み合わせでも）
   const ids = Object.keys(SF.characters.CHARACTERS);

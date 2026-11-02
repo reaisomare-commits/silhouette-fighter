@@ -11,7 +11,7 @@
 //   探検の確率（わざと別の行動を試す確率）は、1回目は 0.3、2回目からは 0.15 から始めて 0.03 まで下げる。
 const fs = require("node:fs");
 const path = require("node:path");
-for (const f of ["constants", "rng", "input", "characters", "game", "cpu", "autobattle", "learn"]) require(`../src/core/${f}.js`);
+for (const f of ["constants", "rng", "input", "characters", "game", "cpu", "autobattle", "learn", "learn-train"]) require(`../src/core/${f}.js`);
 const dataFile = path.join(__dirname, "../src/core/learned-data.js");
 const fresh = process.argv.includes("--fresh");
 if (!fresh && fs.existsSync(dataFile)) require(dataFile);
@@ -43,7 +43,7 @@ for (let round = 1; round <= rounds; round++) {
       const chars = learnSide ? [opp, me] : [me, opp];
       const opponent = (i >> 1) % 2 === 0 ? HARD : pool[(seed * 2654435761 >>> 0) % pool.length];
       const explore = Math.max(0.03, exploreStart * (1 - i / (perBlock * 0.7)));
-      L.trainMatch(brain, seed++, chars, learnSide, opponent, explore);
+      SF.learnTrain.trainMatch(brain, seed++, chars, learnSide, opponent, explore);
     }
   }
   const watch = process.argv.includes("--watch") ? `、学習AI同士 ${ids[0]} の勝率 ${winRate(ids[0], ids[1], SF.cpu.LEARN_LEVEL)}` : "";
