@@ -2726,11 +2726,18 @@ require("../src/core/autobattle.js");
   run(sw, 3, (i) => (i === 0 ? I | O : 0), 0);
   assert.strictEqual(sw.fighters[0].x, ccx, "I＋O で分身と入れ替わらない");
   assert.strictEqual(sw.fighters[0].clone.x, kx, "入れ替えで分身がカゲの場所に来ない");
-  // 分身は攻撃を1回受けると消える
-  sw.fighters[0].clone.x = sw.fighters[1].x - 80 * S;
-  sw.fighters[1].facing = -1;
-  run(sw, 30, 0, (i) => (i === 0 ? I : 0));
+  // 分身はいつも相手をはさんだカゲの鏡写し（カゲが歩いても、相手が動いても、距離が同じ）
+  run(sw, 20, BUTTON.LEFT, R);
+  {
+    const [k, o] = sw.fighters;
+    assert.strictEqual(k.clone.x - o.x, o.x - k.x, "分身が相手をはさんだカゲの鏡写しになっていない");
+    assert.strictEqual(k.clone.facing, -k.facing, "分身の向きがカゲと逆になっていない");
+  }
+  // 分身は攻撃を1回受けると消える：相手が技を出したところでカゲが入れ替わると、相手の技は分身に当たる
+  const hpK = sw.fighters[0].health;
+  run(sw, 30, (i) => (i === 4 ? I | O : 0), (i) => (i === 0 ? I : 0));
   assert.ok(!sw.fighters[0].clone, "攻撃を受けても分身が消えない");
+  assert.strictEqual(sw.fighters[0].health, hpK, "入れ替えたのにカゲが攻撃を受けた");
   // 相手が画面端にいても、分身は相手の後ろ（端）に出て重ならない。相手を押して前に出ても、相手は分身と影の間にはさまる
   {
     const half = CH.kagetsu.width / 2;
@@ -2769,6 +2776,86 @@ require("../src/core/autobattle.js");
   assert.ok(!ep.fighters[0].clone, "6秒たっても分身が消えない");
 
   console.log(`OK カゲ: 体力${K.health}・タイトルに5分で解禁、影潜りは${invAt}Fから無敵で相手をすり抜け朧月でダウン、影縛りはダメージなしで${free}F有利から連続技、影落ち${MV.airCrouchSpecial.damage}、分身は反対側に出て同じ操作で動き（同時攻撃${both}）、入れ替え・1回で消える・6秒で消える`);
+}
+
+// 画面端の重なり：カゲが出る組み合わせを、画面端の近くから始めてでたらめな入力（端へ押す入力を多め・ゲージはよく満タン）で動かし、
+// 本人どうし・分身と相手が地上で重ならないこと、本人が画面の中にいること、分身が相手の方を向いていることを毎フレーム確かめる
+{
+  const CH = SF.characters.CHARACTERS;
+  const ids = Object.keys(CH);
+  const lim = (id) => [(SF.constants.STAGE_MARGIN + CH[id].width / 2) * S, (SF.constants.STAGE_WIDTH - SF.constants.STAGE_MARGIN - CH[id].width / 2) * S];
+  const gap = (a, b) => ((CH[a].width + CH[b].width) / 2) * S;
+  const noPush = new Set([POSE.DOWN, POSE.THROWN, POSE.THROW, POSE.LAUNCH, POSE.SHADOW, POSE.WARP]);
+  const pairs = [];
+  for (const o of ids) {
+    pairs.push(["kage", o]);
+    if (o !== "kage") pairs.push([o, "kage"]);
+  }
+  let frames = 0;
+  let cloneFrames = 0;
+  let offscreen = 0;
+  for (const [c0, c1] of pairs) {
+    for (let seed = 1; seed <= 12; seed++) {
+      const st = newGame(seed, [c0, c1]);
+      const r = SF.rng.createRng(seed * 131 + ids.indexOf(c0) * 7 + ids.indexOf(c1));
+      const L0 = lim(c0);
+      const L1 = lim(c1);
+      const [a, b] = st.fighters;
+      const w = seed % 4;
+      if (w === 0) (a.x = L0[0] + SF.rng.nextInt(r, 60) * S), (b.x = a.x + (60 + SF.rng.nextInt(r, 200)) * S);
+      else if (w === 1) (b.x = L1[1] - SF.rng.nextInt(r, 60) * S), (a.x = b.x - (60 + SF.rng.nextInt(r, 200)) * S);
+      else if (w === 2) (a.x = L0[1] - SF.rng.nextInt(r, 40) * S), (b.x = a.x - (60 + SF.rng.nextInt(r, 150)) * S);
+      else (b.x = L1[0] + SF.rng.nextInt(r, 40) * S), (a.x = b.x + (60 + SF.rng.nextInt(r, 150)) * S);
+      const hold = [0, 0];
+      const len = [0, 0];
+      for (let i = 0; i < 1200; i++) {
+        for (const f of st.fighters) if (f.charId === "kage" && SF.rng.nextInt(r, 3) === 0) f.gauge = SF.game.GAUGE_FULL;
+        for (let k = 0; k < 2; k++) {
+          if (len[k]-- > 0) continue;
+          len[k] = 1 + SF.rng.nextInt(r, 12);
+          let v = SF.rng.nextInt(r, 256);
+          if (SF.rng.nextInt(r, 3) === 0) v = (v & ~(BUTTON.LEFT | BUTTON.RIGHT)) | (SF.rng.nextInt(r, 2) ? BUTTON.LEFT : BUTTON.RIGHT);
+          hold[k] = v;
+        }
+        SF.game.step(st, hold);
+        frames++;
+        const where = () => `${c0}対${c1} 種${seed} ${i}F 左(${a.x / S},${a.pose}) 右(${b.x / S},${b.pose})`;
+        for (const f of st.fighters) {
+          const L = lim(f.charId);
+          assert.ok(f.x >= L[0] && f.x <= L[1], `本人が画面の外に出た: ${where()}`);
+        }
+        if (a.onGround && b.onGround && !noPush.has(a.pose) && !noPush.has(b.pose)) assert.ok(Math.abs(a.x - b.x) >= gap(a.charId, b.charId) - S, `本人どうしが重なった: ${where()}`);
+        for (let k = 0; k < 2; k++) {
+          const c = st.fighters[k].clone;
+          const o = st.fighters[1 - k];
+          if (!c) continue;
+          cloneFrames++;
+          const L = lim(c.charId);
+          if (c.x < L[0] || c.x > L[1]) offscreen++;
+          const me = st.fighters[k];
+          // 分身は相手をはさんだ影の鏡写しなので、影が相手に重なれる（空中・ダウンなど）ときは分身も重なる。影が地上で押し合えるときだけ見る
+          if (c.onGround && o.onGround && me.onGround && !noPush.has(me.pose) && c.action !== POSE.SHADOW && !noPush.has(o.pose)) assert.ok(Math.abs(c.x - o.x) >= gap(c.charId, o.charId) - S, `分身と相手が重なった: ${where()} 分身${c.x / S}`);
+          // 分身は相手をはさんだ鏡写しなので、相手が影の真上を跳んでいるときは近づく（相手が地上にいるときだけ見る）
+          if (c.onGround && me.onGround && o.onGround && !noPush.has(o.pose) && c.action !== POSE.SHADOW && me.action !== POSE.SHADOW && !noPush.has(me.pose)) assert.ok(Math.abs(c.x - me.x) >= gap(c.charId, me.charId) - S, `影と分身が重なった: ${where()} 分身${c.x / S}`);
+        }
+      }
+    }
+  }
+  assert.ok(cloneFrames > frames / 3 && offscreen > 0, `分身があまり出ていない（${cloneFrames}/${frames}F、画面の外${offscreen}F）`);
+  // 相手を画面端に追い詰めて分身を出し、相手を飛び越すと、影と分身が同じ端に来る。そのとき分身は相手をはさんで反対側へ移る
+  {
+    const jo = newGame(1, ["kage", "kagetsu"]);
+    const wall = SF.constants.STAGE_WIDTH - SF.constants.STAGE_MARGIN - CH.kagetsu.width / 2;
+    jo.fighters[0].x = (wall - 60) * S;
+    jo.fighters[1].x = wall * S;
+    jo.fighters[0].gauge = SF.game.GAUGE_FULL;
+    for (let i = 0; i < 50; i++) SF.game.step(jo, [i === 0 ? BUTTON.HEAVY | BUTTON.SPECIAL : 0, 0]);
+    for (let i = 0; i < 60; i++) SF.game.step(jo, [i < 40 ? BUTTON.JUMP | BUTTON.RIGHT : 0, 0]);
+    const [k, o] = jo.fighters;
+    assert.ok(k.x > o.x, "端に追い詰めた相手を飛び越せていない（テストの前提）");
+    assert.ok(k.clone.x < o.x && o.x - k.clone.x >= gap("kage", "kagetsu"), `飛び越したあと影と分身が重なる（影${k.x / S}・相手${o.x / S}・分身${k.clone.x / S}）`);
+  }
+  console.log(`OK 画面端の重なり: カゲが出る${pairs.length}組×12試合（${frames}F、分身がいた${cloneFrames}F・うち画面の外${offscreen}F）で、本人どうし・分身と相手・影と分身が地上で重ならず、本人は画面の中。端に追い詰めて飛び越すと分身は反対側へ`);
 }
 
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める

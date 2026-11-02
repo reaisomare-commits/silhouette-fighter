@@ -132,7 +132,6 @@
       dizzy: false, // 立ち眩み中か（カゲの影縛りを受けた。描画用）
       clone: null, // 分身（カゲのゲージ技）。いないときは null
       swapCool: 0, // 分身と入れ替えたあと、次に入れ替えられるまでの残りフレーム
-      swapped: false, // このフレームで分身と入れ替えたか（分身がその分だけ動かないように）
     };
   }
 
@@ -1487,18 +1486,14 @@
   // 分身を出す：相手を挟んで反対側（今の影と相手の距離と同じだけ後ろ）。画面の外になるときは画面の外に出る
   function spawnClone(state, f, opp) {
     const i = state.fighters.indexOf(f);
-    const lim = cloneLimits(f);
-    // 相手の向こう側（相手と同じ側にいるときは、相手の前に出ないよう相手の体の幅だけは離す）
-    const side = Math.sign(opp.x - f.x) || f.facing;
-    const gap = Math.max(Math.abs(opp.x - f.x), cloneGap(f, opp));
-    const x = Math.max(lim.min, Math.min(lim.max, opp.x + side * gap));
+    const x = mirrorX(f, opp);
     f.clone = {
       cloneOf: i,
       charId: f.charId,
       x,
       y: C.GROUND_Y * S,
       vy: 0,
-      facing: Math.sign(opp.x - x) || -f.facing,
+      facing: -f.facing,
       onGround: true,
       pose: POSE.STAND,
       crouching: false,
@@ -1542,25 +1537,10 @@
     return ((CHARACTERS[c.charId].width + CHARACTERS[opp.charId].width) / 2) * S;
   }
 
-  // 分身と相手の体が重なっていたら離す。side は分身が相手のどちら側にいるか。
-  // ふだんは分身だけが下がるが、分身が画面端で下がれないときは相手を押し出す（相手と分身が重なったままにならない）。
-  // 押し出した相手が影（owner）に重なったら、影も押し下げる（相手が影と分身にはさまれたとき）
-  function separateClone(c, opp, side, owner) {
-    const gap = cloneGap(c, opp);
-    if (Math.abs(c.x - opp.x) >= gap && Math.sign(c.x - opp.x) === side) return;
-    c.x = opp.x + side * gap;
-    clampClone(c);
-    if (Math.abs(c.x - opp.x) < gap) {
-      opp.x = c.x - side * gap;
-      clampToStage(opp);
-      if (owner && owner.action !== POSE.SHADOW && Math.sign(owner.x - opp.x) === -side) {
-        const g2 = cloneGap(owner, opp);
-        if (Math.abs(owner.x - opp.x) < g2) {
-          owner.x = opp.x - side * g2;
-          clampToStage(owner);
-        }
-      }
-    }
+  // 分身の位置：いつも相手をはさんで影の鏡写し（影－相手－分身で、影と相手の距離と相手と分身の距離が同じ）
+  function mirrorX(f, opp) {
+    const { min, max } = cloneLimits(f);
+    return Math.max(min, Math.min(max, 2 * opp.x - f.x));
   }
 
   // 分身を消す
@@ -1597,14 +1577,14 @@
     f.facing = Math.sign(opp.x - f.x) || f.facing;
     c.facing = Math.sign(opp.x - c.x) || c.facing;
     f.swapCool = CHARACTERS[f.charId].clone.swapCooldown;
-    f.swapped = true;
     state.effects.push({ kind: "swap", x1: c.x / S, x2: f.x / S, y: f.y / S - fighterHeight(f) / 2, owner: i, life: 14 });
   }
 
-  // 分身を1フレーム進める（影が動いたあと）。preX は影が動く前の位置
-  //   ・影が自分で動ける（技・歩き・ジャンプ・影潜りなど）なら、同じ行動をする。前後の動きは「相手に向かう向き」で同じだけ
-  //   ・影が攻撃を受けている・ガードしている・倒れている・投げている間は、その場で止まって待つ
-  function updateClone(state, f, opp, preX) {
+  // 分身を1フレーム進める（影が動いたあと）
+  //   ・位置と向きは、いつも相手をはさんだ影の鏡写し（影－相手－分身の距離が同じ）
+  //   ・影が自分で動ける（技・歩き・ジャンプ・影潜りなど）なら、同じ行動をする
+  //   ・影が攻撃を受けている・ガードしている・倒れている・投げている間は、立って待つ
+  function updateClone(state, f, opp) {
     const c = f.clone;
     if (!c) return;
     c.timer -= 1;
@@ -1628,7 +1608,6 @@
         }
       }
       c.pose = c.onGround ? POSE.STAND : POSE.JUMP;
-      if (c.onGround) c.facing = Math.sign(opp.x - c.x) || c.facing; // 待っている間も相手の方を向く
       c.lastMove = null;
     } else {
       if (f.move !== c.lastMove || f.moveFrame < c.lastFrame) c.moveHit = false;
@@ -1644,31 +1623,16 @@
       c.onGround = f.onGround;
       c.y = f.y;
       c.vy = f.vy;
-      // 影が前に進んだ分だけ、分身も自分の前（相手の方）に進む
-      if (!f.swapped) c.x += (f.x - preX) * f.facing * c.facing;
-      // 向き：影が向き直れるとき・技を出した瞬間・潜っている間・分身が地上で技を出していないときは、相手の方を向く
-      // （分身だけが相手を飛び越したときも、着地したら向き直る）
-      if (canTurn(f) || f.action === POSE.SHADOW || (f.move && f.moveFrame === 1) || (c.onGround && !c.move)) c.facing = Math.sign(opp.x - c.x) || c.facing;
-      // 飛び道具も同じ時に撃つ（分身の飛び道具は画面に1つまで）
+    }
+    // 位置と向きは、相手をはさんだ影の鏡写し（影が動いても相手が動いても、影－相手－分身の距離はいつも同じ）
+    c.x = mirrorX(f, opp);
+    c.facing = -f.facing;
+    c.pushVx = 0;
+    // 飛び道具も同じ時に撃つ（分身の飛び道具は画面に1つまで）。向きを決めてから撃つ
+    if (!busy) {
       const m = moveData(c);
       if (m && m.projectile && c.moveFrame === m.startup && !state.projectiles.some((p) => p.clone && p.owner === c.cloneOf)) spawnProjectile(state, c, m);
     }
-    f.swapped = false;
-    c.x += c.pushVx;
-    c.pushVx = Math.trunc((c.pushVx * 4) / 5);
-    // 相手の体には重ならない（分身だけが押し戻される）。潜っている間はすり抜ける
-    if (c.action !== POSE.SHADOW && opp.action !== POSE.SHADOW) {
-      const cTop = c.y - Math.round(fighterHeight(c) * PUSH_HEIGHT_RATIO) * S;
-      const oTop = opp.y - Math.round(fighterHeight(opp) * PUSH_HEIGHT_RATIO) * S;
-      clampClone(c);
-      if (!(c.y <= oTop || opp.y <= cTop) && Math.abs(c.x - opp.x) < cloneGap(c, opp)) {
-        // 分身が相手のどちら側にいるか。ぴったり重なったら、画面の広い方
-        const lim = stageLimits(opp);
-        const side = Math.sign(c.x - opp.x) || (lim.max - opp.x >= opp.x - lim.min ? 1 : -1);
-        separateClone(c, opp, side, f);
-      }
-    }
-    clampClone(c);
   }
 
   // 分身の技：ダメージだけ影の damageRate %
@@ -2384,14 +2348,13 @@
       const body = hurtbox(state.fighters[i]);
       state.fighters[i].pinned = !!(zone && body && overlap(zone, body));
     }
-    const preX = [a.x, b.x]; // 分身（カゲ）が、影の動いた分だけ動くため
     updateFighter(state, a, fighting ? inputs[0] | 0 : 0);
     updateFighter(state, b, fighting ? inputs[1] | 0 : 0);
     if (fighting) updateThrows(state);
     pushApart(a, b);
     if (fighting) {
-      updateClone(state, a, b, preX[0]);
-      updateClone(state, b, a, preX[1]);
+      updateClone(state, a, b);
+      updateClone(state, b, a);
     } else {
       // 決着したら分身は消える（止まったまま残らない）
       for (const f of state.fighters) if (f.clone) vanishClone(state, f);
