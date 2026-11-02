@@ -1484,10 +1484,10 @@
     return !!(m && m.dive && f.moveFrame >= m.startup && !f.onGround);
   }
 
-  // 分身を出す：相手を挟んで反対側（今の影と相手の距離と同じだけ後ろ）。画面の外になるときは画面端
+  // 分身を出す：相手を挟んで反対側（今の影と相手の距離と同じだけ後ろ）。画面の外になるときは画面の外に出る
   function spawnClone(state, f, opp) {
     const i = state.fighters.indexOf(f);
-    const lim = stageLimits(f);
+    const lim = cloneLimits(f);
     // 相手の向こう側（相手と同じ側にいるときは、相手の前に出ないよう相手の体の幅だけは離す）
     const side = Math.sign(opp.x - f.x) || f.facing;
     const gap = Math.max(Math.abs(opp.x - f.x), cloneGap(f, opp));
@@ -1518,9 +1518,23 @@
       timer: CHARACTERS[f.charId].clone.frames,
     };
     f.swapCool = 0;
-    // 画面端で相手の後ろに入る場所がないときは、相手を押し出して分身の場所を空ける
-    separateClone(f.clone, opp, side, f);
     state.effects.push({ kind: "smoke", x: x / S, y: C.GROUND_Y - CHARACTERS[f.charId].height / 2, owner: i, life: 20 });
+  }
+
+  // 分身が動ける範囲：画面の外にも出られる（画面の両側に画面1つ分まで）
+  function cloneLimits(c) {
+    const lim = stageLimits(c);
+    return { min: lim.min - C.STAGE_WIDTH * S, max: lim.max + C.STAGE_WIDTH * S };
+  }
+  function clampClone(c) {
+    const { min, max } = cloneLimits(c);
+    if (c.x < min) c.x = min;
+    if (c.x > max) c.x = max;
+  }
+  // 分身が画面の外にいるか（体の真ん中が、本人の動ける範囲の外）
+  function cloneOffscreen(c) {
+    const lim = stageLimits(c);
+    return c.x < lim.min || c.x > lim.max;
   }
 
   // 分身と相手の体が重ならない距離
@@ -1535,7 +1549,7 @@
     const gap = cloneGap(c, opp);
     if (Math.abs(c.x - opp.x) >= gap && Math.sign(c.x - opp.x) === side) return;
     c.x = opp.x + side * gap;
-    clampToStage(c);
+    clampClone(c);
     if (Math.abs(c.x - opp.x) < gap) {
       opp.x = c.x - side * gap;
       clampToStage(opp);
@@ -1558,13 +1572,28 @@
   }
 
   // 影と分身の位置を入れ替える。技の進み具合はそのまま（両方とも同じ行動をしているので途切れない）
+  // 分身が画面の外にいるときは、影は分身の側の画面端に行き、分身は相手をはさんで反対側（そのときの影と相手の距離）に行く
   function swapClone(state, f) {
     const c = f.clone;
     const i = state.fighters.indexOf(f);
     const opp = state.fighters[1 - i];
-    const x = f.x;
-    f.x = c.x;
-    c.x = x;
+    if (cloneOffscreen(c)) {
+      const lim = stageLimits(f);
+      const side = Math.sign(c.x - opp.x) || f.facing; // 分身が相手のどちら側にいるか
+      f.x = side > 0 ? lim.max : lim.min;
+      // 相手が端にいて影が重なるなら、相手を内側へ押し出す（影が相手の後ろに回る）
+      const gap = cloneGap(f, opp);
+      if (Math.sign(f.x - opp.x) !== side || Math.abs(f.x - opp.x) < gap) {
+        opp.x = f.x - side * gap;
+        clampToStage(opp);
+      }
+      c.x = opp.x - (f.x - opp.x);
+      clampClone(c);
+    } else {
+      const x = f.x;
+      f.x = c.x;
+      c.x = x;
+    }
     f.facing = Math.sign(opp.x - f.x) || f.facing;
     c.facing = Math.sign(opp.x - c.x) || c.facing;
     f.swapCool = CHARACTERS[f.charId].clone.swapCooldown;
@@ -1631,7 +1660,7 @@
     if (c.action !== POSE.SHADOW && opp.action !== POSE.SHADOW) {
       const cTop = c.y - Math.round(fighterHeight(c) * PUSH_HEIGHT_RATIO) * S;
       const oTop = opp.y - Math.round(fighterHeight(opp) * PUSH_HEIGHT_RATIO) * S;
-      clampToStage(c);
+      clampClone(c);
       if (!(c.y <= oTop || opp.y <= cTop) && Math.abs(c.x - opp.x) < cloneGap(c, opp)) {
         // 分身が相手のどちら側にいるか。ぴったり重なったら、画面の広い方
         const lim = stageLimits(opp);
@@ -1639,7 +1668,7 @@
         separateClone(c, opp, side, f);
       }
     }
-    clampToStage(c);
+    clampClone(c);
   }
 
   // 分身の技：ダメージだけ影の damageRate %
@@ -1739,7 +1768,10 @@
         }
       }
     }
-    state.projectiles = list.filter((p) => !p.dead && p.x > -50 * S && p.x < (C.STAGE_WIDTH + 50) * S);
+    // 分身の飛び道具は画面の外から飛んでくることがあるので、画面の外でも画面の方へ向かっている間は消さない
+    const inside = (p) => p.x > -50 * S && p.x < (C.STAGE_WIDTH + 50) * S;
+    const coming = (p) => p.clone && Math.abs(p.x - (C.STAGE_WIDTH / 2) * S) < C.STAGE_WIDTH * 2 * S && (p.x < 0 ? p.vx > 0 : p.vx < 0);
+    state.projectiles = list.filter((p) => !p.dead && (inside(p) || coming(p)));
   }
 
   // 影縫い範囲：技を出してから当たる時間が終わるまで、当たる範囲を少し広げた四角。それ以外は null
@@ -2360,6 +2392,9 @@
     if (fighting) {
       updateClone(state, a, b, preX[0]);
       updateClone(state, b, a, preX[1]);
+    } else {
+      // 決着したら分身は消える（止まったまま残らない）
+      for (const f of state.fighters) if (f.clone) vanishClone(state, f);
     }
     moveProjectiles(state);
     if (fighting) state.fighters.forEach((f) => updateHead(state, f));

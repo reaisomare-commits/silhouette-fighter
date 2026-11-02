@@ -2744,6 +2744,25 @@ require("../src/core/autobattle.js");
     assert.ok(kg.clone.x - op.x >= gap && op.x - kg.x >= gap - S, `画面端で相手を押すと分身・相手・影が重なる（影${kg.x / S}・相手${op.x / S}・分身${kg.clone.x / S}）`);
     assert.strictEqual(kg.clone.facing, -1, "画面端の分身が相手の方を向いていない");
   }
+  // 分身は画面の外にも出る。画面の外から飛び道具が飛んでくる。画面の外の分身と入れ替えると、影は分身の側の画面端へ、分身は相手をはさんで反対側へ
+  {
+    const wall = SF.constants.STAGE_WIDTH - SF.constants.STAGE_MARGIN - K.width / 2;
+    const of = kGame("kagetsu", 300, 800, FULL);
+    run(of, 50, (i) => (i === 0 ? I | O : 0), 0);
+    assert.strictEqual(of.fighters[0].clone.x, 1300 * S, "分身が画面の外に出ない");
+    let comes = false;
+    run(of, 90, (i) => (i === 0 ? O : 0), 0, (i, s) => {
+      if (s.projectiles.some((p) => p.clone && p.x < SF.constants.STAGE_WIDTH * S)) comes = true;
+    });
+    assert.ok(comes, "画面の外の分身の飛び道具が画面に入ってこない");
+    run(of, 20, 0, 0);
+    const ox = of.fighters[1].x;
+    run(of, 2, (i) => (i === 0 ? I | O : 0), 0);
+    const [k2, o2] = of.fighters;
+    assert.strictEqual(k2.x, wall * S, "画面の外の分身と入れ替えても、影が画面端に行かない");
+    assert.strictEqual(k2.clone.x, o2.x - (k2.x - o2.x), "入れ替えたあと、分身が相手をはさんで反対側に来ない");
+    assert.ok(Math.abs(o2.x - ox) <= S, "入れ替えで相手が動いた");
+  }
   // 6秒で消える
   const ep = kGame("kagetsu", 300, 500, FULL);
   run(ep, 45 + K.clone.frames + 1, (i) => (i === 0 ? I | O : 0), 0);
