@@ -14,10 +14,11 @@
       walkForward: 2.75, // 相手に向かって歩く
       walkBack: 2.2, // 下がる（立ちガードしながら）
       // ジャンプ
+      // ver 0.9.0 で鋭くした（低く速く、前に大きく進む。飛び道具を見てから跳び込めるように）
       jumpVelocity: 14.4, // 跳んだ瞬間の上向きの速さ
-      jumpForward: 2.9, // 斜めジャンプの横の速さ
-      gravity: 0.65, // 毎フレーム下向きに加わる速さ
-      // → 高さ約160ピクセル、滞空約45フレーム（0.75秒）。前ジャンプで約130ピクセル進む
+      jumpForward: 4.4, // 斜めジャンプの横の速さ
+      gravity: 0.8, // 毎フレーム下向きに加わる速さ
+      // → 高さ約130ピクセル、滞空約36フレーム（0.6秒）。前ジャンプで約160ピクセル進む
       landingLag: 3, // 着地してから動けない時間（フレーム）
       // 前を素早く2回：ステップ（決まった距離だけ踏み込む）
       forwardDash: {
@@ -90,9 +91,9 @@
       walkBack: 3.2,
       // ジャンプはカゲツと同じ
       jumpVelocity: 14.4,
-      jumpForward: 2.9,
-      gravity: 0.65,
-      // → 高さ約160ピクセル、滞空約45フレーム（0.75秒）
+      jumpForward: 4.4,
+      gravity: 0.8,
+      // → 高さ約130ピクセル、滞空約36フレーム（0.6秒）
       landingLag: 3,
       // 前を素早く2回：ダッシュ（押している間ずっと走る）
       forwardDash: {
@@ -106,7 +107,8 @@
       lightChainMax: 2, // リンはUを2回つないでからIにもつなげられる
       moves: {
         standLight: { name: "ジャブ", startup: 4, active: 2, recovery: 8, hitAdv: 4, blockAdv: 2, damage: 30, guard: "mid", hitbox: { x1: 15, x2: 68, y1: 70, y2: 112 }, push: 16 },
-        standHeavy: { name: "回し蹴り", startup: 9, active: 3, recovery: 16, hitAdv: 3, blockAdv: -2, damage: 80, guard: "high", hitbox: { x1: 15, x2: 98, y1: 60, y2: 125 }, push: 26 },
+        // かかと落とし：中段（立ちガードでしか防げない）。足を高く振り上げてから落とすので遅く（18F）、見てから立ちガードできる。当たるとダウン
+        standHeavy: { name: "かかと落とし", startup: 18, active: 3, recovery: 16, hitAdv: "down", blockAdv: -2, damage: 90, guard: "high", hitbox: { x1: 15, x2: 98, y1: 60, y2: 125 }, push: 26 },
         crouchLight: { name: "小足", startup: 4, active: 2, recovery: 9, hitAdv: 3, blockAdv: 1, damage: 25, guard: "low", hitbox: { x1: 15, x2: 78, y1: 0, y2: 30 }, push: 16 },
         crouchHeavy: { name: "足払い", startup: 10, active: 3, recovery: 20, hitAdv: "down", blockAdv: -8, damage: 70, guard: "low", hitbox: { x1: 15, x2: 98, y1: 0, y2: 30 }, push: 22, noCancel: true },
         airLight: { name: "空中攻撃（弱）", startup: 5, active: 6, recovery: null, hitAdv: 9, blockAdv: 2, damage: 25, guard: "air", hitbox: { x1: 0, x2: 58, y1: -15, y2: 50 }, push: 10 },
@@ -134,10 +136,10 @@
       walkForward: 2.3,
       walkBack: 2.3,
       // カゲツ・リンより少しふわっと跳ぶ
-      jumpVelocity: 13.3,
-      jumpForward: 2.45,
-      gravity: 0.555,
-      // → 高さ約160ピクセル、滞空約48フレーム
+      jumpVelocity: 13.4,
+      jumpForward: 3.6,
+      gravity: 0.65,
+      // → 高さ約130ピクセル、滞空約40フレーム。前ジャンプで約145ピクセル進む
       landingLag: 4,
       // 浮遊：ジャンプの頂上を過ぎてからジャンプのキーを押し続けると、落ちずに浮いて止まる（1回のジャンプで1回）。
       //   frames: 浮いていられる最大のフレーム数、speed: 浮いている間に左右のキーで動く速さ（1フレームに何ピクセル）
@@ -185,10 +187,10 @@
       walkForward: 1.95,
       walkBack: 1.6,
       // 低く重いジャンプ
-      jumpVelocity: 12.8,
-      jumpForward: 2.45,
-      gravity: 0.64,
-      // → 高さ約128ピクセル、滞空約40フレーム
+      jumpVelocity: 13.6,
+      jumpForward: 3.5,
+      gravity: 0.8,
+      // → 高さ約115ピクセル、滞空約34フレーム。前ジャンプで約120ピクセル進む
       landingLag: 5,
       // 前を素早く2回：踏み込み（約58ピクセル）。出だしの invincible フレームは攻撃も投げも当たらない（無敵）。
       //   踏み込んでいる間（projectileInvincible フレーム）はずっと飛び道具が当たらない（すり抜ける）
@@ -196,6 +198,8 @@
       backDash: { frames: 10, speed: 4.6, recovery: 14, invincible: 6 }, // 約46ピクセル下がる
       health: 1300,
       lightChainMax: 1,
+      // 空振りでもキャンセルして出せる技：from の技（step＝踏み込み）の最中に to を出せる
+      whiffCancel: { from: ["standLight", "crouchLight", "step"], to: "crouchHeavy" },
       // ゴウだけの性質：
       //   armor: 踏ん張り。from〜to フレーム目に攻撃を受けても、1発だけは技が止まらない（ダメージは受ける。ゲージ技は受け止められない）
       //   投げ（kind: "throw"）の noTech: true は投げ抜けできない投げ。掴んだら hold フレームかけて投げ、投げたあと finish フレーム動けない
@@ -204,11 +208,15 @@
       moves: {
         // 張り手：弱攻撃なのにリーチが長い（強攻撃なみ）。そのかわり腕のやられる範囲も同じだけ前に出るので、強攻撃を合わされると負ける。
         // 張り手・大張り手は当たる範囲の上側が低め（頭の上の相手には当たりにくい）。弱強の技は硬直が長く、ガードされると不利が大きい
-        standLight: { name: "張り手", startup: 7, active: 3, recovery: 15, hitAdv: 2, blockAdv: -3, damage: 60, guard: "mid", hitbox: { x1: 20, x2: 125, y1: 95, y2: 135 }, hurtExtend: { x1: 0, x2: 125, y1: 95, y2: 150 }, push: 20 },
+        //   ver 0.9.0：硬直を短く（小回りが効く）、当たったら+5
+        standLight: { name: "張り手", startup: 7, active: 3, recovery: 11, hitAdv: 5, blockAdv: -1, damage: 60, guard: "mid", hitbox: { x1: 20, x2: 125, y1: 95, y2: 135 }, hurtExtend: { x1: 0, x2: 125, y1: 95, y2: 150 }, push: 20 },
         // 大振りだが、出だしから発生の直前（発生の2F前）まで1発だけ攻撃を受け止める（踏ん張り）。当たる時間には踏ん張りがない
         standHeavy: { name: "大張り手", startup: 18, active: 4, recovery: 25, hitAdv: 3, blockAdv: -9, damage: 130, guard: "mid", hitbox: { x1: 25, x2: 125, y1: 80, y2: 140 }, push: 30, armor: { from: 1, to: 16 } },
-        crouchLight: { name: "すね蹴り", startup: 8, active: 2, recovery: 15, hitAdv: 2, blockAdv: -4, damage: 50, guard: "low", hitbox: { x1: 20, x2: 100, y1: 0, y2: 35 }, push: 18 },
-        crouchHeavy: { name: "四股踏み", startup: 16, active: 4, recovery: 27, hitAdv: "down", blockAdv: -13, damage: 120, guard: "low", hitbox: { x1: 10, x2: 125, y1: 0, y2: 25 }, push: 24, noCancel: true },
+        crouchLight: { name: "すね蹴り", startup: 8, active: 2, recovery: 15, hitAdv: 5, blockAdv: -4, damage: 50, guard: "low", hitbox: { x1: 20, x2: 100, y1: 0, y2: 35 }, push: 18 },
+        // 四股踏み：足を高く振り上げて地面に叩きつけ、地面全体を揺らす。地面にいる相手には画面のどこにいても当たる（shockwave）。
+        //   立ち・しゃがみどちらでもガードできる。空中の相手（跳んだ瞬間から）には当たらない。発生が遅いので見てから跳べる。
+        //   張り手・すね蹴り（空振りでも）と踏み込みからキャンセルして出せる（whiffCancel）
+        crouchHeavy: { name: "四股踏み", startup: 24, active: 4, recovery: 32, hitAdv: "down", blockAdv: -16, damage: 100, guard: "mid", hitbox: { x1: 10, x2: 125, y1: 0, y2: 25 }, shockwave: true, push: 24, noCancel: true },
         airLight: { name: "肘落とし", startup: 7, active: 6, recovery: null, hitAdv: 10, blockAdv: 2, damage: 50, guard: "air", hitbox: { x1: 0, x2: 68, y1: -15, y2: 55 }, push: 10 },
         // ボディプレス：体ごと落ちてくる。下向きに広い
         airHeavy: { name: "ボディプレス", startup: 10, active: 8, recovery: null, hitAdv: 13, blockAdv: 3, damage: 110, guard: "air", hitbox: { x1: -25, x2: 72, y1: -35, y2: 40 }, push: 14 },
@@ -276,7 +284,7 @@
     // 積極的な動きのボーナス：上と同じ「前に進んだ距離 − 下がった距離」が、そのラウンドで一番前に出た記録を
     // distance ピクセル更新するたびに、ゲージが gain 増える（前に歩く・走る・前ジャンプなど）。
     // 攻撃で押し戻された分は引かれないが、自分から下がった分は取り戻すまで増えない（前後の往復では溜まらない）
-    aggressive: { distance: 100, gain: 1 },
+    aggressive: { distance: 40, gain: 2 },
   };
 
   const IDS = Object.keys(CHARACTERS);

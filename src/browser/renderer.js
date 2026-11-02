@@ -395,6 +395,7 @@
       if (atk) {
         const fwd = { standLight: 8, standHeavy: 14, crouchLight: 4, crouchHeavy: 2, special: 10, throw: 8, super: 22, crouchSpecial: -6, airHeavy: 14 }[move] || 4;
         lean = lerp(-4 * atk.wind, fwd, atk.ext);
+        if (stomp && !atk.ext && !atk.rec) lean = -16 * atk.wind; // 足を振り上げる間は体を後ろへ反らす
       }
       if (f.grab) lean = -2;
       const legW = 18;
@@ -411,9 +412,11 @@
           limb(22, hipY + 22, 14, hipY + 40, legW);
         }
       } else if (stomp) {
-        const raise = atk.ext > 0 || atk.rec ? 0 : atk.wind;
+        // 四股踏み：前の足を頭の高さまでゆっくり振り上げてから、地面に叩きつける
+        // 振りかぶりの前の6割で上げきり、踏み下ろすまで上げたまま止める（いつ落ちてくるか見やすいように）
+        const raise = atk.ext > 0 || atk.rec ? 0 : Math.min(1, atk.wind / 0.6);
         limb(-10, hipY, -26, 0, legW);
-        limb(10, hipY, lerp(30, 40, raise), lerp(0, hipY + 10, raise), legW);
+        limb(10, hipY, lerp(30, 62, raise), lerp(0, headY + 10, raise), legW);
       } else if (crouching) {
         limb(-10, hipY, -30, -26, legW);
         limb(-30, -26, -24, 0, legW);
@@ -539,6 +542,7 @@
       const w = c.width;
       const p = f.pose;
       let crouching = f.crouching;
+      if (f.move && c.moves[f.move] && c.moves[f.move].shockwave) crouching = false; // 四股踏みは立って足を振り上げる
       const guarding =
         p === POSE.GUARD_STAND || p === POSE.GUARD_CROUCH || p === POSE.BLOCK;
       let hurt = p === POSE.HIT || p === POSE.LAUNCH || p === POSE.THROWN || p === POSE.TECH;
@@ -648,7 +652,15 @@
       let kickFoot = null;
       if (!isKagetsu && atk) {
         const e = atk.ext;
-        if (move === "standHeavy") kickFoot = { x: lerp(14, 88, e), y: lerp(0, -95, e) };
+        // かかと落とし：前の足を頭の上まで振り上げてから、相手の頭へ叩き下ろす
+        //   振りかぶりの前の7割で頭の上まで上げ、残りで前へ振り下ろし始める。当たる瞬間は相手の肩の高さ、戻りで地面へ下ろす
+        if (move === "standHeavy") {
+          const up = { x: 30, y: -h - 34 };
+          const hitAt = { x: 82, y: -74 };
+          if (e > 0 || atk.rec) kickFoot = { x: lerp(24, hitAt.x, e), y: lerp(0, hitAt.y, e) };
+          else if (atk.wind < 0.7) kickFoot = { x: lerp(14, up.x, atk.wind / 0.7), y: lerp(0, up.y, atk.wind / 0.7) };
+          else kickFoot = { x: lerp(up.x, 74, (atk.wind - 0.7) / 0.3), y: lerp(up.y, -122, (atk.wind - 0.7) / 0.3) };
+        }
         if (move === "crouchLight") kickFoot = { x: lerp(20, 72, e), y: -6 };
         if (move === "crouchHeavy") kickFoot = { x: lerp(20, 92, e), y: -4 };
         if (move === "airHeavy") kickFoot = { x: lerp(16, 72, e), y: lerp(hipY + 38, hipY + 70, e) };
@@ -679,7 +691,7 @@
           limb(20, -22, 18, 0, legW);
         }
       } else if (kickFoot) {
-        // 立ち回し蹴り：後ろ足で立って前の足を高く上げる
+        // かかと落とし：後ろ足で立って前の足を高く上げる
         limb(-5, hipY, -14, 0, legW);
         limb(5, hipY, kickFoot.x, kickFoot.y, legW);
       } else if (p === POSE.RUN) {
@@ -929,6 +941,37 @@
           ctx.save();
           ctx.globalAlpha = Math.min(1, e.life / 10);
           portal(e.x, e.y, 22, e.h / 2 + 10, Math.min(1, e.life / 14), e.mirror ? ACCENT_MIRROR[e.charId] : c);
+          ctx.restore();
+          continue;
+        }
+        if (e.kind === "quake") {
+          // 四股踏みの衝撃：踏み下ろした所から、地響きが届く所まで（前は reach、後ろは back ピクセル）地面を伝わる
+          const t = 1 - e.life / e.max;
+          const f = state.fighters[e.owner];
+          const c = ACCENT[f.charId] || "#ffb347";
+          const gy = C.GROUND_Y;
+          const grow = Math.min(1, t * 2.5); // 最初の4割の時間で届く所まで広がる
+          ctx.save();
+          ctx.strokeStyle = c;
+          ctx.lineWidth = 5;
+          for (const [dir, len] of [[e.facing, e.reach], [-e.facing, e.back]]) {
+            for (let k = 0; k < 3; k++) {
+              const r = Math.max(0, grow * len - k * 30);
+              const x = e.x + dir * r;
+              ctx.globalAlpha = 0.85 * (1 - t);
+              ctx.beginPath();
+              ctx.moveTo(x - 22, gy);
+              ctx.lineTo(x, gy - 14 + k * 4);
+              ctx.lineTo(x + 22, gy);
+              ctx.stroke();
+            }
+          }
+          // 地響きが届く範囲の地面を光らせる
+          ctx.fillStyle = c;
+          ctx.globalAlpha = 0.3 * (1 - t);
+          const x1 = e.x - e.facing * e.back;
+          const x2 = e.x + e.facing * e.reach * grow;
+          ctx.fillRect(Math.min(x1, x2), gy - 6, Math.abs(x2 - x1), 6);
           ctx.restore();
           continue;
         }

@@ -12,6 +12,10 @@
   const MIN_ALPHA = 0.03; // 表を直す強さの下限（はじめは大きく、同じ場面を何度も経験すると小さくなる）
   const ROUND_REWARD = 1; // ラウンドの勝ち負けでもらう得点
   const DOWN_REWARD = 0.03; // 相手をダウンさせたらもらう得点（自分がダウンしたら引く）。起き攻めの機会を取りにいくように
+  // 体力で勝っている間は時間がたつほど少しずつもらい、負けている間は少しずつ引かれる（1秒あたり）。
+  //   勝っている側はタイムアップまで守りきってもよく、負けている側は攻めて取り返しに行かなければならないように。
+  //   ラウンド1つ（60秒）ずっと勝っていても 0.3 で、ラウンドの勝ち負け（1）よりずっと小さい
+  const LEAD_REWARD = 0.005;
   const PLAYER_ALPHA = 0.2; // あなたとの対戦から学ぶときの、表を直す強さ（試合数が少なくても戦い方が変わるように大きめ）
   const PLAYER_EXPLORE = 0.05; // あなたとの対戦から学ぶときに、わざと別の行動を試す確率
 
@@ -24,10 +28,12 @@
   // 決まりは上から順に見て、最初に当てはまったものを使う。dist＝距離（DIST_LABELS の番号）、opp＝相手の様子（OPP_LABELS の番号、なければどれでも）
   //   距離：0 投げの距離、1 弱攻撃の距離、2 強攻撃の距離、3 少し遠い、4 遠い、5 とても遠い
   //   相手：0 ふつう、1 しゃがみ・ガード、2 技を出している、3 技のスキ、4 のけぞり・ガード硬直、5 空中、6 倒れている
+  //   gauge: true の決まりは、自分のゲージが満タンのときだけ
   const POLICY = {
     // カゲツ：基本は待ち。大振り斬り（I）→ 飛刃（O）のキャンセルは隙が少ないので、とりあえず振りやすい。ジャンプ強攻撃は攻めに使う。
     //   跳んできたら昇り斬り。ゲージ技（月影斬）は攻められているときの切り返しと、相手が牽制などで動いたのを見て撃つ（cpu.js）
     kagetsu: [
+      { gauge: true, opp: [2, 3], dist: [0, 1, 2, 3], act: { super: 3, heavy: 1 } },
       { opp: [6], dist: [0, 1, 2, 3], act: { okiStrike: 2, okiLow: 2, okiThrow: 2, wait: 1 } },
       { opp: [5], dist: [0, 1, 2, 3], act: { crouchSpecial: 4, back: 1 } },
       { opp: [3], dist: [0, 1, 2], act: { heavy: 3, special: 1 } },
@@ -36,9 +42,10 @@
       { dist: [2], act: { heavy: 4, wait: 1, back: 1, jump: 1 } },
       { dist: [0, 1], act: { light: 2, heavy: 2, throw: 1, back: 1 } },
     ],
-    // リン：ためた突進拳（O）も使いながら近づき、回し蹴り（I・中段）と下段で崩す。
+    // リン：ためた突進拳（O）も使いながら近づき、かかと落とし（I・中段、当たるとダウン）と下段で崩す。
     //   ゲージ技（練気）は攻めている最中に出し、I・S＋U・S＋I → O をくり返して攻め続ける（cpu.js）
     rin: [
+      { gauge: true, opp: [0, 1, 4], dist: [0, 1, 2], act: { super: 2, heavy: 1, crouchLight: 1 } },
       { opp: [6], dist: [0, 1, 2, 3], act: { okiStrike: 2, okiLow: 2, okiThrow: 2, wait: 1 } },
       { opp: [1], dist: [2, 3], act: { dashThrow: 2, dashLow: 2, heavy: 1 } },
       { opp: [5], dist: [0, 1, 2, 3], act: { crouchSpecial: 4, back: 1 } },
@@ -51,6 +58,7 @@
     // ゲンマ：ジャンプと浮遊で逃げ回りながら異空間弾をまく。キャンセルの O は隙をさらしやすいので連続技には入れない。
     //   近づかれたら前後のワープで逃げる。ゲージ技（冥府球）をガードさせたら、上りの空中攻撃と下段で崩す（cpu.js）
     genma: [
+      { gauge: true, opp: [0, 1, 2, 3], dist: [3, 4, 5], act: { super: 2, special: 1 } },
       { opp: [6], dist: [0, 1, 2], act: { okiLow: 2, okiThrow: 1, special: 1 } },
       { opp: [5], dist: [0, 1, 2], act: { backdash: 2, crouchSpecial: 1 } },
       { dist: [4, 5], act: { special: 3, jumpUp: 3, jumpBack: 1 } },
@@ -61,6 +69,7 @@
     // ゴウ：張り手（U）で牽制し、当たったら四股踏み（S＋I）へキャンセル。大張り手（I・踏ん張り）で近づいて岩落とし（O）を狙う。
     //   ダウンさせたら、起き上がりに岩落とし、跳んだらつかみ上げ、バックステップには攻撃で択をかける（cpu.js）。ゲージ技はカゲツと同じ使い方
     gou: [
+      { gauge: true, opp: [0, 1, 3], dist: [0], act: { super: 3, special: 1 } },
       { opp: [6], dist: [0, 1, 2, 3], act: { okiThrow: 3, okiStrike: 1, okiLow: 1, wait: 1 } },
       { opp: [1], dist: [2, 3], act: { dashThrow: 3, heavy: 1 } },
       { opp: [5], dist: [0, 1, 2, 3], act: { crouchSpecial: 4 } },
@@ -80,8 +89,8 @@
   function policyFor(charId, s) {
     const rules = POLICY[charId];
     if (!rules) return null;
-    const { d, os } = SF.learn.stateParts(s);
-    const rule = rules.find((r) => r.dist.includes(d) && (!r.opp || r.opp.includes(os)));
+    const { d, os, gauge } = SF.learn.stateParts(s);
+    const rule = rules.find((r) => r.dist.includes(d) && (!r.opp || r.opp.includes(os)) && (!r.gauge || gauge));
     return rule ? rule.act : null;
   }
 
@@ -102,7 +111,7 @@
     const me = state.fighters[index];
     const act = policyFor(me.charId, s);
     if (!act || SF.rng.nextInt(rng, 100) >= POLICY_GUIDE * 100) return undefined;
-    const ids = Object.keys(act).filter((id) => L.allowed(state, index, L.ACTION_INDEX[id]));
+    const ids = Object.keys(act).filter((id) => L.allowed(state, index, L.ACTION_INDEX[id], s));
     if (!ids.length) return undefined;
     let r = SF.rng.nextInt(rng, ids.reduce((t, id) => t + act[id], 0));
     for (const id of ids) {
@@ -130,6 +139,15 @@
     return dealt - taken + downs;
   }
 
+  // 前に考えたときから今までの時間で、体力（割合）で勝っていればプラス、負けていればマイナス
+  function leadReward(L, state, me, opp) {
+    const CH = SF.characters.CHARACTERS;
+    const lead = me.health / CH[me.charId].health - opp.health / CH[opp.charId].health;
+    if (Math.abs(lead) < 1e-9 || L.frame === undefined) return 0;
+    const seconds = Math.max(0, state.frame - L.frame) / 60;
+    return Math.sign(lead) * LEAD_REWARD * seconds;
+  }
+
   // 前の行動の表の数字を、もらった得点と「次の状況でいちばん良い数字」に近づける（Q学習）。nextS が -1 ならラウンドの終わり
   function update(L, reward, nextS) {
     const t = L.table;
@@ -141,8 +159,8 @@
   }
 
   // 様子見で考えるたびに learn.decide から呼ばれる（学習中だけ）
-  function learnStep(L, me, opp, s) {
-    update(L, damageReward(L, me, opp), s);
+  function learnStep(L, state, me, opp, s) {
+    update(L, damageReward(L, me, opp) + leadReward(L, state, me, opp), s);
   }
 
   // ラウンドが終わったときに learn.endRound から呼ばれる（学習中だけ）
@@ -151,7 +169,7 @@
     const opp = state.fighters[1 - index];
     const w = state.round.winner;
     const bonus = w === index ? ROUND_REWARD : w === 1 - index ? -ROUND_REWARD : 0;
-    update(L, damageReward(L, me, opp) + bonus, -1);
+    update(L, damageReward(L, me, opp) + leadReward(L, state, me, opp) + bonus, -1);
   }
 
   // ---- 学習の実行（画面なしで1試合） ----

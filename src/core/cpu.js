@@ -41,8 +41,8 @@
       crouchLight: ["special"], // 足元突き → 飛刃
     },
     rin: {
-      standLight: ["light", "heavy", "special"], // ジャブ → ジャブ → 回し蹴り → 突進拳
-      standHeavy: ["special"], // 回し蹴り → 突進拳
+      // かかと落とし（中段・発生18）は遅くて弱攻撃からはつながらないので、連続技には入れない（単発で崩しに使う）
+      standLight: ["light", "special"], // ジャブ → ジャブ → 突進拳
       crouchLight: ["light", "heavy"], // 小足 → 小足 → 足払い
     },
     genma: {
@@ -93,7 +93,7 @@
   const AIR_SHOT_CHANCE = 60;
 
   // 構えを決めるとき、投げ抜け狙いでなければ、しゃがみガードで待つ割合（%）。下段と中段を防げるので多め。
-  // 立ちガードで待つと、中段（リンの回し蹴り）と跳び込みを防げる
+  // 立ちガードで待つと、中段（リンのかかと落とし）と跳び込みを防げる
   const CROUCH_GUESS = 65;
   const PROJECTILE_ALERT = 260; // 飛び道具がこれより近づいたらガードを考える（ピクセル）
   const ANTI_AIR_RANGE = 130; // 跳んできた相手がこれより近づいたら対空技を出す（ピクセル、横の距離）
@@ -111,13 +111,14 @@
     gou: { confirm: true, maxDist: 240, grab: true },
   };
   // リンの練気で強くなっている間の連続技（すべての攻撃がキャンセルできるので長くつなぐ）
-  //   回し蹴り・小足・足払いと突進拳を交互にキャンセルし続けて、ガードされても攻めを続ける
+  //   かかと落とし・小足・足払いと突進拳を交互にキャンセルし続けて、ガードされても攻めを続ける
+  //   （かかと落としが当たったら相手はダウンするので、そこで連続技は終わる）
   const BUFF_COMBOS = {
     rin: {
-      standLight: ["heavy", "special", "crouchLight", "special", "heavy", "special"], // ジャブ → 回し蹴り → 突進拳 → 小足 → 突進拳 → 回し蹴り → 突進拳
-      standHeavy: ["special", "crouchLight", "special", "crouchHeavy", "special"], // 回し蹴り → 突進拳 → 小足 → 突進拳 → 足払い → 突進拳
-      crouchLight: ["special", "heavy", "special", "crouchHeavy", "special"], // 小足 → 突進拳 → 回し蹴り → 突進拳 → 足払い → 突進拳
-      crouchHeavy: ["special", "heavy", "special", "crouchLight", "special"], // 足払い → 突進拳 → 回し蹴り → 突進拳 → 小足 → 突進拳
+      standLight: ["heavy", "special", "crouchLight", "special", "heavy", "special"], // ジャブ → かかと落とし → 突進拳 → 小足 → 突進拳 → かかと落とし → 突進拳
+      standHeavy: ["special", "crouchLight", "special", "crouchHeavy", "special"], // かかと落とし → 突進拳 → 小足 → 突進拳 → 足払い → 突進拳
+      crouchLight: ["special", "heavy", "special", "crouchHeavy", "special"], // 小足 → 突進拳 → かかと落とし → 突進拳 → 足払い → 突進拳
+      crouchHeavy: ["special", "heavy", "special", "crouchLight", "special"], // 足払い → 突進拳 → かかと落とし → 突進拳 → 小足 → 突進拳
     },
   }; // 相手の様子を何フレーム前まで覚えておくか（反応の速さより長く）
 
@@ -637,9 +638,10 @@
     const plans = PLANS[me.charId] || PLANS.kagetsu;
     const band = dist <= reachOf(me, opp, "standLight") ? "near" : dist <= reachOf(me, opp, "standHeavy") ? "mid" : "far";
     let plan;
-    // ゲージが満タンなら、場面に合えばゲージ技を使う（学習AIも同じ決まりで使う。学習した表には入っていない）
+    // ゲージが満タンなら、場面に合えばゲージ技を使う。
+    //   学習AIは、様子見で使うかどうかを表で選ぶ（行動の「ゲージ技」）。連続技の締め・切り返し・見てから撃つのは反射神経なので、ほかのCPUと同じ
     const grabbable = !sp || !sp.grab || (o.onGround && o.pose !== POSE.HIT && o.pose !== POSE.BLOCK);
-    if (sp && !sp.confirm && grabbable && SF.game.gaugeFull(me) && sp.bands.includes(band) && dist <= sp.maxDist && chance(cpu, lv.superUse / sp.rate)) {
+    if (sp && !sp.confirm && !cpu.learner && grabbable && SF.game.gaugeFull(me) && sp.bands.includes(band) && dist <= sp.maxDist && chance(cpu, lv.superUse / sp.rate)) {
       return finish(cpu, SUPER);
     }
     if (cpu.learner) {
@@ -670,6 +672,9 @@
         }
         return pressMove(cpu, move);
       }
+      case "super":
+        cpu.hold = 0;
+        return finish(cpu, SUPER);
       case "dashThrow":
       case "dashLow": {
         // ダッシュで近づき、着いたら投げ（ゴウは岩落とし）・しゃがみ弱。届かなければ少し歩いてから

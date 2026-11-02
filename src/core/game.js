@@ -395,6 +395,9 @@
   //   ・U → I（リンは U → U → I も）
   function cancelTarget(state, f, down) {
     if (cancelAllActive(f)) return buffCancelTarget(state, f, down);
+    // 空振りでもキャンセルできる技（ゴウの張り手・すね蹴り → 四股踏み）。出したあと（発生してから）ならいつでも
+    const wc = whiffCancelTo(f, f.move, down);
+    if (wc && f.moveFrame >= moveData(f).startup) return wc;
     if (!f.moveHit || !GROUND_NORMALS.includes(f.move)) return null;
     if (moveData(f).noCancel) return null;
     const b = f.buffer;
@@ -406,6 +409,14 @@
       return down ? "crouchLight" : "standLight";
     }
     return null;
+  }
+
+  // 空振りキャンセル：from（技の名前か "step"）の最中に、今の先行入力で出せる技。なければ null
+  function whiffCancelTo(f, from, down) {
+    const wc = CHARACTERS[f.charId].whiffCancel;
+    if (!wc || !wc.from.includes(from)) return null;
+    const want = { crouchHeavy: down && f.buffer === "heavy", standHeavy: !down && f.buffer === "heavy", crouchLight: down && f.buffer === "light" }[wc.to];
+    return want ? wc.to : null;
   }
 
   // ゲージ技で強くなっている間（リンの練気）：すべての攻撃が、当たるかガードされたら別の攻撃でキャンセルできる
@@ -574,6 +585,8 @@
       } else {
         f.moveFrame += 1;
         if (m.projectile && f.moveFrame === m.startup) spawnProjectile(state, f, m);
+        // 地面を揺らす技：当たる時間の始めに、地面を伝う衝撃を出す（見た目だけ）
+        if (m.shockwave && f.moveFrame === m.startup) state.effects.push({ kind: "quake", x: f.x / S, owner: state.fighters.indexOf(f), facing: f.facing, back: SF.constants.STAGE_WIDTH, reach: SF.constants.STAGE_WIDTH, life: 30, max: 30 });
       }
       // 前に突っ込む技
       const cur = moveData(f);
@@ -582,6 +595,13 @@
         const speed = cur.lunge.speed + (cur.charge && f.move === "special" ? f.chargeFrames * cur.charge.speedPerFrame : 0);
         f.vx = f.facing * Math.trunc(speed * S);
       }
+    } else if (f.onGround && f.action === POSE.STEP && whiffCancelTo(f, "step", down)) {
+      // 踏み込みの最中から出せる技（ゴウの四股踏み）
+      const next = whiffCancelTo(f, "step", down);
+      f.action = null;
+      f.vx = 0;
+      f.crouching = next === "crouchLight" || next === "crouchHeavy";
+      startMove(state, f, next, true);
     } else if (f.onGround && f.action) {
       // ステップ・ダッシュ・バックステップの最中
       updateAction(f, st, { forward, down, jump: wantJump });
@@ -842,6 +862,8 @@
   function fighterHeight(f) {
     const c = CHARACTERS[f.charId];
     if (f.pose === POSE.DOWN) return DOWN_HEIGHT;
+    // 四股踏み（しゃがみ強だが、足を振り上げて立っている）は立っている高さ
+    if (f.move && c.moves[f.move] && c.moves[f.move].shockwave) return c.height;
     return f.crouching ? c.crouchHeight : c.height;
   }
 
@@ -924,6 +946,11 @@
     if (!isActive(f) || f.moveHit) return null;
     const m = moveData(f);
     if (!m.hitbox || m.kind === "throw") return null;
+    // 地面を揺らす技（ゴウの四股踏み）：画面の端から端まで、地面から hitbox の高さまで
+    if (m.shockwave) {
+      const y = f.y / S;
+      return { left: 0, right: SF.constants.STAGE_WIDTH, top: y - m.hitbox.y2, bottom: y - m.hitbox.y1 };
+    }
     return boxAt(f, m.hitbox);
   }
 
@@ -1206,9 +1233,17 @@
       }
     }
 
-    // 押し返し。ガードされたときは守った側はその場に踏みとどまり、攻めた側が下がる（影縫い）
+    // 押し返し。ガードされたときは両方が下がり、攻めた側の方が多く下がる（守った側 BLOCK_PUSH_DEF %、残りが攻めた側）。
+    //   守った側が画面端で下がれなかった分は、攻めた側が下がる
     if (blocked) {
-      if (!proj) att.pushVx = (-dir * pushPx * S) / 5;
+      if (!proj) {
+        const push = pushPx * S;
+        const limits = stageLimits(def);
+        const room = dir === 1 ? limits.max - def.x : def.x - limits.min;
+        const defPush = Math.min(Math.trunc((push * BLOCK_PUSH_DEF) / 100), Math.max(0, room));
+        if (def.onGround) def.pushVx = (dir * defPush) / 5;
+        att.pushVx = (-dir * (push - (def.onGround ? defPush : 0))) / 5;
+      }
       // 何回も当たる飛び道具は、ガードしている相手を押し出していく
       else if (multi) def.pushVx = (Math.sign(proj.vx) * pushPx * S) / 5;
     } else if (def.onGround) {
@@ -1221,6 +1256,9 @@
       if (!air && !proj && defPush < push) att.pushVx = (-dir * (push - defPush)) / 5;
     }
   }
+
+  // ガードされたとき、押し返しの距離のうち守った側が下がる割合（%）。残りは攻めた側が下がる
+  const BLOCK_PUSH_DEF = 40;
 
   function knockDown(f) {
     f.pose = POSE.DOWN;
@@ -1240,6 +1278,8 @@
       const att = state.fighters[i];
       const def = state.fighters[1 - i];
       const box = hitbox(att);
+      // 地面を揺らす技は、地面にいる相手にだけ当たる（跳んだ瞬間から当たらない）
+      if (box && moveData(att).shockwave && !def.onGround) continue;
       const body = box && touching(box, def);
       // つかみ上げ（ゴウ）の出だしは、空中の相手の攻撃が当たらない
       if (body && !att.onGround && airInvincible(def)) continue;
