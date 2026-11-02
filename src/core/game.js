@@ -529,6 +529,16 @@
       f.buffer = null;
       startSuper(state, f, !!f.move);
     }
+    // 頭が離れているときの O・S＋O（噛みつき・跳ね戻り）は頭だけが動く。本人は止まらず、隙もない（完全に別に動く）。
+    //   本人がのけぞり・ガード・ダウン・掴まれ中でなければ、本人の技の最中や空中でも出せる
+    if (f.buffer === "special" && headCommandReady(f)) {
+      f.buffer = null;
+      const name = headSpecialName(f, down);
+      if (name) {
+        record(state, f, name, "uses");
+        startHeadMove(state, f, CHARACTERS[f.charId].moves[name]);
+      }
+    }
     const wantAttack = ["light", "heavy", "special", "throw", "super"].includes(f.buffer) ? f.buffer : null;
     const wantJump = f.buffer === "jump";
     const doubleForward = f.buffer === "dashForward";
@@ -1053,6 +1063,13 @@
     return null;
   }
 
+  // 頭に噛みつき・跳ね戻りを命じられるか（頭が置いてあるか転がっていて、本人が攻撃を受けていない）
+  function headCommandReady(f) {
+    const h = f.head;
+    if (!h || (h.state !== "rest" && h.state !== "roll")) return false;
+    return f.stun === 0 && !f.grab && !BUSY_POSES.has(f.pose);
+  }
+
   // 頭から出すゲージ技を、本人の様子に関係なく出せるか（頭が離れていて、攻撃を受けて転がっていない）
   function headSuperReady(f) {
     const sup = CHARACTERS[f.charId].moves.super;
@@ -1147,6 +1164,8 @@
     const dir = Math.sign(opp.x - x) || f.facing;
     f.head = newHead(f, "super", x);
     f.head.dir = dir;
+    // 頭がムクロ本人の方へ向かって進むとき（相手の向こう側から出したとき）は、噛み終わったら頭が体に戻る
+    f.head.toBody = !fromBody && Math.sign(f.x - x) === dir;
     state.projectiles.push({
       owner: i,
       move: "super",
@@ -1253,8 +1272,16 @@
       fall();
     } else if (h.state === "super") {
       const p = state.projectiles.find((q) => q.headSuper && q.owner === state.fighters.indexOf(f));
-      if (p && p.x > lim.min && p.x < lim.max) {
+      // ムクロ本人の方へ進む大口が本人に着いたら、そこで終わる
+      const reached = p && h.toBody && (f.x - p.x) * p.vx <= 0;
+      if (p && !reached && p.x > lim.min && p.x < lim.max) {
         h.x = p.x;
+      } else if (h.toBody) {
+        // 噛み終わったら、頭はムクロ本人の体に戻る
+        if (p) p.dead = true;
+        f.head = null;
+        state.effects.push({ kind: "block", x: f.x / S, y: f.y / S - fighterHeight(f), life: 10 });
+        return;
       } else {
         // 噛みつき終わった（画面の端に着いた）ら、その場に落ちて少し動けない
         if (p) p.dead = true;
@@ -1374,7 +1401,10 @@
           else if (p.vy > want) p.vy = Math.max(want, p.vy - p.homing.turn);
         }
       }
-      if (p.age > 0) {
+      if (p.latch !== undefined) {
+        // 大口（ムクロ）：一度当たったら（ガードされても）すり抜けず、相手にくっついたまま噛み続ける
+        p.x = state.fighters[1 - p.owner].x + p.latch;
+      } else if (p.age > 0) {
         // 出た瞬間のフレームは動かない（目の前の相手にはすぐ当たる）
         p.x += p.vx;
         p.y += p.vy;
@@ -1497,6 +1527,7 @@
     if (!multi || proj.hitsLeft === multi.hits) record(state, att, moveName, blocked ? "blocks" : "hits");
     if (!proj) att.moveHit = true;
     if (proj) proj.hitsLeft -= 1;
+    if (proj && proj.headSuper && proj.latch === undefined) proj.latch = proj.x - def.x;
     if (multi) proj.cooldown = multi.interval;
     // 何回も当たる飛び道具は、最後の1発より前はダウンさせず、押す距離も小さい
     const midMulti = multi && proj.hitsLeft > 0;

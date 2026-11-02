@@ -270,10 +270,10 @@
       //   headSuper: ゲージ技は頭から出る飛び道具（頭が離れていれば、本人が攻撃を受けている間も倒れている間も出せる）
       moves: {
         standLight: { name: "腐れ爪", startup: 6, active: 2, recovery: 10, hitAdv: 3, blockAdv: 1, damage: 45, guard: "mid", hitbox: { x1: 15, x2: 80, y1: 80, y2: 135 }, push: 16 },
-        // 頭突き（頭が付いているときだけ）
-        standHeavy: { name: "頭突き", startup: 13, active: 3, recovery: 22, hitAdv: 2, blockAdv: -7, damage: 110, guard: "mid", hitbox: { x1: 20, x2: 105, y1: 120, y2: 175 }, push: 26 },
+        // 頭突き（頭が付いているときだけ）：低く構えた頭を、下から前へ振り上げる（しゃがんだ相手にも当たる）
+        standHeavy: { name: "頭突き", startup: 13, active: 3, recovery: 22, hitAdv: 2, blockAdv: -7, damage: 110, guard: "mid", hitbox: { x1: 20, x2: 100, y1: 30, y2: 150 }, push: 26 },
         crouchLight: { name: "足元引っかき", startup: 7, active: 2, recovery: 11, hitAdv: 2, blockAdv: 0, damage: 40, guard: "low", hitbox: { x1: 15, x2: 95, y1: 0, y2: 35 }, push: 16 },
-        crouchHeavy: { name: "屍転がし", startup: 15, active: 3, recovery: 24, hitAdv: "down", blockAdv: -11, damage: 100, guard: "low", hitbox: { x1: 20, x2: 125, y1: 0, y2: 30 }, push: 22, noCancel: true },
+        crouchHeavy: { name: "屍転がし", startup: 14, active: 3, recovery: 24, hitAdv: "down", blockAdv: -11, damage: 100, guard: "low", hitbox: { x1: 20, x2: 125, y1: 0, y2: 30 }, push: 22, noCancel: true },
         airLight: { name: "空中攻撃（弱）", startup: 7, active: 6, recovery: null, hitAdv: 10, blockAdv: 3, damage: 35, guard: "air", hitbox: { x1: 0, x2: 70, y1: -15, y2: 55 }, push: 10 },
         airHeavy: { name: "空中攻撃（強）", startup: 11, active: 6, recovery: null, hitAdv: 14, blockAdv: 4, damage: 90, guard: "air", hitbox: { x1: -5, x2: 92, y1: -25, y2: 50 }, push: 14 },
         // 頭転がし（頭が付いているとき O）：頭を下手で地面に転がす。下段。当たってもガードされても、頭は相手をすり抜けて背中の後ろで止まる
@@ -284,7 +284,7 @@
         throw: { name: "噛みちぎり", kind: "throw", startup: 5, active: 2, recovery: 22, damage: 125, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 } },
         // ---- 頭が外れているときの技 ----
         // 振り下ろし（I）：頭のない体で両腕を振り下ろす中段
-        headlessHeavy: { name: "振り下ろし", startup: 16, active: 3, recovery: 20, hitAdv: 2, blockAdv: -6, damage: 90, guard: "high", hitbox: { x1: 15, x2: 100, y1: 60, y2: 150 }, push: 24 },
+        headlessHeavy: { name: "振り下ろし", startup: 14, active: 3, recovery: 20, hitAdv: 2, blockAdv: -6, damage: 90, guard: "high", hitbox: { x1: 15, x2: 100, y1: 60, y2: 150 }, push: 24 },
         // 噛みつき（O）：頭がいる所から相手に飛びかかって噛む。ガードさせて大きく有利
         headBite: { name: "噛みつき", kind: "special", startup: 3, active: 1, recovery: 8, hitAdv: 14, blockAdv: 10, damage: 60, guard: "mid", hitbox: null, push: 0, headBite: true },
         // 跳ね戻り（S＋O）：頭がその場で跳ねながらムクロの方へ寄る対空技。跳ねている間、頭は無敵
