@@ -955,7 +955,11 @@
       strong: !!pr.multi,
       vx: f.facing * pr.speed * S,
       vy: (pr.fall || 0) * S, // 斜め下に飛ぶ飛び道具（空中の異空間弾）は下へも進む
-      homing: pr.homing ? { turn: Math.round(pr.homing.turn * S), max: Math.round(pr.homing.max * S) } : null,
+      homing: pr.homing ? { turn: Math.round(pr.homing.turn * S), max: Math.round(pr.homing.max * S), turnBack: Math.round((pr.homing.turnBack || 0) * S), turnBackFrames: pr.homing.turnBackFrames || 0 } : null,
+      speed: pr.speed * S,
+      turning: false, // 内側の相手に向かって向きを変えている途中か（ゲンマの異空間弾）
+      turned: false, // もう向きを変えたか（1回だけ）
+      vanishOnHit: !!pr.vanishOnHit, // 撃った側が攻撃を受けたら消えるか
       facing: f.facing,
       w: pr.width,
       h: pr.height,
@@ -975,6 +979,18 @@
       if (p.homing && p.age > 0) {
         // ホーミング：相手の体の真ん中の高さに向かって、上下の速さを少しずつ変える（相手を通り過ぎたら変えない）
         const target = state.fighters[1 - p.owner];
+        // 出てすぐ、相手が門より内側（弾の後ろ）にいたら、向きを反対に変えて内側へ飛ぶ（1回だけ）
+        const h = p.homing;
+        if (h.turnBack && !p.turned && !p.turning && p.age <= h.turnBackFrames && (target.x - p.x) * p.facing < -(p.w / 2) * S) p.turning = true;
+        if (p.turning) {
+          const wantVx = -p.facing * p.speed;
+          p.vx = wantVx > p.vx ? Math.min(wantVx, p.vx + h.turnBack) : Math.max(wantVx, p.vx - h.turnBack);
+          if (p.vx === wantVx) {
+            p.turning = false;
+            p.turned = true;
+            p.facing = -p.facing;
+          }
+        }
         const ahead = Math.sign(target.x - p.x) === Math.sign(p.vx);
         if (ahead) {
           const ty = target.y - (fighterHeight(target) / 2) * S;
@@ -1587,6 +1603,15 @@
     pushApart(a, b);
     moveProjectiles(state);
     if (fighting) checkHits(state);
+    // 撃った側が攻撃を受けたら消える飛び道具（ゲンマの異空間弾）
+    for (const p of state.projectiles) {
+      const owner = state.fighters[p.owner];
+      if (p.vanishOnHit && !p.dead && (owner.pose === POSE.HIT || owner.pose === POSE.LAUNCH || owner.pose === POSE.THROWN)) {
+        p.dead = true;
+        state.effects.push({ kind: "block", x: p.x / S, y: p.y / S, life: 12 });
+      }
+    }
+    state.projectiles = state.projectiles.filter((p) => !p.dead);
     if (fighting) {
       updatePassive(state, a, b);
       updatePassive(state, b, a);
