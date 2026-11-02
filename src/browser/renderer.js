@@ -1403,7 +1403,7 @@
         return;
       }
       if (!info.showBoxes) {
-        text(`Esc：一時停止`, C.STAGE_WIDTH / 2, C.STAGE_HEIGHT - 16, 12, "rgba(243, 234, 216, 0.5)", "center", "normal");
+        text(`Esc：一時停止　M：音のオン／オフ`, C.STAGE_WIDTH / 2, C.STAGE_HEIGHT - 16, 12, "rgba(243, 234, 216, 0.5)", "center", "normal");
         return;
       }
       const me = state.fighters[0];
@@ -1746,7 +1746,8 @@
       {
         title: "便利なキー",
         rows: [
-          ["Esc", "一時停止（資料を見る・キャラ選択・タイトルへ）"],
+          ["Esc", "一時停止（音量・資料を見る・キャラ選択・タイトルへ）"],
+          ["M", "音のオン／オフ（どの画面でも）"],
           ["H", "当たり判定と、押しているキーなどを表示"],
           ["G", "トレーニング：ゲージをずっと満タンにする"],
           ["3", "相手を練習相手に（押すたびに動きが変わる）"],

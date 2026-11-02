@@ -13,6 +13,8 @@
   const keyboard = SF.keyboard.createKeyboard(root);
   const renderer = SF.renderer.createRenderer(document.getElementById("screen"));
   const menu = SF.menu.createMenu();
+  const sound = SF.sound.createSound();
+  const canvas = document.getElementById("screen");
 
   // ---- キーコンフィグ：割り当てはこのブラウザ（localStorage）に保存する ----
   const KC = SF.keyconfig;
@@ -49,7 +51,8 @@
   // 試合の上に出す小さなメニュー（一時停止・試合終了）。出ていないときは null
   let overlay = null;
 
-  const PAUSE_ITEMS = ["つづける", "資料を見る", "キャラ選択にもどる", "タイトルにもどる"];
+  // 一時停止のメニュー。BGM・効果音の行は ←→（または Enter）で音量を変える
+  const pauseItems = () => ["つづける", `BGM：${sound.levelLabel("bgm")}`, `効果音：${sound.levelLabel("sfx")}`, "資料を見る", "キャラ選択にもどる", "タイトルにもどる"];
   const END_ITEMS = ["もう一度", "キャラ選択にもどる", "タイトルにもどる"];
 
   let matchCount = 0;
@@ -83,6 +86,7 @@
     });
     counted = false;
     overlay = null;
+    sound.begin(state);
     keyboard.read(); // メニューで押したキーが試合に残らないように捨てる
   }
 
@@ -181,11 +185,20 @@
 
   function pressOverlay(action) {
     const n = overlay.items.length;
+    const pick = overlay.items[overlay.cursor];
+    const volumeRow = pick.startsWith("BGM") ? "bgm" : pick.startsWith("効果音") ? "sfx" : null;
+    if (volumeRow && (action === "left" || action === "right" || action === "ok")) {
+      sound.change(volumeRow, action === "left" ? -1 : 1);
+      overlay.items = pauseItems();
+      return;
+    }
+    if (action === "up" || action === "down") sound.play("move");
+    else if (action === "back" && overlay.kind === "pause") sound.play("back");
+    else if (action === "ok") sound.play("ok");
     if (action === "up") overlay.cursor = (overlay.cursor + n - 1) % n;
     else if (action === "down") overlay.cursor = (overlay.cursor + 1) % n;
     else if (action === "back" && overlay.kind === "pause") overlay = null;
     else if (action === "ok") {
-      const pick = overlay.items[overlay.cursor];
       if (pick === "つづける") overlay = null;
       else if (pick === "資料を見る") openLibrary("battle");
       else if (pick === "もう一度") newMatch();
@@ -194,20 +207,50 @@
     }
   }
 
+  // メニューの操作の音
+  function menuSound(action) {
+    if (action === "ok") sound.play("ok");
+    else if (action === "back") sound.play("back");
+    else sound.play("move");
+  }
+
+  // M キーで音のオン／オフ（画面の右上に少しのあいだ表示する）
+  let toast = null;
+  function toggleMute() {
+    const muted = sound.toggleMute();
+    toast = { text: muted ? "音：オフ（M でオン）" : "音：オン", life: 90 };
+    if (overlay && overlay.kind === "pause") overlay.items = pauseItems();
+  }
+
+  // ブラウザは、画面をクリックするかキーを押すまで音を出せないので、そのときに音の準備をする
+  root.addEventListener("pointerdown", () => sound.unlock());
+
   root.addEventListener("keydown", (e) => {
+    sound.unlock();
     const action = MENU_KEYS[e.code];
     if (e.code.startsWith("Arrow") || e.code === "Space" || e.code === "Backspace") e.preventDefault(); // 画面がスクロールしないように
     if (scene === "keys") {
+      if (!keyScreen.waiting && action && !e.repeat) menuSound(action);
       onKeyConfigKey(e);
       return;
     }
+    // M：音のオン／オフ（試合の操作に M を割り当てたときは、試合中だけ使わない）
+    if (e.code === "KeyM" && !e.repeat && !(scene === "battle" && !overlay && keyboard.isBound("KeyM")) && !MENU_KEYS.KeyM) {
+      toggleMute();
+      return;
+    }
     if (scene === "library") {
-      if (action && !(e.repeat && (action === "ok" || action === "back"))) pressLibrary(action);
+      if (action && !(e.repeat && (action === "ok" || action === "back"))) {
+        if (action === "back") sound.play("back");
+        else if (action !== "ok") sound.play("page");
+        pressLibrary(action);
+      }
       return;
     }
 
     if (scene === "menu") {
       if (!action || (e.repeat && (action === "ok" || action === "back"))) return;
+      menuSound(action);
       const result = SF.menu.press(menu, action);
       if (result && result.start) startBattle(result.start);
       if (result && result.library) openLibrary("menu");
@@ -220,7 +263,8 @@
       return;
     }
     if (e.code === "Escape" && !e.repeat) {
-      overlay = { kind: "pause", items: PAUSE_ITEMS, cursor: 0 };
+      sound.play("ok");
+      overlay = { kind: "pause", items: pauseItems(), cursor: 0 };
       return;
     }
     // 確認用のキー（H・3・4）は、試合の操作に割り当てたときは使わない
@@ -264,6 +308,7 @@
     if (config.mode === "cvc") input = inputs[0];
     if (fullGauge) state.fighters[0].gauge = SF.game.GAUGE_FULL;
     SF.game.step(state, inputs);
+    sound.observe(state);
 
     if (state.round.phase === SF.game.PHASE.MATCH_END) {
       // 学習AIが学んだ頭脳を、試合が終わったら保存する
@@ -326,7 +371,29 @@
       info.overlay = overlay;
       renderer.draw(state, info);
     }
+    // BGM：試合中は試合の曲（決着したら止める）、それ以外はメニューの曲。一時停止中は小さく
+    const inBattle = scene === "battle";
+    sound.music(inBattle ? (state.round.phase === SF.game.PHASE.MATCH_END ? null : "battle") : "menu");
+    sound.duck(inBattle && !!overlay && overlay.kind === "pause");
+    if (toast) drawToast();
     requestAnimationFrame(frame);
+  }
+
+  function drawToast() {
+    const g = canvas.getContext("2d");
+    toast.life -= 1;
+    g.save();
+    g.globalAlpha = Math.min(1, toast.life / 20);
+    g.font = "bold 16px sans-serif";
+    const w = g.measureText(toast.text).width + 28;
+    g.fillStyle = "rgba(10, 8, 12, 0.8)";
+    g.fillRect(canvas.width - w - 16, 16, w, 34);
+    g.fillStyle = "#f3ead8";
+    g.textAlign = "left";
+    g.textBaseline = "middle";
+    g.fillText(toast.text, canvas.width - w - 2, 34);
+    g.restore();
+    if (toast.life <= 0) toast = null;
   }
 
   applyBindings();
