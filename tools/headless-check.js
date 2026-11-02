@@ -2731,6 +2731,19 @@ require("../src/core/autobattle.js");
   sw.fighters[1].facing = -1;
   run(sw, 30, 0, (i) => (i === 0 ? I : 0));
   assert.ok(!sw.fighters[0].clone, "攻撃を受けても分身が消えない");
+  // 相手が画面端にいても、分身は相手の後ろ（端）に出て重ならない。相手を押して前に出ても、相手は分身と影の間にはさまる
+  {
+    const half = CH.kagetsu.width / 2;
+    const wall = SF.constants.STAGE_WIDTH - SF.constants.STAGE_MARGIN - half;
+    const gap = ((K.width + CH.kagetsu.width) / 2) * S;
+    const ed = kGame("kagetsu", 700, wall, FULL);
+    run(ed, 50, (i) => (i === 0 ? I | O : 0), 0);
+    const [kg, op] = ed.fighters;
+    assert.ok(kg.clone.x > op.x && kg.clone.x - op.x >= gap, `画面端で分身が相手の後ろに出ない（分身${kg.clone.x / S}・相手${op.x / S}）`);
+    run(ed, 60, R, 0);
+    assert.ok(kg.clone.x - op.x >= gap && op.x - kg.x >= gap - S, `画面端で相手を押すと分身・相手・影が重なる（影${kg.x / S}・相手${op.x / S}・分身${kg.clone.x / S}）`);
+    assert.strictEqual(kg.clone.facing, -1, "画面端の分身が相手の方を向いていない");
+  }
   // 6秒で消える
   const ep = kGame("kagetsu", 300, 500, FULL);
   run(ep, 45 + K.clone.frames + 1, (i) => (i === 0 ? I | O : 0), 0);
