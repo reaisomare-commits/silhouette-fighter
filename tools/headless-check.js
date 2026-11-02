@@ -1957,8 +1957,7 @@ require("../src/core/autobattle.js");
   for (const id of Object.keys(SF.characters.CHARACTERS)) assert.ok(SF.learnTrain.POLICY[id], `${id} の方針がない`);
 
   // ゲームに入っている学習データの学習AIは「つよい」CPUにしっかり勝つ（どの組み合わせでも）
-  // ムクロ（ver 0.10.0 で追加）はまだ学習していないので、学び直すまでは数えない
-  const ids = Object.keys(SF.characters.CHARACTERS).filter((id) => id !== "mukuro");
+  const ids = Object.keys(SF.characters.CHARACTERS);
   const def = [];
   for (const me of ids) {
     for (const opp of ids) {
@@ -1971,7 +1970,9 @@ require("../src/core/autobattle.js");
       }
       def.push(`${SF.characters.CHARACTERS[me].name}対${SF.characters.CHARACTERS[opp].name} ${w * 5}%`);
       // ver 0.9.0 では、カゲツは「つよい」ゴウにほとんど勝てず、リンは半分ほど（ゴウが強すぎる。次の調整で直す）
-      const need = opp === "gou" ? (me === "kagetsu" ? 0 : me === "rin" ? 6 : 14) : 14;
+      // ver 0.10.1 のムクロは強く、ゲンマは「つよい」ムクロにほとんど勝てない。ムクロは「つよい」ゴウにほとんど勝てない。ムクロが出る組み合わせは 7割ほど
+      const hard = (me === "genma" && opp === "mukuro") || (me === "mukuro" && opp === "gou");
+      const need = hard ? 0 : opp === "mukuro" || me === "mukuro" ? 10 : opp === "gou" ? (me === "kagetsu" ? 0 : me === "rin" ? 6 : 14) : 14;
       assert.ok(w >= need, `学習AI（${me}）が つよい（${opp}）に勝てていない（${w}/20）`);
     }
   }
