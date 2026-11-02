@@ -5,8 +5,8 @@
 // 前のフレームとくらべて「技を出した」「当たった」「ガードされた」「KO」などを見つけて音を鳴らす。
 //
 // BGMは和の音階（都節・陽音階）で、太鼓・三味線・笛・琴に似せた音を組み合わせて鳴らす。
-//   タイトル・メニュー：ゆったりした琴と笛（陽音階）
-//   試合：太鼓と三味線の速い曲（都節）
+//   タイトル・メニュー：琴と笛に太鼓のリズムが入った、軽快な曲（陽音階）
+//   試合：太鼓・三味線・笛に、低いドラムと歪んだ音を重ねた激しい曲（都節）
 // ブラウザは「画面をクリックするかキーを押すまで音を出さない」決まりなので、最初の操作で鳴りはじめる。
 (function (root) {
   const SF = (root.SF = root.SF || {});
@@ -36,10 +36,10 @@
     return n;
   }
 
-  // 試合の曲：都節音階（D・E♭・G・A・B♭）。150BPM、16分音符で1マス、16小節で1周
+  // 試合の曲：都節音階（D・E♭・G・A・B♭）。168BPM、16分音符で1マス、16小節で1周
   const MIYAKO = [0, 1, 5, 7, 8];
   const BATTLE_SONG = {
-    stepDur: 60 / 150 / 4,
+    stepDur: 60 / 168 / 4,
     stepsPerBar: 16,
     sections: [
       {
@@ -77,10 +77,10 @@
     ],
   };
 
-  // タイトル・メニューの曲：陽音階（D・E・G・A・B）。76BPM、8分音符で1マス、8小節で1周
+  // タイトル・メニューの曲：陽音階（D・E・G・A・B）。112BPM、8分音符で1マス、8小節で1周
   const YO = [0, 2, 5, 7, 9];
   const MENU_SONG = {
-    stepDur: 60 / 76 / 2,
+    stepDur: 60 / 112 / 2,
     stepsPerBar: 8,
     koto: ["0.24.7.4", "2.46.9.6", "1.35.8.5", "0.24.7.5", "3.57.a.7", "2.46.9.6", "1.35.6.5", "0..2.4.."],
     flute: ["7-------", "9---7---", "8-------", "7---5---", "a-------", "9---7-8-", "6-------", "5-------"],
@@ -301,13 +301,78 @@
       lfo.stop(t + dur + 0.2);
     }
     function bass(dest, t, freq, dur, vol) {
-      tone(dest, { t, type: "sawtooth", f0: freq, dur, vol, lowpass: 420, q: 1, attack: 0.005 });
+      tone(dest, { t, type: "sawtooth", f0: freq, dur, vol, lowpass: 520, lowpassTo: 260, q: 3, attack: 0.004 });
+      tone(dest, { t, type: "square", f0: freq / 2, dur, vol: vol * 0.5, lowpass: 200, attack: 0.004 });
+    }
+    // 低いドラム（お腹にひびくドン）
+    function kick(dest, t, vol) {
+      tone(dest, { t, f0: 150, f1: 42, sweep: 0.09, dur: 0.28, vol });
+      noise(dest, { t, filter: "highpass", f0: 3000, dur: 0.012, vol: vol * 0.35 });
+    }
+    // シャン（小さな鳴り物）
+    function hat(dest, t, vol, open) {
+      noise(dest, { t, filter: "highpass", f0: 7000, dur: open ? 0.16 : 0.035, vol });
+    }
+    // ジャーン（区切りのシンバル）
+    function crash(dest, t, vol) {
+      noise(dest, { t, filter: "highpass", f0: 4500, dur: 1.4, vol, rev: 0.4 });
+      noise(dest, { t, f0: 9000, q: 0.7, dur: 0.9, vol: vol * 0.5 });
+    }
+    // 歪んだ笛（笛の旋律を1オクターブ上で重ねて、とがった音にする）
+    function lead(dest, t, freq, dur, vol) {
+      [-8, 8].forEach((det) => {
+        const osc = ctx.createOscillator();
+        osc.type = "sawtooth";
+        osc.frequency.value = freq;
+        osc.detune.value = det;
+        const f = ctx.createBiquadFilter();
+        f.type = "lowpass";
+        f.frequency.setValueAtTime(3200, t);
+        f.Q.value = 2;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(vol, t + 0.015);
+        g.gain.setValueAtTime(vol * 0.8, t + Math.max(0.02, dur - 0.05));
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.08);
+        const sh = crunch();
+        osc.connect(f);
+        f.connect(sh);
+        sh.connect(g);
+        sendTo(g, dest, 0.3);
+        osc.start(t);
+        osc.stop(t + dur + 0.12);
+      });
+    }
+    // 音を歪ませる（打撃と歪んだ笛に使う）。歪み方の表は1つを使い回す
+    let crunchCurve = null;
+    function crunch() {
+      if (!crunchCurve) {
+        const n = 1024;
+        crunchCurve = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          const x = (i / (n - 1)) * 2 - 1;
+          crunchCurve[i] = Math.tanh(x * 3.5);
+        }
+      }
+      const sh = ctx.createWaveShaper();
+      sh.curve = crunchCurve;
+      return sh;
+    }
+    // 歪ませてから dest に送る入口（効果音用）。vol は歪んだあとの大きさ
+    function crunchTo(dest, vol, life) {
+      const sh = crunch();
+      const g = ctx.createGain();
+      g.gain.value = vol;
+      sh.connect(g);
+      g.connect(dest);
+      root.setTimeout(() => sh.disconnect(), (life || 1) * 1000 + 200);
+      return sh;
     }
 
     // ---- BGMを鳴らす仕組み：少し先までの音を予約しておく ----
     const SONGS = {
       battle: { stepDur: BATTLE_SONG.stepDur, length: BATTLE_SONG.sections.length * 4 * 16, play: playBattleStep },
-      menu: { stepDur: MENU_SONG.stepDur, length: MENU_SONG.koto.length * 8, play: playMenuStep },
+      menu: { stepDur: MENU_SONG.stepDur, length: MENU_SONG.koto.length * 8, play: playMenuStep, gain: 1.8 }, // 音数が少ないぶん大きく
     };
     let wanted = null; // 鳴らしたい曲（音の土台ができる前でも覚えておく）
     let current = null; // 鳴っている曲
@@ -318,23 +383,35 @@
 
     function playBattleStep(step, t, dest) {
       const bar = Math.floor(step / 16);
-      const sec = BATTLE_SONG.sections[Math.floor(bar / 4)];
+      const secIndex = Math.floor(bar / 4);
+      const sec = BATTLE_SONG.sections[secIndex];
       const b = bar % 4;
       const i = step % 16;
       const at = (p) => (Array.isArray(p) ? p[b] : p)[i];
-      if (at(sec.taiko) === "x") taiko(dest, t, i % 4 === 0 ? 0.9 : 0.6);
-      if (at(sec.shime) === "x") shime(dest, t, i % 2 ? 0.35 : 0.5);
+      // 区切りでジャーン
+      if (i === 0 && b === 0) crash(dest, t, 0.22);
+      // 低いドラムは拍ごと（最後の盛り上がりは8分ごと）
+      if (i % 4 === 0 || (secIndex === 3 && i % 2 === 0)) kick(dest, t, 0.75);
+      if (at(sec.taiko) === "x") taiko(dest, t, i % 4 === 0 ? 0.9 : 0.65);
+      if (at(sec.shime) === "x") shime(dest, t, i % 2 ? 0.4 : 0.55);
+      // 裏拍のシャン
+      if (i % 4 === 2) hat(dest, t, 0.16, i === 14);
+      else if (i % 2 === 1) hat(dest, t, 0.06, false);
       const s = degreeOf(sec.shamisen[b][i]);
-      if (s !== null) shamisen(dest, t, midi(noteOf(MIYAKO, 62, s)), 0.17);
+      if (s !== null) shamisen(dest, t, midi(noteOf(MIYAKO, 62, s)), 0.2);
       if (sec.flute) {
         const ch = sec.flute[b][i];
         const d = degreeOf(ch);
-        if (d !== null) flute(dest, t, midi(noteOf(MIYAKO, 50, d)), holdLength(sec.flute[b], i) * BATTLE_SONG.stepDur, 0.16);
+        if (d !== null) {
+          const dur = holdLength(sec.flute[b], i) * BATTLE_SONG.stepDur;
+          flute(dest, t, midi(noteOf(MIYAKO, 50, d)), dur, 0.17);
+          lead(dest, t, midi(noteOf(MIYAKO, 62, d)), dur, 0.035);
+        }
       }
-      // ベース：1小節に6回（7マス目と15マス目は1オクターブ上）
-      if ([0, 3, 6, 8, 11, 14].includes(i)) {
+      // ベース：8分音符で刻み続ける（裏は1オクターブ上）
+      if (i % 2 === 0) {
         const root = sec.bass[b];
-        bass(dest, t, midi(i === 6 || i === 14 ? root + 12 : root), BATTLE_SONG.stepDur * 1.6, i === 3 || i === 11 ? 0.18 : 0.22);
+        bass(dest, t, midi(i % 4 === 2 ? root + 12 : root), BATTLE_SONG.stepDur * 1.7, i % 4 === 0 ? 0.24 : 0.18);
       }
     }
 
@@ -343,17 +420,22 @@
       const i = step % 8;
       const k = degreeOf(MENU_SONG.koto[bar][i]);
       if (k !== null) koto(dest, t, midi(noteOf(YO, 62, k)), 0.16);
-      // 笛は2周目から（1周目は琴だけで静かに）
-      if (songPass % 2 === 1) {
-        const d = degreeOf(MENU_SONG.flute[bar][i]);
-        if (d !== null) flute(dest, t, midi(noteOf(YO, 62, d)), holdLength(MENU_SONG.flute[bar], i) * MENU_SONG.stepDur, 0.13);
+      // 三味線で小節の頭と真ん中を強く
+      if (i === 0 || i === 4) {
+        const k0 = degreeOf(MENU_SONG.koto[bar][0]);
+        if (k0 !== null) shamisen(dest, t, midi(noteOf(YO, 50, k0)), 0.14);
       }
-      if (i === 0) {
-        const r = MENU_SONG.drone[bar];
-        tone(dest, { t, type: "triangle", f0: midi(r), dur: MENU_SONG.stepDur * 8, attack: 0.4, vol: 0.12, lowpass: 600 });
-        tone(dest, { t, type: "sine", f0: midi(r + 7), dur: MENU_SONG.stepDur * 8, attack: 0.6, vol: 0.05 });
-        if (bar % 2 === 0) taiko(dest, t, 0.35);
-      }
+      const d = degreeOf(MENU_SONG.flute[bar][i]);
+      if (d !== null) flute(dest, t, midi(noteOf(YO, 62, d)), holdLength(MENU_SONG.flute[bar], i) * MENU_SONG.stepDur, songPass % 2 ? 0.15 : 0.12);
+      // リズム：1・3拍目に太鼓、2・4拍目に締太鼓、8分でシャン
+      if (i === 0 || i === 4) taiko(dest, t, i === 0 ? 0.6 : 0.45);
+      if (i === 2 || i === 6) shime(dest, t, 0.45);
+      if (i === 7 && bar % 2 === 1) shime(dest, t, 0.3);
+      hat(dest, t, i % 2 ? 0.08 : 0.04, false);
+      if (i === 0 && bar === 0) crash(dest, t, 0.12);
+      // ベース：8分で刻む
+      const r = MENU_SONG.drone[bar];
+      if (i % 2 === 0) bass(dest, t, midi(i === 6 ? r + 12 : r), MENU_SONG.stepDur * 0.9, 0.15);
     }
     function scheduleMusic() {
       if (!ctx || ctx.state !== "running") return;
@@ -386,7 +468,7 @@
       if (!current) return;
       trackGain = ctx.createGain();
       trackGain.gain.setValueAtTime(0, t);
-      trackGain.gain.linearRampToValueAtTime(1, t + 0.4);
+      trackGain.gain.linearRampToValueAtTime(SONGS[current].gain || 1, t + 0.4);
       trackGain.connect(bgmBus);
       songStep = 0;
       songPass = 0;
@@ -397,24 +479,35 @@
     const SFX = {
       // 風切り音（技を出した）。heavy は低く長く
       swing(t, heavy) {
-        noise(sfxBus, { t, f0: heavy ? 500 : 900, f1: heavy ? 1800 : 3200, q: 1.2, attack: heavy ? 0.04 : 0.02, dur: heavy ? 0.16 : 0.08, vol: heavy ? 0.3 : 0.2 });
+        noise(sfxBus, { t, f0: heavy ? 450 : 900, f1: heavy ? 2200 : 3800, q: 1.4, attack: heavy ? 0.035 : 0.015, dur: heavy ? 0.17 : 0.08, vol: heavy ? 0.45 : 0.3 });
+        if (heavy) tone(sfxBus, { t, type: "sine", f0: 180, f1: 90, attack: 0.03, dur: 0.12, vol: 0.12 });
       },
       // 打撃：重さ（0〜1以上）で大きさと低さが変わる。blade は刀の金属音つき
+      // 「ドン（低い音）」「バシッ（歪んだ破裂音）」「パン（高い音）」を重ねる
       hit(t, power, blade) {
-        const p = Math.min(1.6, Math.max(0.25, power));
-        tone(sfxBus, { t, f0: 220 - p * 60, f1: 45, sweep: 0.12, dur: 0.12 + p * 0.12, vol: 0.45 + p * 0.25 });
-        noise(sfxBus, { t, filter: "lowpass", f0: 900 + p * 1400, f1: 300, dur: 0.06 + p * 0.1, vol: 0.4 + p * 0.25 });
-        noise(sfxBus, { t, f0: 2400, q: 1.5, dur: 0.03, vol: 0.35 });
+        const p = Math.min(1.6, Math.max(0.3, power));
+        const dist = crunchTo(sfxBus, 0.35 + p * 0.2, 0.6);
+        // ドン
+        tone(sfxBus, { t, f0: 260 - p * 70, f1: 40, sweep: 0.1 + p * 0.05, dur: 0.15 + p * 0.18, vol: 0.6 + p * 0.3 });
+        // バシッ（歪ませる）
+        noise(dist, { t, filter: "lowpass", f0: 2500 + p * 1500, f1: 400, dur: 0.05 + p * 0.09, vol: 0.9 });
+        tone(dist, { t, type: "square", f0: 120 + p * 20, f1: 50, dur: 0.06 + p * 0.08, vol: 0.5 });
+        // パン
+        noise(sfxBus, { t, filter: "highpass", f0: 3000, dur: 0.025, vol: 0.5 });
+        if (p > 0.8) noise(sfxBus, { t: t + 0.01, filter: "lowpass", f0: 600, f1: 120, dur: 0.25 + p * 0.1, vol: 0.35, rev: 0.25 });
         if (blade) {
-          tone(sfxBus, { t, type: "triangle", f0: 1900, dur: 0.25 + p * 0.15, vol: 0.12, rev: 0.4 });
-          tone(sfxBus, { t, type: "sine", f0: 2870, dur: 0.2 + p * 0.1, vol: 0.08, rev: 0.4 });
+          noise(sfxBus, { t, f0: 5000, q: 2, dur: 0.06, vol: 0.35 });
+          tone(sfxBus, { t, type: "triangle", f0: 1900, dur: 0.3 + p * 0.15, vol: 0.16, rev: 0.4 });
+          tone(sfxBus, { t, type: "sine", f0: 2870, dur: 0.25 + p * 0.1, vol: 0.1, rev: 0.4 });
         }
       },
-      // ガード：カチッと硬い音
+      // ガード：ガキッと硬い音
       block(t) {
-        tone(sfxBus, { t, type: "square", f0: 1300, f1: 800, dur: 0.04, vol: 0.13, lowpass: 3500 });
-        noise(sfxBus, { t, f0: 4200, q: 2, dur: 0.05, vol: 0.32 });
-        tone(sfxBus, { t, f0: 300, f1: 160, dur: 0.06, vol: 0.2 });
+        const dist = crunchTo(sfxBus, 0.25, 0.3);
+        tone(dist, { t, type: "square", f0: 1400, f1: 700, dur: 0.05, vol: 0.5 });
+        noise(sfxBus, { t, f0: 4200, q: 1.5, dur: 0.07, vol: 0.45 });
+        tone(sfxBus, { t, f0: 320, f1: 150, dur: 0.08, vol: 0.35 });
+        tone(sfxBus, { t, type: "triangle", f0: 2600, dur: 0.12, vol: 0.06, rev: 0.3 });
       },
       // 飛び道具（カゲツの飛刃）：シュイン
       blade(t) {
@@ -444,8 +537,9 @@
       },
       // 倒れた：ドスン
       down(t) {
-        tone(sfxBus, { t, f0: 110, f1: 38, dur: 0.3, vol: 0.5 });
-        noise(sfxBus, { t, filter: "lowpass", f0: 500, f1: 150, dur: 0.25, vol: 0.4 });
+        tone(sfxBus, { t, f0: 120, f1: 34, dur: 0.4, vol: 0.75 });
+        noise(sfxBus, { t, filter: "lowpass", f0: 700, f1: 120, dur: 0.3, vol: 0.55 });
+        noise(crunchTo(sfxBus, 0.2, 0.4), { t, filter: "lowpass", f0: 1500, f1: 200, dur: 0.12, vol: 0.8 });
       },
       // 掴んだ：布をつかむ音
       grab(t) {
@@ -473,12 +567,14 @@
           tone(sfxBus, { t: t + d, type: "sine", f0: (i ? 1976 : 1480) * 2.76, dur: 0.25, vol: 0.04, rev: 0.6 });
         });
       },
-      // ゲージ技（暗転）：太鼓のドンと、ためてからの刀の音
+      // ゲージ技（暗転）：大きなドンと、ためてからの刀の音
       superFlash(t) {
-        tone(sfxBus, { t, f0: 90, f1: 35, dur: 0.8, vol: 0.6 });
-        noise(sfxBus, { t, filter: "lowpass", f0: 600, f1: 120, dur: 0.5, vol: 0.4 });
-        noise(sfxBus, { t: t + 0.05, f0: 400, f1: 6000, q: 2, attack: 0.45, dur: 0.15, vol: 0.25, rev: 0.5 });
-        tone(sfxBus, { t: t + 0.5, type: "triangle", f0: 2200, dur: 0.6, vol: 0.12, rev: 0.7 });
+        tone(sfxBus, { t, f0: 110, f1: 30, dur: 1, vol: 0.85 });
+        noise(crunchTo(sfxBus, 0.3, 0.8), { t, filter: "lowpass", f0: 1200, f1: 120, dur: 0.5, vol: 0.9 });
+        noise(sfxBus, { t, filter: "highpass", f0: 4000, dur: 1, vol: 0.2, rev: 0.5 });
+        noise(sfxBus, { t: t + 0.05, f0: 300, f1: 7000, q: 2, attack: 0.5, dur: 0.12, vol: 0.4, rev: 0.5 });
+        tone(sfxBus, { t: t + 0.55, type: "triangle", f0: 2200, dur: 0.7, vol: 0.18, rev: 0.7 });
+        tone(sfxBus, { t: t + 0.55, type: "sine", f0: 3300, dur: 0.5, vol: 0.1, rev: 0.7 });
       },
       // 拍子木（カン、カン）：ラウンド開始の合図
       clappers(t) {
@@ -501,8 +597,13 @@
       // KO：大きな打撃と銅鑼
       ko(t) {
         SFX.hit(t, 1.6, false);
+        SFX.hit(t + 0.09, 1.2, false);
         SFX.down(t + 0.02);
-        SFX.gong(t + 0.05, 0.45);
+        SFX.crash(t + 0.05);
+        SFX.gong(t + 0.05, 0.55);
+      },
+      crash(t) {
+        crash(sfxBus, t, 0.35);
       },
       // 試合の決着：琴の上り調子と銅鑼
       victory(t) {
