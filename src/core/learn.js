@@ -49,16 +49,20 @@
     // ダッシュで近づいて、着いたら投げ（ゴウは岩落とし）・しゃがみ弱（下段）。ガードを固める相手を崩す
     { id: "dashThrow", label: "ダッシュして投げ" },
     { id: "dashLow", label: "ダッシュして下段" },
+    // ゲージが満タンのときだけ選べる
+    { id: "super", label: "ゲージ技 I+O" },
   ];
   const ACTION_INDEX = Object.fromEntries(ACTIONS.map((a, i) => [a.id, i]));
 
   // 状況のまとめ方。数を変えたら STATE_VERSION を上げる（古い学習データは使わない）
-  //   距離 6 × 相手の様子 7 × 自分の飛び道具 2 × 相手の飛び道具 2 × 画面端 3
+  //   距離 6 × 相手の様子 7 × 自分の飛び道具 2 × 相手の飛び道具 2 × 画面端 3 × 自分のゲージ（満タンか）2
   const DIST_LABELS = ["投げの距離", "弱攻撃の距離", "強攻撃の距離", "少し遠い", "遠い", "とても遠い"];
   const OPP_LABELS = ["ふつう", "しゃがみ・ガード", "技を出している", "技のスキ", "のけぞり・ガード硬直", "空中", "倒れている"];
   const WALL_LABELS = ["端ではない", "自分が端", "相手が端"];
-  const STATES = DIST_LABELS.length * OPP_LABELS.length * 2 * 2 * WALL_LABELS.length;
-  const STATE_VERSION = 2; // 2：相手の様子に「倒れている」、行動に起き攻めとダッシュからの崩しを足した
+  const STATES = DIST_LABELS.length * OPP_LABELS.length * 2 * 2 * WALL_LABELS.length * 2;
+  // 2：相手の様子に「倒れている」、行動に起き攻めとダッシュからの崩しを足した
+  // 3：状況に「自分のゲージが満タンか」、行動に「ゲージ技」を足した
+  const STATE_VERSION = 3;
 
   const PLAY_EXPLORE = 0.04; // 学習していないとき（ふつうに戦うとき）にも少しだけ別の行動を混ぜる（毎回同じ動きにならないように）
   const WALL_NEAR = 120; // 画面端からこれ以内なら「端」（ピクセル）
@@ -188,11 +192,14 @@
     const oppBack = me.x < o.x ? o.x > right : o.x < left;
     const w = meBack ? 1 : oppBack ? 2 : 0;
 
-    return (((d * OPP_LABELS.length + os) * 2 + myProj) * 2 + oppProj) * WALL_LABELS.length + w;
+    const g = SF.game.gaugeFull(me) ? 1 : 0;
+    return ((((d * OPP_LABELS.length + os) * 2 + myProj) * 2 + oppProj) * WALL_LABELS.length + w) * 2 + g;
   }
 
   // 状況番号を言葉にする（画面の説明用）
   function describeState(s) {
+    const g = s % 2;
+    s = Math.floor(s / 2);
     const w = s % 3;
     s = Math.floor(s / 3);
     const op = s % 2;
@@ -201,21 +208,29 @@
     s = Math.floor(s / 2);
     const os = s % OPP_LABELS.length;
     const d = Math.floor(s / OPP_LABELS.length);
-    return { dist: DIST_LABELS[d], opp: OPP_LABELS[os], myProj: !!mp, oppProj: !!op, wall: WALL_LABELS[w] };
+    return { dist: DIST_LABELS[d], opp: OPP_LABELS[os], myProj: !!mp, oppProj: !!op, wall: WALL_LABELS[w], gauge: !!g };
   }
 
   // 状況番号を、距離と相手の様子の番号に分ける（学ぶ部分の方針で使う）
+  //   （1つの距離・相手の様子の中に、飛び道具 2 × 2 × 画面端 3 × ゲージ 2 ＝ 24 通りある）
   function stateParts(s) {
-    const os = Math.floor(s / 12) % OPP_LABELS.length;
-    const d = Math.floor(s / (12 * OPP_LABELS.length));
-    return { d, os };
+    const os = Math.floor(s / 24) % OPP_LABELS.length;
+    const d = Math.floor(s / (24 * OPP_LABELS.length));
+    return { d, os, gauge: s % 2 === 1 };
   }
 
   // ---- 行動を選ぶ ----
 
-  // 選べない行動（飛び道具は画面に1つまで）
-  function allowed(state, index, a) {
-    if (ACTIONS[a].id === "special") {
+  // 選べない行動。s＝今の状況番号
+  //   ・飛び道具は画面に1つまで
+  //   ・起き攻めは相手が倒れているときだけ（倒れていないときに選ぶと、ただの強攻撃・下段・投げと同じで、表がむだに分かれるため）
+  //   ・ゲージ技はゲージが満タンのときだけ
+  const OKI = ["okiStrike", "okiLow", "okiThrow"];
+  function allowed(state, index, a, s) {
+    const id = ACTIONS[a].id;
+    if (OKI.includes(id)) return stateParts(s).os === 6;
+    if (id === "super") return stateParts(s).gauge;
+    if (id === "special") {
       const me = state.fighters[index];
       const sp = SF.characters.CHARACTERS[me.charId].moves.special;
       if (sp.projectile && state.projectiles.some((p) => p.owner === index)) return false;
@@ -247,7 +262,7 @@
     const opp = state.fighters[1 - index];
     if (!L.table) L.table = tableFor(L.brain, me.charId, opp.charId);
     const s = stateOf(state, index, o);
-    if (L.train && L.lastS >= 0) SF.learnTrain.learnStep(L, me, opp, s); // 前の行動の得点で表を直す
+    if (L.train && L.lastS >= 0) SF.learnTrain.learnStep(L, state, me, opp, s); // 前の行動の得点で表を直す
 
     let a;
     if (SF.rng.nextInt(rng, 10000) < L.explore * 10000) {
@@ -255,7 +270,7 @@
       if (SF.learnTrain) a = SF.learnTrain.explorePick(rng, state, index, s);
       if (a === undefined) {
         do a = SF.rng.nextInt(rng, ACTIONS.length);
-        while (!allowed(state, index, a));
+        while (!allowed(state, index, a, s));
       }
     } else {
       // いちばん数字の大きい行動。同じ数字が並んだら、その中からでたらめに選ぶ
@@ -263,7 +278,7 @@
       let best = -Infinity;
       let ties = 0;
       for (let k = 0; k < ACTIONS.length; k++) {
-        if (!allowed(state, index, k)) continue;
+        if (!allowed(state, index, k, s)) continue;
         const v = L.table.q[base + k];
         if (v > best + 1e-9) {
           best = v;
@@ -279,6 +294,7 @@
     L.lastA = a;
     L.hp = [me.health, opp.health];
     L.downs = L.downCount.slice(); // このときまでにダウンした回数 [自分, 相手]（学ぶ部分の得点で使う）
+    L.frame = state.frame; // 考えたときのフレーム（学ぶ部分で、勝っている・負けている時間の得点に使う）
     L.decisions += 1;
     return ACTIONS[a].id;
   }
