@@ -2726,11 +2726,18 @@ require("../src/core/autobattle.js");
   run(sw, 3, (i) => (i === 0 ? I | O : 0), 0);
   assert.strictEqual(sw.fighters[0].x, ccx, "I＋O で分身と入れ替わらない");
   assert.strictEqual(sw.fighters[0].clone.x, kx, "入れ替えで分身がカゲの場所に来ない");
-  // 分身は攻撃を1回受けると消える
-  sw.fighters[0].clone.x = sw.fighters[1].x - 80 * S;
-  sw.fighters[1].facing = -1;
-  run(sw, 30, 0, (i) => (i === 0 ? I : 0));
+  // 分身はいつも相手をはさんだカゲの鏡写し（カゲが歩いても、相手が動いても、距離が同じ）
+  run(sw, 20, BUTTON.LEFT, R);
+  {
+    const [k, o] = sw.fighters;
+    assert.strictEqual(k.clone.x - o.x, o.x - k.x, "分身が相手をはさんだカゲの鏡写しになっていない");
+    assert.strictEqual(k.clone.facing, -k.facing, "分身の向きがカゲと逆になっていない");
+  }
+  // 分身は攻撃を1回受けると消える：相手が技を出したところでカゲが入れ替わると、相手の技は分身に当たる
+  const hpK = sw.fighters[0].health;
+  run(sw, 30, (i) => (i === 4 ? I | O : 0), (i) => (i === 0 ? I : 0));
   assert.ok(!sw.fighters[0].clone, "攻撃を受けても分身が消えない");
+  assert.strictEqual(sw.fighters[0].health, hpK, "入れ替えたのにカゲが攻撃を受けた");
   // 相手が画面端にいても、分身は相手の後ろ（端）に出て重ならない。相手を押して前に出ても、相手は分身と影の間にはさまる
   {
     const half = CH.kagetsu.width / 2;
@@ -2825,9 +2832,11 @@ require("../src/core/autobattle.js");
           cloneFrames++;
           const L = lim(c.charId);
           if (c.x < L[0] || c.x > L[1]) offscreen++;
-          if (c.onGround && o.onGround && c.action !== POSE.SHADOW && !noPush.has(o.pose)) assert.ok(Math.abs(c.x - o.x) >= gap(c.charId, o.charId) - S, `分身と相手が重なった: ${where()} 分身${c.x / S}`);
           const me = st.fighters[k];
-          if (c.onGround && me.onGround && c.action !== POSE.SHADOW && me.action !== POSE.SHADOW && !noPush.has(me.pose)) assert.ok(Math.abs(c.x - me.x) >= gap(c.charId, me.charId) - S, `影と分身が重なった: ${where()} 分身${c.x / S}`);
+          // 分身は相手をはさんだ影の鏡写しなので、影が相手に重なれる（空中・ダウンなど）ときは分身も重なる。影が地上で押し合えるときだけ見る
+          if (c.onGround && o.onGround && me.onGround && !noPush.has(me.pose) && c.action !== POSE.SHADOW && !noPush.has(o.pose)) assert.ok(Math.abs(c.x - o.x) >= gap(c.charId, o.charId) - S, `分身と相手が重なった: ${where()} 分身${c.x / S}`);
+          // 分身は相手をはさんだ鏡写しなので、相手が影の真上を跳んでいるときは近づく（相手が地上にいるときだけ見る）
+          if (c.onGround && me.onGround && o.onGround && !noPush.has(o.pose) && c.action !== POSE.SHADOW && me.action !== POSE.SHADOW && !noPush.has(me.pose)) assert.ok(Math.abs(c.x - me.x) >= gap(c.charId, me.charId) - S, `影と分身が重なった: ${where()} 分身${c.x / S}`);
         }
       }
     }

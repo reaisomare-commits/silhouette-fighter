@@ -1,6 +1,6 @@
 {
   "name": "silhouette-fighter",
-  "version": "0.11.4",
+  "version": "0.11.5",
   "private": true,
   "description": "影の剣士と拳法家が戦う、ブラウザで遊ぶ2D格闘ゲーム",
   "scripts": {
