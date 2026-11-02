@@ -1432,6 +1432,7 @@ function combo(att, def, first, steps, gap = 60, guard = 0) {
 // 6. CPU（よわい・ふつう・つよい・学習AI）
 require("../src/core/cpu.js");
 require("../src/core/learn.js");
+require("../src/core/learn-train.js");
 require("../src/core/learned-data.js");
 {
   const LV = SF.cpu.LEVELS;
@@ -1467,6 +1468,14 @@ require("../src/core/learned-data.js");
     assert.ok(w / n >= 0.8, `${LV[hi].label}が${LV[lo].label}に勝てていない（${w}/${n}）`);
   }
 
+  // 学習AIの反射神経は、様子見だけを選ぶ頭脳で測る（学んだ立ち回りで先に技を出して動けないと、反射神経が測れないため）
+  const waitBrain = SF.learn.createBrain();
+  for (const pair of [["kagetsu", "rin"], ["rin", "kagetsu"]]) {
+    const waitTable = SF.learn.tableFor(waitBrain, ...pair);
+    waitTable.q.fill(0);
+    for (let k = 0; k < waitTable.q.length; k += SF.learn.ACTIONS.length) waitTable.q[k] = 1;
+  }
+
   // 近づいてきて弱攻撃（下段も）をくり返す相手に、CPUがどれだけガードできるか。
   // CPUが自分の技などで動けないときに来た攻撃は数えない
   function guardRate(lv, low) {
@@ -1474,7 +1483,7 @@ require("../src/core/learned-data.js");
     let block = 0;
     for (let seed = 1; seed <= 8; seed++) {
       const st = newGame(seed, ["rin", "kagetsu"]);
-      const cpu = SF.cpu.createCpu(lv, seed);
+      const cpu = SF.cpu.createCpu(lv, seed, { brain: waitBrain });
       const [a, b] = st.fighters;
       let wait = 0;
       let counted = false;
@@ -1500,10 +1509,16 @@ require("../src/core/learned-data.js");
     }
     return Math.round((100 * block) / (hit + block));
   }
+  // 発生の速い弱攻撃は見てからでは間に合わないので、構え（読み）で受ける。
+  //   投げ抜け狙い（tech %）のときはガードできる確率が半分、それ以外はしゃがみガード 65%・立ちガード 35% で待つ。
+  //   中段はどちらの構えでも防げるが、下段は立ちガードで待っていると当たる
   const guards = LV.map((_, i) => [guardRate(i, false), guardRate(i, true)]);
   guards.forEach(([mid, lowRate], i) => {
-    assert.ok(Math.abs(mid - LV[i].guard) <= 15, `${LV[i].label}のガード率（中段）が表とずれている: ${mid}%`);
-    assert.ok(Math.abs(lowRate - LV[i].guard) <= 15, `${LV[i].label}のガード率（下段）が表とずれている: ${lowRate}%`);
+    const { guard, tech } = LV[i];
+    const midNeed = (guard * (100 - tech / 2)) / 100;
+    const lowNeed = (guard * ((100 - tech) * 0.65 + tech / 2)) / 100;
+    assert.ok(Math.abs(mid - midNeed) <= 15, `${LV[i].label}のガード率（中段）が表とずれている: ${mid}%（${midNeed.toFixed(0)}%くらいのはず）`);
+    assert.ok(Math.abs(lowRate - lowNeed) <= 15, `${LV[i].label}のガード率（下段）が表とずれている: ${lowRate}%（${lowNeed.toFixed(0)}%くらいのはず）`);
   });
 
   // 投げをくり返す相手に、CPUがどれだけ投げ抜けできるか
@@ -1514,7 +1529,7 @@ require("../src/core/learned-data.js");
       const st = newGame(seed, ["rin", "kagetsu"]);
       st.fighters[0].x = 420 * S;
       st.fighters[1].x = 470 * S;
-      const cpu = SF.cpu.createCpu(lv, seed);
+      const cpu = SF.cpu.createCpu(lv, seed, { brain: waitBrain });
       let grabbed = false;
       for (let i = 0; i < 60; i++) {
         // 投げ抜け以外でCPUがU＋Iを押さないよう、掴まれている間の入力だけ使う
@@ -1536,9 +1551,6 @@ require("../src/core/learned-data.js");
 
   // 前ジャンプで跳び込んでくる相手に、CPUがどれだけ対空技を出すか
   // 学習AIは、様子見を選ぶ頭脳で測る（学んだ立ち回りで先に技を出して動けないと、反射神経が測れないため）
-  const waitBrain = SF.learn.createBrain();
-  const waitTable = SF.learn.tableFor(waitBrain, "kagetsu", "rin");
-  for (let k = 0; k < waitTable.q.length; k += SF.learn.ACTIONS.length) waitTable.q[k] = 1;
   function antiAirRate(lv) {
     let jumps = 0;
     let aa = 0;
@@ -1561,32 +1573,48 @@ require("../src/core/learned-data.js");
   const aas = LV.map((_, i) => antiAirRate(i));
   aas.forEach((r, i) => assert.ok(Math.abs(r - LV[i].antiAir) <= 20, `${LV[i].label}の対空を出す率が表とずれている: ${r}%`));
 
-  // 連続技：ジャブが当たったあと、どれだけ最後（突進拳）までつなぐか
-  function comboRate(lv) {
+  // 連続技：弱攻撃が当たったあと、どれだけ次の技（move）までつなぐか。block＝相手が立ちガードしているとき
+  //   リンのジャブ → ジャブ → 回し蹴り → 突進拳：ジャブ2発の間に当たったのが見えるので、見てから最後までつなぐ
+  //   カゲツの柄打ち → 大振り斬り：柄打ちが終わる前には見えないので、見ずにつなぐか（commit）を決める
+  function comboRate(lv, chars, move, block = false) {
     let full = 0;
     const N = 40;
     for (let seed = 1; seed <= N; seed++) {
-      const st = newGame(seed, ["rin", "kagetsu"]);
+      const st = newGame(seed, chars);
       st.fighters[0].x = 440 * S;
       st.fighters[1].x = 500 * S;
-      const cpu = SF.cpu.createCpu(lv, seed);
-      // CPUを左に置いて、何もしない相手にジャブを当てさせる
-      let usedSpecial = false;
+      const cpu = SF.cpu.createCpu(lv, seed, { brain: waitBrain }); // 学習AIは様子見を選ぶ頭脳で（自分で選んだ技を数えないように）
+      // CPUを左に置いて、何もしない（block なら立ちガードする）相手に弱攻撃を当てさせる
+      let used = false;
       for (let i = 0; i < 120; i++) {
         const cin = SF.cpu.input(cpu, st, 0);
-        SF.game.step(st, [i === 0 ? U : cin & ~(BUTTON.LEFT | BUTTON.RIGHT) & (i < 3 ? 0 : 127), 0]);
-        if (st.fighters[0].move === "special") usedSpecial = true;
+        SF.game.step(st, [i === 0 ? U : cin & ~(BUTTON.LEFT | BUTTON.RIGHT) & (i < 3 ? 0 : 127), block ? BUTTON.RIGHT : 0]);
+        if (i < 50 && st.fighters[0].move === move) used = true; // つなぎだけを数える（あとで様子見から出した技は数えない）
       }
-      if (usedSpecial) full++;
+      if (used) full++;
     }
     return Math.round((100 * full) / N);
   }
-  const combos = LV.map((_, i) => comboRate(i));
-  combos.forEach((r, i) => assert.ok(Math.abs(r - LV[i].combo) <= 20, `${LV[i].label}の連続技を最後までつなぐ率が表とずれている: ${r}%`));
+  const combos = LV.map((_, i) => comboRate(i, ["rin", "kagetsu"], "special"));
+  const blindHit = LV.map((_, i) => comboRate(i, ["kagetsu", "rin"], "standHeavy"));
+  const blindBlock = LV.map((_, i) => comboRate(i, ["kagetsu", "rin"], "standHeavy", true));
+  const rinBlock = comboRate(2, ["rin", "kagetsu"], "special", true);
+  const HARD = 2;
+  assert.ok(combos[HARD] >= 75, `つよいCPUが連続技を最後までつながない: ${combos[HARD]}%`);
+  assert.ok(combos[0] <= combos[1] && combos[1] <= combos[HARD], `連続技をつなぐ率が強さの順になっていない: ${combos}`);
+  assert.ok(rinBlock <= 10, `ジャブ2発で見えているのに、ガードされた連続技を突進拳まで出している: ${rinBlock}%`);
+  // 柄打ちは当たってから16Fで終わる。それより見るのが遅い強さは、見ずにつなぐか決める（当たっていてもガードされていても commit の確率）。
+  // 間に合う強さ（つよい・学習AI）は見てから：当たったらつなぎ、ガードされたらつながない
+  blindHit.forEach((r, i) => {
+    const blind = LV[i].see > 16;
+    const hitNeed = blind ? LV[i].commit : LV[i].combo;
+    const blockNeed = blind ? LV[i].commit : 0;
+    assert.ok(Math.abs(r - hitNeed) <= 20 && Math.abs(blindBlock[i] - blockNeed) <= 20, `${LV[i].label}の柄打ちからのつなぎがおかしい: 当たり ${r}%・ガード ${blindBlock[i]}%`);
+  });
 
   const show = (arr) => arr.map((r, i) => `${LV[i].label}${r}%`).join("・");
   console.log(`OK CPU: 同じ種なら同じ試合、勝率 ${Object.entries(wins).map(([k, v]) => `${k} ${v}%`).join("・")}`);
-  console.log(`OK CPUの強さ: ガード（中段/下段） ${guards.map((g, i) => `${LV[i].label}${g[0]}/${g[1]}%`).join("・")}、投げ抜け ${show(techs)}、対空 ${show(aas)}、連続技を最後まで ${show(combos)}`);
+  console.log(`OK CPUの強さ: ガード（中段/下段） ${guards.map((g, i) => `${LV[i].label}${g[0]}/${g[1]}%`).join("・")}、投げ抜け ${show(techs)}、対空 ${show(aas)}、連続技 リンのジャブから最後まで ${show(combos)}（ガードされたら つよい${rinBlock}%）・カゲツの柄打ちから大振り斬り 当たり ${show(blindHit)}／ガード ${show(blindBlock)}`);
 }
 
 // メニュー：タイトル → モード選択 → キャラと強さの選択 → 試合の設定が正しく作られるか
@@ -1862,7 +1890,7 @@ require("../src/core/autobattle.js");
     for (let k = 0; k < 3; k++) {
       const st = SF.game.createGame(300 + k, ["rin", "kagetsu"]);
       const you = SF.cpu.createCpu(2, 400 + k);
-      const ai = SF.cpu.createCpu(LEARN, 500 + k, { brain: mine, train: true, explore: L.PLAYER_EXPLORE, alpha: L.PLAYER_ALPHA });
+      const ai = SF.cpu.createCpu(LEARN, 500 + k, { brain: mine, train: true, explore: SF.learnTrain.PLAYER_EXPLORE, alpha: SF.learnTrain.PLAYER_ALPHA });
       for (let n = 0; n < 60 * 60 * 6 && st.round.phase !== SF.game.PHASE.MATCH_END; n++) {
         SF.game.step(st, [SF.cpu.input(you, st, 0), SF.cpu.input(ai, st, 1)]);
       }
@@ -1896,7 +1924,7 @@ require("../src/core/autobattle.js");
   const before = winRate(fresh, 40);
   for (let i = 0; i < 400; i++) {
     const side = i % 2;
-    L.trainMatch(fresh, i + 1, side ? ["rin", "kagetsu"] : ["kagetsu", "rin"], side, 2, 0.3);
+    SF.learnTrain.trainMatch(fresh, i + 1, side ? ["rin", "kagetsu"] : ["kagetsu", "rin"], side, 2, 0.3);
   }
   const after = winRate(fresh, 40);
   const ms = Number(process.hrtime.bigint() - t1) / 1e6;
@@ -1907,7 +1935,7 @@ require("../src/core/autobattle.js");
   L.tableFor(guided, "kagetsu", "rin");
   const guidedRate = winRate(guided, 40);
   assert.ok(guidedRate > before, `方針の手がかりを入れても強くならない（${before}% → ${guidedRate}%）`);
-  for (const id of Object.keys(SF.characters.CHARACTERS)) assert.ok(L.POLICY[id], `${id} の方針がない`);
+  for (const id of Object.keys(SF.characters.CHARACTERS)) assert.ok(SF.learnTrain.POLICY[id], `${id} の方針がない`);
 
   // ゲームに入っている学習データの学習AIは「つよい」CPUにしっかり勝つ（どの組み合わせでも）
   const ids = Object.keys(SF.characters.CHARACTERS);
@@ -1922,10 +1950,8 @@ require("../src/core/autobattle.js");
         if (AB.runMatch(80000 + i, chars, levels).winner === side) w += 1;
       }
       def.push(`${SF.characters.CHARACTERS[me].name}対${SF.characters.CHARACTERS[opp].name} ${w * 5}%`);
-      // ゲージ技は学習データを作ったあとに入れたので（学習AIはゲージ技のある戦いをまだ学んでいない）、
-      // ゲンマ対カゲツだけは「つよい」と五分くらいまで下がる。学び直したら 14 にもどす
-      // リンはゴウに大きく不利な組み合わせとして残している（ゴウの岩落とし）。カゲツ相手も、方針（ためた突進拳で近づく）にしてから「つよい」と五分より下
-      const need = me === "rin" && opp === "gou" ? 0 : me === "rin" && opp === "kagetsu" ? 3 : 14;
+      // ver 0.8.0（反射神経を人間らしくして学び直し）では、カゲツは「つよい」ゴウに3割ほどしか勝てない（ゴウの岩落としと起き攻めが通るようになったため）
+      const need = me === "kagetsu" && opp === "gou" ? 3 : 14;
       assert.ok(w >= need, `学習AI（${me}）が つよい（${opp}）に勝てていない（${w}/20）`);
     }
   }

@@ -1,4 +1,4 @@
-// 学習AIをきたえる画面（HTMLのボタンとグラフ）。学習のしくみは src/core/learn.js。
+// 学習AIをきたえる画面（HTMLのボタンとグラフ）。学習のしくみは src/core/learn.js（戦う部分）と src/core/learn-train.js（学ぶ部分）。
 // 画面が固まらないよう、少しずつ（1回に約30ミリ秒ぶん）試合を進める。
 // 学習した頭脳はこのブラウザ（localStorage）に保存し、ページを開き直しても続きから使える。
 (function (root) {
@@ -252,7 +252,7 @@
       // 学習AI同士のときは、相手に「少し前の自分のコピー」（学習しない）を使い、ときどき新しくする
       if (r.oppValue === "self" && r.done % SNAPSHOT_EVERY === 0) r.snapshot = { brain: L.clone(L.currentBrain()) };
       const opponent = r.oppValue === "self" ? r.snapshot : r.oppValue;
-      const res = L.trainMatch(L.currentBrain(), r.seed + r.done, chars, side, opponent, explore);
+      const res = SF.learnTrain.trainMatch(L.currentBrain(), r.seed + r.done, chars, side, opponent, explore);
       const win = res.winner === side ? 1 : 0;
       r.wins += win;
       r.blockWins += win;

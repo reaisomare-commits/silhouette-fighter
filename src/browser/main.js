@@ -78,8 +78,8 @@
         return SF.cpu.createCpu(lv, seed + matchCount * 2 + i, {
           brain: SF.learnPage.playerBrain(),
           train: true,
-          explore: SF.learn.PLAYER_EXPLORE,
-          alpha: SF.learn.PLAYER_ALPHA,
+          explore: SF.learnTrain.PLAYER_EXPLORE,
+          alpha: SF.learnTrain.PLAYER_ALPHA,
         });
       }
       return SF.cpu.createCpu(lv, seed + matchCount * 2 + i);
