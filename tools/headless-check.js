@@ -1950,10 +1950,8 @@ require("../src/core/autobattle.js");
         if (AB.runMatch(80000 + i, chars, levels).winner === side) w += 1;
       }
       def.push(`${SF.characters.CHARACTERS[me].name}対${SF.characters.CHARACTERS[opp].name} ${w * 5}%`);
-      // ゲージ技は学習データを作ったあとに入れたので（学習AIはゲージ技のある戦いをまだ学んでいない）、
-      // ゲンマ対カゲツだけは「つよい」と五分くらいまで下がる。学び直したら 14 にもどす
-      // リンはゴウに大きく不利な組み合わせとして残している（ゴウの岩落とし）。カゲツ相手も、方針（ためた突進拳で近づく）にしてから「つよい」と五分より下
-      const need = me === "rin" && opp === "gou" ? 0 : me === "rin" && opp === "kagetsu" ? 3 : 14;
+      // ver 0.8.0（反射神経を人間らしくして学び直し）では、カゲツは「つよい」ゴウに3割ほどしか勝てない（ゴウの岩落としと起き攻めが通るようになったため）
+      const need = me === "kagetsu" && opp === "gou" ? 3 : 14;
       assert.ok(w >= need, `学習AI（${me}）が つよい（${opp}）に勝てていない（${w}/20）`);
     }
   }
