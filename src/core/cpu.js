@@ -55,6 +55,11 @@
       standLight: ["crouchHeavy"], // 張り手 → 四股踏み
       crouchLight: ["crouchHeavy"], // すね蹴り → 四股踏み
     },
+    // ムクロ：腐れ爪 → 頭突き（頭が外れていれば振り下ろし）、足元引っかき → 頭転がし（頭が外れていれば噛みつき）
+    mukuro: {
+      standLight: ["heavy"],
+      crouchLight: ["special"],
+    },
   };
   // ガードされても続ける連続技（隙の少ないキャンセル）。カゲツの大振り斬り → 飛刃
   const BLOCK_COMBOS = {
@@ -86,6 +91,12 @@
       mid: { forward: 30, dash: 25, light: 20, heavy: 10, crouchHeavy: 5, wait: 10 },
       far: { forward: 40, dash: 40, jump: 5, wait: 15 },
     },
+    // ムクロ：頭を転がして相手の後ろに置き、這い寄り（前2回）で近づく。頭が外れたら噛みつき（cpu の頭の動き）で有利を取って崩す
+    mukuro: {
+      near: { light: 20, crouchLight: 20, throw: 15, heavy: 15, special: 10, wait: 10, back: 10 },
+      mid: { special: 30, dash: 25, crouchLight: 10, wait: 15, guardLow: 10, light: 10 },
+      far: { special: 30, dash: 40, wait: 15, forward: 15 },
+    },
   };
 
   // 浮遊できるキャラ（ゲンマ）が、1回のジャンプで浮くか・空中の飛び道具を撃つかを決める確率（%）
@@ -109,7 +120,13 @@
     rin: { bands: ["near"], maxDist: 999, rate: 2 },
     genma: { bands: ["mid", "far"], maxDist: 999, rate: 3 },
     gou: { confirm: true, maxDist: 240, grab: true },
+    // ムクロの大口：どこからでも（ジャンプでかわせない）。頭が離れていれば、攻められている最中の切り返しにも使う
+    mukuro: { bands: ["near", "mid", "far"], maxDist: 999, rate: 3 },
   };
+  // ムクロの頭の動き（CPU）
+  //   BITE_RANGE：頭から相手までがこれより近ければ噛みつく（ピクセル）
+  //   MIX：噛みつきを当てた・ガードさせたあとの崩しの選びやすさ（振り下ろし＝中段、足元引っかき＝下段、投げ）
+  const MUKURO = { BITE_RANGE: 230, MIX: { standHeavy: 35, crouchLight: 35, throw: 30 } };
   // リンの練気で強くなっている間の連続技（すべての攻撃がキャンセルできるので長くつなぐ）
   //   かかと落とし・小足・足払いと突進拳を交互にキャンセルし続けて、ガードされても攻めを続ける
   //   （かかと落としが当たったら相手はダウンするので、そこで連続技は終わる）
@@ -177,6 +194,9 @@
       myAir: false, // 前のフレームで自分が空中にいたか（ジャンプ1回ごとに浮くかを決める）
       floatPlan: false, // このジャンプで浮くか
       airShotPlan: false, // このジャンプで空中の飛び道具を撃つか
+      bitePlan: false, // ムクロ：噛みつきを出したので、当たった・ガードさせたら崩しに行く
+      headSuperKey: null, // ムクロ：どの相手の技のときに、頭からの大口で切り返すかを決めたか
+      headHitKey: null, // 相手（ムクロ）の頭を叩くかを決めた時（32フレームごとに1回）
     };
   }
 
@@ -207,7 +227,10 @@
     if (opp.move && (opp.move !== cpu.oppLastMove || opp.moveFrame < cpu.oppLastFrame)) cpu.oppMoveId += 1;
     cpu.oppLastMove = opp.move;
     cpu.oppLastFrame = opp.moveFrame;
-    const projs = state.projectiles.filter((p) => p.owner === 1 - index);
+    const projs = state.projectiles.filter((p) => p.owner === 1 - index).map((p) => ({ x: p.x, vx: p.vx, guard: "mid" }));
+    // ムクロの頭の攻撃も飛び道具と同じように見張る（頭転がしは下段）
+    const oh = opp.head;
+    if (oh && (oh.state === "roll" || oh.state === "bite" || oh.state === "hop") && !oh.hit) projs.push({ x: oh.x, vx: oh.vx || oh.dir, guard: oh.state === "roll" ? "low" : "mid" });
     if (projs.length > cpu.oppProjCount) cpu.projId += 1;
     cpu.oppProjCount = projs.length;
     const air = !opp.onGround && opp.pose === SF.game.POSE.JUMP;
@@ -225,7 +248,7 @@
       moveHit: opp.moveHit,
       moveId: cpu.oppMoveId,
       jumpId: cpu.jumpId,
-      projs: projs.map((p) => ({ x: p.x, vx: p.vx })),
+      projs,
       projId: cpu.projId,
     });
     if (cpu.history.length > HISTORY) cpu.history.shift();
@@ -268,7 +291,7 @@
     // 飛び道具がこちらに向かってきている
     for (const p of o.projs) {
       const toward = Math.sign(me.x - p.x) === Math.sign(p.vx);
-      if (toward && Math.abs(me.x - p.x) / S < PROJECTILE_ALERT) return { key: "p" + o.projId, kind: "p", id: o.projId, guard: "mid" };
+      if (toward && Math.abs(me.x - p.x) / S < PROJECTILE_ALERT) return { key: "p" + o.projId, kind: "p", id: o.projId, guard: p.guard || "mid" };
     }
     if (!o.move || o.moveHit) return null;
     const m = CHARACTERS[opp.charId].moves[o.move];
@@ -545,6 +568,13 @@
       }
     }
 
+    // ムクロ：頭が離れていれば、攻められている（のけぞり・ガード・ダウン）最中でも頭から大口を出して切り返す（1回の攻めごとに決める）
+    if (me.head && SUPER_PLAN[me.charId] && SF.game.gaugeFull(me) && me.head.state !== "stunned" && me.head.state !== "super" && (me.pose === POSE.HIT || me.pose === POSE.BLOCK || me.pose === POSE.DOWN)) {
+      if (cpu.headSuperKey !== o.moveId) {
+        cpu.headSuperKey = o.moveId;
+        if (chance(cpu, lv.superUse / 2)) return finish(cpu, SUPER);
+      }
+    }
     if (!free) return finish(cpu, cpu.hold & ~(BUTTON.LIGHT | BUTTON.HEAVY | BUTTON.SPECIAL));
 
     // 学習AIのひとまとまりの攻め（起き攻め・ダッシュからの崩し）の続き
@@ -626,6 +656,23 @@
     if ((o.pose === POSE.DOWN && !cpu.learner) || o.pose === POSE.LAUNCH) {
       cpu.hold = dist > reachOf(me, opp, "standLight") ? forward : 0;
       return finish(cpu, cpu.hold);
+    }
+
+    // ムクロの頭（学習AIも、頭の噛みつき・崩し・拾いはここで決める）
+    if (me.head && me.charId === "mukuro") {
+      const out = mukuroHead(cpu, state, me, opp, o, lv, forward, back);
+      if (out !== null) return finish(cpu, out);
+    }
+    // 相手（ムクロ）の頭が届く所に置いてあれば、先に下段で叩く（学習AIでないとき）
+    const oh = opp.head;
+    if (!cpu.learner && oh && (oh.state === "rest" || oh.state === "recover") && cpu.headHitKey !== state.frame >> 5) {
+      cpu.headHitKey = state.frame >> 5;
+      const cl = CHARACTERS[me.charId].moves.crouchLight;
+      const ahead = (oh.x - me.x) * me.facing;
+      if (ahead > 0 && ahead / S <= cl.hitbox.x2 + CHARACTERS.mukuro.head.size / 2 - 4 && chance(cpu, lv.guard / 2 + 20)) {
+        cpu.queue.push(BUTTON.DOWN | BUTTON.LIGHT, BUTTON.DOWN);
+        return finish(cpu, BUTTON.DOWN);
+      }
     }
 
     // 様子見：考え直す時間になったら、距離に合わせて行動を選ぶ
@@ -742,6 +789,44 @@
     }
   }
 
+  // ムクロの頭の動かし方。このフレームの入力を返す（何もしないなら null）
+  //   ・相手が頭転がしをガードした（当たった）・頭の近くにいるなら、噛みつき
+  //   ・噛みつきを当てた・ガードさせたら、這い寄りで近づいて中段・下段・投げの択
+  //   ・頭が転がって動けない、または相手からも自分からも遠い所にあれば、拾いに行く（相手の向こうなら跳び越える）
+  function mukuroHead(cpu, state, me, opp, o, lv, forward, back) {
+    const { POSE } = SF.game;
+    const h = me.head;
+    const toOpp = Math.abs(h.x - o.x) / S;
+    if (h.state === "rest" && (o.pose === POSE.BLOCK || o.pose === POSE.HIT || toOpp <= MUKURO.BITE_RANGE) && o.onGround && chance(cpu, lv.combo)) {
+      cpu.bitePlan = true;
+      return BUTTON.SPECIAL;
+    }
+    if (cpu.bitePlan && h.state === "recover" && (opp.pose === POSE.BLOCK || opp.pose === POSE.HIT)) {
+      cpu.bitePlan = false;
+      const move = pick(cpu, MUKURO.MIX);
+      cpu.macro = { kind: "dash", move, timer: 30 };
+      cpu.queue.push(0, forward, forward, forward);
+      cpu.thinkTimer = 30;
+      return forward;
+    }
+    if (h.state === "stunned" || (h.state === "rest" && toOpp > MUKURO.BITE_RANGE + 40)) {
+      const dx = h.x - me.x;
+      const behindOpp = Math.sign(o.x - me.x) === Math.sign(dx) && Math.abs(dx) > Math.abs(o.x - me.x);
+      const toward = dx * me.facing > 0 ? forward : back;
+      cpu.thinkTimer = 10;
+      if (behindOpp && chance(cpu, 30)) {
+        cpu.thinkTimer = 50;
+        cpu.hold = forward;
+        return BUTTON.JUMP | forward;
+      }
+      if (!behindOpp) {
+        cpu.hold = toward;
+        return toward;
+      }
+    }
+    return null;
+  }
+
   // 起き攻め・ダッシュからの崩しで使う技の名前。投げは、コマンド投げ（ゴウの岩落とし）があればそちら
   function okiMove(st, plan) {
     if (plan === "okiStrike") return "standHeavy";
@@ -765,8 +850,10 @@
   function runMacro(cpu, state, me, opp, forward) {
     const mc = cpu.macro;
     const st = CHARACTERS[me.charId];
-    const m = st.moves[mc.move];
-    const reach = reachOf(me, opp, mc.move === "special" && m.kind === "throw" ? "special" : mc.move) - 6;
+    // 頭が外れているムクロの I は振り下ろし
+    const name = mc.move === "standHeavy" && me.head && st.moves.headlessHeavy ? "headlessHeavy" : mc.move;
+    const m = st.moves[name];
+    const reach = reachOf(me, opp, mc.move === "special" && m.kind === "throw" ? "special" : name) - 6;
     const realDist = Math.abs(me.x - opp.x) / S;
     if (mc.kind === "oki") {
       if (opp.pose !== POSE_DOWN() || opp.health <= 0) {
@@ -800,6 +887,7 @@
         cpu.queue.push(BUTTON.DOWN | BUTTON.LIGHT, BUTTON.DOWN);
         return BUTTON.DOWN;
       }
+      if (mc.move === "standHeavy") return BUTTON.HEAVY;
       return mc.move === "throw" ? BUTTON.LIGHT | BUTTON.HEAVY : BUTTON.SPECIAL;
     }
     if (mc.timer <= 0) {
