@@ -603,7 +603,7 @@ function jumpIn(guardInput, att = "kagetsu", btn = U, pressAt = 30) {
     let freeBetween = false;
     for (let i = 0; i < 110; i++) {
       // ジャンプ強攻撃のあと、着地前に弱攻撃を連打（先行入力）
-      const inA = (i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0) | (i === 26 ? I : 0) | (i > 30 && i % 2 === 0 ? U : 0);
+      const inA = (i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0) | (i === 24 ? I : 0) | (i > 30 && i % 2 === 0 ? U : 0);
       const before = b.health;
       SF.game.step(st, [inA, 0]);
       if (b.health < before) hits++;
@@ -1958,7 +1958,7 @@ require("../src/core/autobattle.js");
   for (let i = 0; i < 40; i++) SF.game.step(gGuard, [i === 0 ? I : 0, BUTTON.RIGHT]);
   assert.strictEqual(gGuard.fighters[1].gauge, Math.floor((100 * 20 * 100) / 900), "ガードした側のゲージ");
   const gProj = superGame(["kagetsu", "rin"], 300, 0);
-  for (let i = 0; i < 80; i++) SF.game.step(gProj, [i === 0 ? O : 0, BUTTON.RIGHT]);
+  for (let i = 0; i < 120; i++) SF.game.step(gProj, [i === 0 ? O : 0, BUTTON.RIGHT]);
   assert.strictEqual(gProj.fighters[1].gauge, Math.floor((80 * 40 * 100) / 900), "飛び道具をガードした側のゲージ");
 
   // 消極的な動きのペナルティ：前に出ず飛び道具しか撃たない時間が5秒続くと、そこから1秒ごとにゲージが3減る
@@ -1976,7 +1976,30 @@ require("../src/core/autobattle.js");
   for (let i = 0; i <= P.frames + 100; i++) SF.game.step(shooter, [i % 120 === 0 ? O : 0, 0]); // 当たった瞬間の止まり（ヒットストップ）は数えないので少し長めに
   assert.ok(shooter.fighters[0].passive >= P.frames, "飛び道具だけ撃っていても消極的と数えられない");
   assert.strictEqual(passiveRun((i) => (i % 120 === 0 ? U : 0), P.frames + 1), 5000, "攻撃しているのにゲージが減った");
-  assert.strictEqual(passiveRun((i) => (i % 120 < 5 ? BUTTON.RIGHT : 0), P.frames + 1), 5000, "前に歩いているのにゲージが減った");
+  // 前に少しずつ歩く（差し引きで advance ピクセル以上進む）と数え直し。ゲンマの歩き（2.3px）で20フレーム＝46px
+  assert.ok(passiveRun((i) => (i % 120 < 20 ? BUTTON.RIGHT : 0), P.frames + 1) >= 5000, "前に歩いているのにゲージが減った");
+  // 前後に行ったり来たりして、差し引きでその場にとどまっていると消極的と数える（ゲンマは前後の歩きの速さが同じ）
+  const wobble = (i) => (i % 40 < 20 ? BUTTON.LEFT : BUTTON.RIGHT);
+  assert.strictEqual(passiveRun(wobble, P.frames), 5000 - P.drain * 100, "前後の往復でその場にとどまっているのにゲージが減らない");
+  // 前に1回ちょんと押しただけ（advance ピクセルに届かない）でも数え直しにならない
+  assert.strictEqual(passiveRun((i) => (i % 60 < 3 ? BUTTON.RIGHT : 0), P.frames), 5000 - P.drain * 100, "前にちょんと押しただけで数え直しになった");
+
+  // 積極的な動きのボーナス：差し引きで前に進んだ記録を distance ピクセル更新するたびにゲージが gain 増える
+  const A = SF.characters.BATTLE.aggressive;
+  const walkFwd = superGame(["kagetsu", "rin"], 500, 0);
+  for (let i = 0; i < 100; i++) SF.game.step(walkFwd, [BUTTON.RIGHT, 0]);
+  const walked = (walkFwd.fighters[0].x / S - 300) | 0;
+  assert.strictEqual(walkFwd.fighters[0].gauge, Math.floor(walked / A.distance) * A.gain * 100, `前に${walked}px歩いたときのゲージ`);
+  // 前ジャンプでも増える
+  const jumpFwd = superGame(["kagetsu", "rin"], 500, 0);
+  for (let i = 0; i < 60; i++) SF.game.step(jumpFwd, [i === 0 ? BUTTON.JUMP | BUTTON.RIGHT : 0, 0]);
+  assert.ok(jumpFwd.fighters[0].x / S - 300 >= A.distance, "前ジャンプで進む距離が短い");
+  assert.strictEqual(jumpFwd.fighters[0].gauge, A.gain * 100, "前ジャンプでゲージが増えない");
+  // 下がってから同じだけ戻っても増えない、前後の往復でも増えない
+  const backFwd = superGame(["genma", "kagetsu"], 500, 0);
+  for (let i = 0; i < 160; i++) SF.game.step(backFwd, [i < 80 ? BUTTON.LEFT : BUTTON.RIGHT, 0]);
+  for (let i = 0; i < 600; i++) SF.game.step(backFwd, [wobble(i), 0]);
+  assert.strictEqual(backFwd.fighters[0].gauge, 0, "下がって戻っただけ・往復しただけでゲージが増えた");
 
   // カゲツ：月影斬。暗転前からガードを押していないと防げない。暗転前から押していればガードでき、−2
   function tsukikage(holdBefore) {
@@ -2072,6 +2095,7 @@ require("../src/core/autobattle.js");
   assert.strictEqual(blocks, 8, "冥府球を8回ガードしていない");
   assert.strictEqual(1000 - blk.fighters[1].health, 8 * 4, "冥府球の削り");
   assert.ok(pushed > 120, `ガードしても押し出されない（${pushed}px）`);
+  console.log(`OK 積極的・消極的: 前に${A.distance}px進んだ記録を更新するたびにゲージ+${A.gain}（歩き・前ジャンプ）、前後の往復や下がって戻るだけでは増えず、往復でその場にとどまると消極的でゲージが減る`);
   console.log(`OK ゲージ技: ゲージの溜まり方（ガードでも溜まる）・I＋O（どんな技からもキャンセル）・暗転・持ち越し・消極的だと減る、月影斬は暗転前からガードしないと防げず（ガードで${tYes.adv}F）無敵で切り返せる、練気は暗転明けすぐ動けて6秒間すべてキャンセル可能、冥府球は地上でも空中でも8回連続ヒット（${dmg}）・ガードで${Math.round(pushed)}px押し出し`);
 }
 
@@ -2196,6 +2220,33 @@ require("../src/core/autobattle.js");
   }
   assert.ok(stepAt > 0);
   assert.strictEqual(thru.fighters[0].health, G.health, "踏み込みの出だしで飛刃をすり抜けない");
+  // 踏み込みの出だし（invincible フレーム）は攻撃も投げも当たらない（やられる範囲がない）
+  const inv = gouGame("kagetsu", 300);
+  let invFrames = 0;
+  let afterInv = false;
+  for (let i = 0; i < 20; i++) {
+    SF.game.step(inv, [i === 0 || i === 2 ? R : 0, 0]);
+    const gf = inv.fighters[0];
+    if (gf.pose !== POSE.STEP) continue;
+    if (SF.game.hurtbox(gf) === null) {
+      assert.ok(!afterInv, "踏み込みの無敵が途中で戻った");
+      invFrames++;
+    } else afterInv = true;
+  }
+  assert.strictEqual(invFrames, fd.invincible, `踏み込みの無敵のフレーム数（${invFrames}）`);
+  assert.ok(afterInv, "踏み込みの終わり際まで無敵になっている");
+  // 実際に攻撃を重ねても当たらない：目の前のカゲツの柄打ちが、踏み込みの出だしに重なる（踏み込まなければ当たる）
+  function stepVsJab(step) {
+    const st = gouGame("kagetsu", 100);
+    let hpAtInvEnd = -1;
+    for (let i = 0; i < 12; i++) {
+      SF.game.step(st, [step && (i === 0 || i === 2) ? R : 0, i === 0 ? U : 0]);
+    }
+    hpAtInvEnd = st.fighters[0].health;
+    return hpAtInvEnd;
+  }
+  assert.ok(stepVsJab(false) < G.health, "（確かめ方の確認）踏み込まなければ柄打ちが当たるはず");
+  assert.strictEqual(stepVsJab(true), G.health, "踏み込みの無敵中に攻撃が当たった");
 
   // 大地落とし（ゲージ技）：約200px先まで突進して掴む。ガードも投げ抜けもできない。320ダメージ
   const su = G.moves.super;
@@ -2223,7 +2274,7 @@ require("../src/core/autobattle.js");
   assert.strictEqual(pre.fighters[1].health, 1000, "暗転の前から跳んでいた相手を大地落としで掴めた");
   assert.ok(su.recovery >= 70, "大地落としの空振りの隙");
 
-  console.log(`OK ゴウ: 張り手は148pxまで届くが腕に強攻撃を合わされる、弱と強がかち合ったら強が勝つ、大張り手の踏ん張りは1発だけ、張り手・すね蹴りから四股踏みにキャンセルできる、岩落とし（${sp.damage}）は投げ抜けできずガード硬直中とジャンプ中は掴めない、つかみ上げ（${cs.damage}）は空中の相手だけ・空中攻撃に勝つ、踏み込みで飛び道具をすり抜け、大地落とし（${su.damage}）はガード・投げ抜け不可で約250pxまで届き、暗転のあとで跳んでもバックステップしても掴む（暗転の前から跳んでいれば空振り）`);
+  console.log(`OK ゴウ: 張り手は148pxまで届くが腕に強攻撃を合わされる、弱と強がかち合ったら強が勝つ、大張り手の踏ん張りは1発だけ、張り手・すね蹴りから四股踏みにキャンセルできる、岩落とし（${sp.damage}）は投げ抜けできずガード硬直中とジャンプ中は掴めない、つかみ上げ（${cs.damage}）は空中の相手だけ・空中攻撃に勝つ、踏み込みは出だし無敵で飛び道具もすり抜け、大地落とし（${su.damage}）はガード・投げ抜け不可で約250pxまで届き、暗転のあとで跳んでもバックステップしても掴む（暗転の前から跳んでいれば空振り）`);
 }
 
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める
