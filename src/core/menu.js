@@ -52,7 +52,29 @@
     ],
   };
 
-  const charIds = () => Object.keys(SF.characters.CHARACTERS);
+  // 選べるキャラ。隠しキャラ（カゲ）は解禁するまで出さない
+  const charIds = (menu) => Object.keys(SF.characters.CHARACTERS).filter((id) => !SF.characters.CHARACTERS[id].hidden || (menu && menu.unlocked));
+
+  // 隠しキャラの解禁：タイトル画面にいる間、夕日が SUNSET_FRAMES かけて沈む（メニューを操作していても数える。タイトルを離れたら最初から）。
+  // 沈み切ると真ん中に影が現れ、クリックするか決定キーを押すと解禁
+  const SUNSET_FRAMES = 5 * 60 * 60;
+  // 夕日の沈み具合（0〜1）
+  const sunset = (menu) => Math.min(1, menu.titleFrames / SUNSET_FRAMES);
+  // 影が現れていて、まだ解禁していないか
+  const kageReady = (menu) => !menu.unlocked && menu.screen === SCREEN.TITLE && menu.titleFrames >= SUNSET_FRAMES;
+  // 1フレーム進める（main.js が毎フレーム呼ぶ）
+  function tick(menu) {
+    if (menu.screen === SCREEN.TITLE) menu.titleFrames += 1;
+    else menu.titleFrames = 0;
+    if (menu.unlockFlash > 0) menu.unlockFlash -= 1;
+  }
+  // 解禁する。解禁したら true（保存は main.js）
+  function unlock(menu) {
+    if (!kageReady(menu)) return false;
+    menu.unlocked = true;
+    menu.unlockFlash = 240;
+    return true;
+  }
   const levelCount = () => SF.cpu.LEVELS.length;
 
   // トレーニングの相手の動き：練習相手（SF.dummy の動き）のあとに、CPUの強さが並ぶ
@@ -62,9 +84,13 @@
     return list;
   }
 
-  function createMenu() {
+  // unlocked＝隠しキャラを解禁しているか（このブラウザに保存してある値を main.js が渡す）
+  function createMenu(unlocked = false) {
     return {
       screen: SCREEN.TITLE,
+      titleFrames: 0, // タイトル画面にいるフレーム数（夕日が沈む）
+      unlocked, // 隠しキャラ（カゲ）を解禁したか
+      unlockFlash: 0, // 「カゲが目覚めた」を出している残りフレーム
       modeCursor: 0,
       cursor: 0, // キャラ選択画面で選んでいる行
       // 前に選んだものを覚えておく（もどってきても選び直さなくてよい）
@@ -113,6 +139,11 @@
   // 試合を始めるときだけ { start: 設定 }、資料の画面を開くときは { library: true } を返す。それ以外は null
   function press(menu, action) {
     if (menu.screen === SCREEN.TITLE) {
+      // 影が現れていれば、決定キーで解禁（もう一度押すとモード選択へ）
+      if (action === "ok" && kageReady(menu)) {
+        unlock(menu);
+        return { unlock: true };
+      }
       if (action === "ok") menu.screen = SCREEN.MODE;
       return null;
     }
@@ -137,7 +168,7 @@
     else if (action === "left" || action === "right") {
       const d = action === "left" ? -1 : 1;
       if (row.kind === "char") {
-        const ids = charIds();
+        const ids = charIds(menu);
         p.chars[row.side] = ids[wrap(ids.indexOf(p.chars[row.side]) + d, ids.length)];
       } else if (row.kind === "level") {
         // 強さは端で止める（よわい←→つよいが一周すると分かりにくいため）
@@ -154,5 +185,5 @@
     return null;
   }
 
-  SF.menu = { SCREEN, MODES, VS_TYPES, ROWS, createMenu, press, matchConfig, rows, picks, partners };
+  SF.menu = { SCREEN, MODES, VS_TYPES, ROWS, SUNSET_FRAMES, createMenu, press, matchConfig, rows, picks, partners, charIds, sunset, kageReady, unlock, tick };
 })(globalThis);

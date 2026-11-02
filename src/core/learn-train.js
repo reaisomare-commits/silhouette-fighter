@@ -93,6 +93,17 @@
       { dist: [2, 3], act: { special: 3, dash: 2, guardLow: 1 } },
       { dist: [0, 1], act: { light: 2, crouchLight: 2, special: 1, throw: 1 } },
     ],
+    // カゲ：影走り（前2回）で近づいて弱攻撃と投げ（影縛りから連続技は cpu.js）で崩す。離れたら影苦無。跳んできたら朧月（S＋O）。
+    //   分身（ゲージ技）は近い所で出し、入れ替えは cpu.js が攻撃の出だしで決める
+    kage: [
+      { gauge: true, opp: [0, 1, 2, 3], dist: [0, 1, 2], act: { super: 3, light: 1 } },
+      { opp: [6], dist: [0, 1, 2, 3], act: { okiThrow: 2, okiLow: 2, okiStrike: 1 } },
+      { opp: [5], dist: [0, 1, 2, 3], act: { crouchSpecial: 4, back: 1 } },
+      { opp: [1, 4], dist: [0, 1], act: { throw: 3, light: 2, crouchLight: 1 } },
+      { dist: [4, 5], act: { dash: 3, special: 2, forward: 1 } },
+      { dist: [2, 3], act: { dash: 2, heavy: 2, special: 1, jump: 1 } },
+      { dist: [0, 1], act: { light: 2, crouchLight: 2, throw: 2 } },
+    ],
   };
   const POLICY_GUIDE = 0.6; // 探検のとき、方針の行動から選ぶ割合
   const POLICY_PRIOR = 0.03; // 何も覚えていない表で、方針の行動の数字をどれだけ高くしておくか（いちばん重い行動がこの値）

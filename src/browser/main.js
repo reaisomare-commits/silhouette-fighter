@@ -12,7 +12,16 @@
   const seed = (Date.now() & 0x7fffffff) >>> 0;
   const keyboard = SF.keyboard.createKeyboard(root);
   const renderer = SF.renderer.createRenderer(document.getElementById("screen"));
-  const menu = SF.menu.createMenu();
+  // 隠しキャラ（カゲ）を解禁したかは、このブラウザ（localStorage）に保存する
+  const UNLOCK_STORE = "silhouette-fighter.kage";
+  function loadUnlocked() {
+    try {
+      return root.localStorage.getItem(UNLOCK_STORE) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+  const menu = SF.menu.createMenu(loadUnlocked());
   const sound = SF.sound.createSound();
   const canvas = document.getElementById("screen");
 
@@ -35,6 +44,18 @@
     }
   }
   const bindings = loadBindings();
+  renderer.setUnlocked(menu.unlocked);
+
+  // 隠しキャラを解禁した（タイトル画面で、沈んだ夕日の下に現れた影をクリックか決定キー）
+  function onUnlock() {
+    try {
+      root.localStorage.setItem(UNLOCK_STORE, "1");
+    } catch (e) {
+      // 保存できなくても、開いている間は使える
+    }
+    renderer.setUnlocked(true);
+    sound.play("superFlash");
+  }
   let keyScreen = KC.createScreen();
 
   let scene = "menu"; // "menu"（メニュー）、"battle"（試合・トレーニング）、"library"（資料）、"keys"（キーコンフィグ）
@@ -108,7 +129,7 @@
     else backToMenu(SF.menu.SCREEN.MODE);
   }
   function pressLibrary(action) {
-    const n = renderer.LIBRARY_PAGE_COUNT;
+    const n = renderer.libraryPageCount();
     if (action === "left" || action === "up") library.page = (library.page + n - 1) % n;
     else if (action === "right" || action === "down") library.page = (library.page + 1) % n;
     else if (action === "back") closeLibrary();
@@ -223,7 +244,16 @@
   }
 
   // ブラウザは、画面をクリックするかキーを押すまで音を出せないので、そのときに音の準備をする
-  root.addEventListener("pointerdown", () => sound.unlock());
+  root.addEventListener("pointerdown", (e) => {
+    sound.unlock();
+    // タイトル画面で、真ん中に現れた影をクリックしたら解禁
+    if (scene !== "menu" || !SF.menu.kageReady(menu)) return;
+    const r = canvas.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * canvas.width;
+    const y = ((e.clientY - r.top) / r.height) * canvas.height;
+    const box = renderer.TITLE_KAGE_BOX;
+    if (x >= box.left && x <= box.right && y >= box.top && y <= box.bottom && SF.menu.unlock(menu)) onUnlock();
+  });
 
   root.addEventListener("keydown", (e) => {
     sound.unlock();
@@ -252,6 +282,7 @@
       if (!action || (e.repeat && (action === "ok" || action === "back"))) return;
       menuSound(action);
       const result = SF.menu.press(menu, action);
+      if (result && result.unlock) onUnlock();
       if (result && result.start) startBattle(result.start);
       if (result && result.library) openLibrary("menu");
       return;
@@ -332,6 +363,7 @@
       // 一時停止中は試合を進めない（試合終了のメニューは、後ろで決着の場面を進めたままにする）
       if (scene === "battle" && !(overlay && overlay.kind === "pause")) stepBattle();
       else keyboard.read();
+      if (scene === "menu") SF.menu.tick(menu); // タイトル画面の夕日を進める
       accumulator -= STEP_MS;
       steps++;
       updates++;

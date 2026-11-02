@@ -294,6 +294,64 @@
         super: { name: "大口", kind: "special", startup: 1, active: 1, recovery: 30, hitAdv: "down", blockAdv: -12, damage: 52, guard: "mid", hitbox: null, push: 10, headSuper: true, projectile: { speed: 6, width: 110, height: 330, multi: { hits: 6, interval: 7, hitAdv: 0, push: 12, airLift: 2 } } },
       },
     },
+    // カゲ（影）：隠しキャラ。タイトル画面で夕日が沈み切るまで待ち、真ん中に出てくる影をクリックすると使える。
+    //   姿は完全なシルエット（黒よりうっすら明るい。同キャラ対戦の2Pは真っ白）。
+    //   速い通常技、地面の影に潜って無敵で動き回る「影潜り」、投げから連続技につなぐ「影縛り」、
+    //   ゲージ技は相手の後ろに出る分身（同じ行動をして、いつでも入れ替えられる）
+    kage: {
+      name: "カゲ",
+      hidden: true, // 隠しキャラ（解禁するまでキャラ選択・資料に出ない）
+      width: 54,
+      height: 168,
+      crouchHeight: 102,
+      walkForward: 3.4,
+      walkBack: 2.8,
+      jumpVelocity: 14.8,
+      jumpForward: 4.6,
+      gravity: 0.85,
+      // → 高さ約129ピクセル、滞空約35フレーム。前ジャンプで約160ピクセル進む
+      landingLag: 3,
+      // 前を素早く2回：影走り（約110ピクセル踏み込む）
+      forwardDash: { type: "step", frames: 14, speed: 7.85, recovery: 4 },
+      backDash: { frames: 12, speed: 5.4, recovery: 10, invincible: 10 }, // 約65ピクセル下がる。初めの10Fは無敵
+      health: 1000,
+      lightChainMax: 2, // 弱攻撃は1回の連続技で2回までつながる
+      // 影潜り（S＋O を押している間）：地面の影に潜る。
+      //   sink: 潜り始めの長さ（F）。invincibleFrom フレーム目から無敵（攻撃・投げ・飛び道具すべて当たらない）
+      //   speed: 潜っている間に前後に動ける速さ（1Fのピクセル）。相手もすり抜ける
+      //   maxFrames: 潜っていられる長さ（潜り終わってから。過ぎると自動で朧月）
+      //   O を離すと朧月（crouchSpecial）で飛び出す。S を離すと攻撃せずに出る（emerge フレームのあいだ動けず、攻撃は当たる）
+      shadowDive: { sink: 6, invincibleFrom: 3, speed: 4.5, maxFrames: 90, emerge: 8 },
+      // 分身（ゲージ技）の数値
+      //   frames: 分身がいる時間、damageRate: 分身の攻撃のダメージ（影の何%）、swapCooldown: 入れ替えたあと次に入れ替えられるまで（F）
+      clone: { frames: 360, damageRate: 50, swapCooldown: 15 },
+      // カゲだけの性質：
+      //   emergeInvincible: 朧月を出してからそのフレームまで、攻撃も投げも飛び道具も当たらない（影から飛び出す間）
+      //   dive: 空中から斜め下へ飛び込む技（1Fに speed ピクセル、45度）。発生から着地まで当たり、着地すると landingLag フレーム動けない
+      //   stagger: 投げで相手を立ち眩みにする（ダメージなし）。相手は stagger フレーム動けず、投げた側は finish フレームで動ける
+      moves: {
+        standLight: { name: "影突き", startup: 5, active: 2, recovery: 9, hitAdv: 3, blockAdv: 1, damage: 35, guard: "mid", hitbox: { x1: 15, x2: 72, y1: 80, y2: 128 }, push: 16 },
+        standHeavy: { name: "影薙ぎ", startup: 11, active: 3, recovery: 20, hitAdv: 3, blockAdv: -5, damage: 95, guard: "mid", hitbox: { x1: 20, x2: 132, y1: 60, y2: 122 }, push: 26 },
+        crouchLight: { name: "影這い", startup: 5, active: 2, recovery: 10, hitAdv: 2, blockAdv: 0, damage: 30, guard: "low", hitbox: { x1: 15, x2: 88, y1: 0, y2: 32 }, push: 16 },
+        crouchHeavy: { name: "影払い", startup: 12, active: 3, recovery: 22, hitAdv: "down", blockAdv: -9, damage: 85, guard: "low", hitbox: { x1: 20, x2: 128, y1: 0, y2: 30 }, push: 22, noCancel: true },
+        // 月牙（ジャンプ中 U）：斜め上前へ弧を描く斬撃。頭の上と前に強く、空中の相手を落とす対空（地上の相手には、立ちガードで防がれる空中攻撃として当たる）
+        airLight: { name: "月牙", startup: 6, active: 6, recovery: null, hitAdv: 8, blockAdv: 2, damage: 60, guard: "air", hitbox: { x1: -10, x2: 85, y1: 60, y2: 200 }, push: 10 },
+        airHeavy: { name: "空中攻撃（強）", startup: 10, active: 6, recovery: null, hitAdv: 13, blockAdv: 3, damage: 85, guard: "air", hitbox: { x1: -5, x2: 92, y1: -25, y2: 50 }, push: 14 },
+        // 影苦無（O）：速くて小さい飛び道具。画面に1つまで（分身の苦無は別に数える）
+        special: { name: "影苦無", kind: "special", startup: 13, active: 1, recovery: 20, hitAdv: 4, blockAdv: -4, damage: 60, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 55, y1: 90, y2: 125 }, push: 12, projectile: { speed: 9, width: 34, height: 14, spawnX: 45, y: 105 } },
+        // 影球（ジャンプ中 O）：斜め下（45度）に撃つ球。追いかけない代わりに速い
+        airSpecial: { name: "影球", kind: "special", startup: 12, active: 1, recovery: null, hitAdv: 6, blockAdv: 1, damage: 70, guard: "mid", hitbox: null, hurtExtend: { x1: 0, x2: 40, y1: 40, y2: 100 }, push: 10, projectile: { speed: 7, fall: 7, width: 30, height: 30, spawnX: 45, y: 40 } },
+        // 影潜り → 朧月（S＋O を押して潜り、O を離すと飛び出す昇り技）。発生は離してから数える
+        crouchSpecial: { name: "朧月", kind: "special", startup: 5, active: 5, recovery: 34, hitAdv: "down", blockAdv: -28, damage: 110, guard: "mid", hitbox: { x1: -10, x2: 85, y1: 40, y2: 240 }, hurtExtend: { x1: 0, x2: 60, y1: 40, y2: 170 }, push: 14, emergeInvincible: 4 },
+        // 影落ち（ジャンプ中 S＋O）：影になって斜め下へ飛び込む。飛んでいる間は飛び道具をすり抜ける。外すと着地後16F動けない
+        airCrouchSpecial: { name: "影落ち", kind: "special", startup: 8, active: 60, recovery: null, hitAdv: "down", blockAdv: -6, damage: 90, guard: "air", hitbox: { x1: -10, x2: 62, y1: -30, y2: 60 }, push: 14, dive: { speed: 10 }, landingLag: 16, projectileInvincible: 99 },
+        // 影縛り（投げ）：ダメージはなく、相手を立ち眩みにする。投げた側が先に動けて、連続技を入れられる（続く技は連続技の2発目として数える）
+        throw: { name: "影縛り", kind: "throw", startup: 5, active: 2, recovery: 22, damage: 0, hitbox: { x1: 0, x2: 55, y1: 0, y2: 160 }, stagger: 30, finish: 12 },
+        // ゲージ技「分身」：相手の後ろ（今の影と相手の距離と同じだけ後ろ）に分身を出す。分身は影と同じ入力で動き、攻撃は影の半分のダメージ。
+        //   分身がいる間に I＋O で影と分身の位置を入れ替える（ガード中・攻撃を受けている間は入れ替えられない）
+        super: { name: "分身", kind: "special", startup: 1, active: 0, recovery: 20, hitAdv: 0, blockAdv: 0, damage: 0, guard: "mid", hitbox: null, push: 0, clone: true },
+      },
+    },
   };
 
   // 方向キーを2回押したとみなす間隔（1回目を押してから何フレーム以内に2回目を押すか）
