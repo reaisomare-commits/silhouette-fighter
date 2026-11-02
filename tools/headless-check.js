@@ -2771,6 +2771,69 @@ require("../src/core/autobattle.js");
   console.log(`OK カゲ: 体力${K.health}・タイトルに5分で解禁、影潜りは${invAt}Fから無敵で相手をすり抜け朧月でダウン、影縛りはダメージなしで${free}F有利から連続技、影落ち${MV.airCrouchSpecial.damage}、分身は反対側に出て同じ操作で動き（同時攻撃${both}）、入れ替え・1回で消える・6秒で消える`);
 }
 
+// 画面端の重なり：カゲが出る組み合わせを、画面端の近くから始めてでたらめな入力（端へ押す入力を多め・ゲージはよく満タン）で動かし、
+// 本人どうし・分身と相手が地上で重ならないこと、本人が画面の中にいること、分身が相手の方を向いていることを毎フレーム確かめる
+{
+  const CH = SF.characters.CHARACTERS;
+  const ids = Object.keys(CH);
+  const lim = (id) => [(SF.constants.STAGE_MARGIN + CH[id].width / 2) * S, (SF.constants.STAGE_WIDTH - SF.constants.STAGE_MARGIN - CH[id].width / 2) * S];
+  const gap = (a, b) => ((CH[a].width + CH[b].width) / 2) * S;
+  const noPush = new Set([POSE.DOWN, POSE.THROWN, POSE.THROW, POSE.LAUNCH, POSE.SHADOW, POSE.WARP]);
+  const pairs = [];
+  for (const o of ids) {
+    pairs.push(["kage", o]);
+    if (o !== "kage") pairs.push([o, "kage"]);
+  }
+  let frames = 0;
+  let cloneFrames = 0;
+  let offscreen = 0;
+  for (const [c0, c1] of pairs) {
+    for (let seed = 1; seed <= 12; seed++) {
+      const st = newGame(seed, [c0, c1]);
+      const r = SF.rng.createRng(seed * 131 + ids.indexOf(c0) * 7 + ids.indexOf(c1));
+      const L0 = lim(c0);
+      const L1 = lim(c1);
+      const [a, b] = st.fighters;
+      const w = seed % 4;
+      if (w === 0) (a.x = L0[0] + SF.rng.nextInt(r, 60) * S), (b.x = a.x + (60 + SF.rng.nextInt(r, 200)) * S);
+      else if (w === 1) (b.x = L1[1] - SF.rng.nextInt(r, 60) * S), (a.x = b.x - (60 + SF.rng.nextInt(r, 200)) * S);
+      else if (w === 2) (a.x = L0[1] - SF.rng.nextInt(r, 40) * S), (b.x = a.x - (60 + SF.rng.nextInt(r, 150)) * S);
+      else (b.x = L1[0] + SF.rng.nextInt(r, 40) * S), (a.x = b.x + (60 + SF.rng.nextInt(r, 150)) * S);
+      const hold = [0, 0];
+      const len = [0, 0];
+      for (let i = 0; i < 1200; i++) {
+        for (const f of st.fighters) if (f.charId === "kage" && SF.rng.nextInt(r, 3) === 0) f.gauge = SF.game.GAUGE_FULL;
+        for (let k = 0; k < 2; k++) {
+          if (len[k]-- > 0) continue;
+          len[k] = 1 + SF.rng.nextInt(r, 12);
+          let v = SF.rng.nextInt(r, 256);
+          if (SF.rng.nextInt(r, 3) === 0) v = (v & ~(BUTTON.LEFT | BUTTON.RIGHT)) | (SF.rng.nextInt(r, 2) ? BUTTON.LEFT : BUTTON.RIGHT);
+          hold[k] = v;
+        }
+        SF.game.step(st, hold);
+        frames++;
+        const where = () => `${c0}対${c1} 種${seed} ${i}F 左(${a.x / S},${a.pose}) 右(${b.x / S},${b.pose})`;
+        for (const f of st.fighters) {
+          const L = lim(f.charId);
+          assert.ok(f.x >= L[0] && f.x <= L[1], `本人が画面の外に出た: ${where()}`);
+        }
+        if (a.onGround && b.onGround && !noPush.has(a.pose) && !noPush.has(b.pose)) assert.ok(Math.abs(a.x - b.x) >= gap(a.charId, b.charId) - S, `本人どうしが重なった: ${where()}`);
+        for (let k = 0; k < 2; k++) {
+          const c = st.fighters[k].clone;
+          const o = st.fighters[1 - k];
+          if (!c) continue;
+          cloneFrames++;
+          const L = lim(c.charId);
+          if (c.x < L[0] || c.x > L[1]) offscreen++;
+          if (c.onGround && o.onGround && c.action !== POSE.SHADOW && !noPush.has(o.pose)) assert.ok(Math.abs(c.x - o.x) >= gap(c.charId, o.charId) - S, `分身と相手が重なった: ${where()} 分身${c.x / S}`);
+        }
+      }
+    }
+  }
+  assert.ok(cloneFrames > frames / 3 && offscreen > 0, `分身があまり出ていない（${cloneFrames}/${frames}F、画面の外${offscreen}F）`);
+  console.log(`OK 画面端の重なり: カゲが出る${pairs.length}組×12試合（${frames}F、分身がいた${cloneFrames}F・うち画面の外${offscreen}F）で、本人どうし・分身と相手が地上で重ならず、本人は画面の中`);
+}
+
 // 2. 速さ：60秒の試合を100回ぶん、画面なしで進める
 const t0 = process.hrtime.bigint();
 for (let i = 0; i < 100; i++) runMatch(i + 1, 3600);
