@@ -140,9 +140,9 @@
   // カゲ（CPU）：分身がいる間、自分の攻撃が当たる少し前に入れ替える確率（%。強さの combo に掛ける）
   const KAGE_SWAP = 50;
   // ムクロの頭の動き（CPU）
-  //   BITE_RANGE：頭から相手までがこれより近ければ噛みつく（ピクセル）
+  //   BITE_RANGE：頭から相手（の真ん中）までがこれより近ければ噛みつく（噛みつきは頭1つ分しか飛ばない）。FETCH_RANGE：これより遠ければ頭を拾いに行く（ピクセル）
   //   MIX：噛みつきを当てた・ガードさせたあとの崩しの選びやすさ（振り下ろし＝中段、足元引っかき＝下段、投げ）
-  const MUKURO = { BITE_RANGE: 230, MIX: { standHeavy: 35, crouchLight: 35, throw: 30 } };
+  const MUKURO = { BITE_RANGE: 85, FETCH_RANGE: 270, MIX: { standHeavy: 35, crouchLight: 35, throw: 30 } };
   // リンの練気で強くなっている間の連続技（すべての攻撃がキャンセルできるので長くつなぐ）
   //   かかと落とし・小足・足払いと突進拳を交互にキャンセルし続けて、ガードされても攻めを続ける
   //   （かかと落としが当たったら相手はダウンするので、そこで連続技は終わる）
@@ -834,7 +834,7 @@
     const { POSE } = SF.game;
     const h = me.head;
     const toOpp = Math.abs(h.x - o.x) / S;
-    if (h.state === "rest" && (o.pose === POSE.BLOCK || o.pose === POSE.HIT || toOpp <= MUKURO.BITE_RANGE) && o.onGround && chance(cpu, lv.combo)) {
+    if (h.state === "rest" && toOpp <= MUKURO.BITE_RANGE && o.onGround && chance(cpu, lv.combo)) {
       cpu.bitePlan = true;
       return BUTTON.SPECIAL;
     }
@@ -846,7 +846,7 @@
       cpu.thinkTimer = 30;
       return forward;
     }
-    if (h.state === "stunned" || (h.state === "rest" && toOpp > MUKURO.BITE_RANGE + 40)) {
+    if (h.state === "stunned" || (h.state === "rest" && toOpp > MUKURO.FETCH_RANGE)) {
       const dx = h.x - me.x;
       const behindOpp = Math.sign(o.x - me.x) === Math.sign(dx) && Math.abs(dx) > Math.abs(o.x - me.x);
       const toward = dx * me.facing > 0 ? forward : back;

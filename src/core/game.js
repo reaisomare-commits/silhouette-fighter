@@ -560,7 +560,10 @@
       startSuper(state, f, !!f.move);
     }
     // 頭が離れているときの O・S＋O（噛みつき・跳ね戻り）は頭だけが動く。本人は止まらず、隙もない（完全に別に動く）。
-    //   本人がのけぞり・ガード・ダウン・掴まれ中でなければ、本人の技の最中や空中でも出せる
+    //   本人がのけぞり・ガード・ダウン・掴まれ中でなければ、本人の技の最中や空中でも出せる。
+    //   のけぞり・ガード・ダウン・掴まれ中に押した O は捨てる（動けるようになってから出たりしない）。
+    //   動けるうちに命じた頭の動きは、そのあと本人が攻撃を受けても止まらない
+    if (f.buffer === "special" && f.head && (f.stun > 0 || f.grab || BUSY_POSES.has(f.pose))) f.buffer = null;
     if (f.buffer === "special" && headCommandReady(f)) {
       f.buffer = null;
       const name = headSpecialName(f, down);
@@ -1091,7 +1094,8 @@
   //     recover＝噛みつき・跳ね戻りのあと動けない、stunned＝攻撃を受けて転がって動けない、super＝ゲージ技（大口）の飛び道具になっている
   //   頭が攻撃を受けるのは rest と recover のときだけ。ムクロ本人が rest・recover・stunned の頭に重なると拾う（体に戻る）
   const headSpec = (f) => CHARACTERS[f.charId].head;
-  const HEAD_HITTABLE = ["rest", "recover"];
+  // 離れた頭が攻撃を受ける状態（転がっている間と大口の間は受けない）
+  const HEAD_HITTABLE = ["rest", "recover", "bite", "hop"];
   const HEAD_PICKABLE = ["rest", "recover", "stunned"];
 
   // 頭が外れているときに変わる技（ムクロの I は振り下ろし）
@@ -1134,7 +1138,8 @@
   // 頭のやられる範囲。攻撃が当たらないときは null
   function headHurtbox(f) {
     if (!f.head || !HEAD_HITTABLE.includes(f.head.state)) return null;
-    return headRect(f.head, headSpec(f).size);
+    const hs = headSpec(f);
+    return headRect(f.head, hs.hurtSize || hs.size);
   }
   // 頭の当たる範囲。当たらないときは null
   function headHitbox(f) {
@@ -1146,7 +1151,7 @@
     if (h.state === "hop") {
       // 跳ねながら上へ噛みつく：頭の上に長い
       const r = headRect(h, hs.hopSize);
-      return { ...r, top: r.top - 50 };
+      return { ...r, top: r.top - hs.hopReach };
     }
     return null;
   }

@@ -256,14 +256,14 @@
       // 頭が外れているときの体：背が低く（頭の分）、少し速く歩ける。投げのダメージが減る
       headless: { height: 150, crouchHeight: 92, walkForward: 2.1, walkBack: 1.7, throwDamage: 110, throwName: "締めつけ" },
       // 頭（本体とは別に動く2体目）の数値（ピクセル・フレーム）
-      //   size: 頭の大きさ（やられる範囲の一辺）
+      //   size: 頭の大きさ（転がる頭の当たる範囲の一辺）／hurtSize: 離れた頭のやられる範囲の一辺（ver 0.11.7 で頭より大きく）
       //   rollSpeed / rollDistance: 頭転がしの速さと、何にも当たらなかったときに転がる距離
       //   behind / passBoost: 頭転がしが相手に当たる（ガードされる）と、passBoost 倍の速さで相手の足の下をすり抜け、背中からこの距離だけ後ろで止まる
-      //   biteSpeed / biteRange / biteSize / biteRecover: 噛みつきの飛ぶ速さ・届く距離・当たる範囲の大きさ・噛んだあと動けない時間
-      //   hopVelocity / hopDistance / hopSize / hopRecover: 跳ね戻りの跳ぶ速さ・ムクロの方へ寄る距離・当たる範囲の大きさ・着地してから動けない時間
+      //   biteSpeed / biteRange / biteSize / biteRecover: 噛みつきの飛ぶ速さ・届く距離（ver 0.11.7 で頭1つ分）・当たる範囲の大きさ・噛んだあと動けない時間
+      //   hopVelocity / hopDistance / hopSize / hopReach / hopRecover: 跳ね戻りの跳ぶ速さ・ムクロの方へ寄る距離・当たる範囲の大きさ・当たる範囲が頭の上に伸びる長さ・着地してから動けない時間
       //   stunFrames / knockback: 頭が攻撃を受けたら転がって動けない時間と、飛ばされる距離
       //   pickup: ムクロ本人の体の端から、これだけの距離に頭があれば拾う（体に戻る）
-      head: { size: 30, rollSpeed: 8, rollDistance: 300, behind: 40, passBoost: 2, biteSpeed: 14, biteRange: 250, biteSize: 40, biteRecover: 30, hopVelocity: 13, hopDistance: 100, hopSize: 56, hopRecover: 20, stunFrames: 180, knockback: 40, pickup: 12 },
+      head: { size: 30, hurtSize: 46, rollSpeed: 8, rollDistance: 300, behind: 10, passBoost: 2, biteSpeed: 14, biteRange: 30, biteSize: 40, biteRecover: 60, hopVelocity: 13, hopDistance: 100, hopSize: 56, hopReach: 80, hopRecover: 45, stunFrames: 180, knockback: 40, pickup: 12 },
       // ムクロだけの性質：
       //   headRoll / headBite / headHop: 発生のフレームに、頭が転がる・噛みつく・跳ね戻る（体の技は合図だけで、当たる範囲を持たない）
       //   頭の技の硬直差（hitAdv / blockAdv）は、ムクロ本人が動けるようになったときから数える（頭転がしは、頭が相手の後ろで止まったときから）
@@ -287,7 +287,7 @@
         headlessHeavy: { name: "振り下ろし", startup: 14, active: 3, recovery: 20, hitAdv: 2, blockAdv: -6, damage: 90, guard: "high", hitbox: { x1: 15, x2: 100, y1: 60, y2: 150 }, push: 24 },
         // 噛みつき（O）：頭がいる所から相手に飛びかかって噛む。ガードさせて大きく有利
         headBite: { name: "噛みつき", kind: "special", startup: 3, active: 1, recovery: 8, hitAdv: 14, blockAdv: 10, damage: 60, guard: "mid", hitbox: null, push: 0, headBite: true },
-        // 跳ね戻り（S＋O）：頭がその場で跳ねながらムクロの方へ寄る対空技。跳ねている間、頭は無敵
+        // 跳ね戻り（S＋O）：頭がその場で跳ねながらムクロの方へ寄る対空技（ver 0.11.7 で無敵をなくした）
         headHop: { name: "跳ね戻り", kind: "special", startup: 3, active: 1, recovery: 10, hitAdv: "down", blockAdv: 2, damage: 70, guard: "mid", hitbox: null, push: 0, headHop: true },
         // ゲージ技「大口」：頭が大きく膨らみ、床から天井まで届く大きな口で相手に向かって進み、6回噛みつく（ジャンプでかわせない）。
         //   頭が付いていれば体の前から、外れていれば頭のいる所から出る
