@@ -1970,9 +1970,9 @@ require("../src/core/autobattle.js");
       }
       def.push(`${SF.characters.CHARACTERS[me].name}対${SF.characters.CHARACTERS[opp].name} ${w * 5}%`);
       // ver 0.9.0 では、カゲツは「つよい」ゴウにほとんど勝てず、リンは半分ほど（ゴウが強すぎる。次の調整で直す）
-      // ver 0.10.1 のムクロは強く、ゲンマは「つよい」ムクロにほとんど勝てない。ムクロは「つよい」ゴウにほとんど勝てない。ムクロが出る組み合わせは 7割ほど
+      // ムクロは「つよい」ゴウにほとんど勝てず、ver 0.11.7 で頭を弱くしてからは「つよい」カゲツにも3割ほど。ムクロが出るほかの組み合わせは 6割以上
       // ver 0.11.0 のカゲは「つよい」ゴウに勝てない（学習AIでも 0%。次の調整で見る）
-      const hard = (me === "genma" && opp === "mukuro") || (me === "mukuro" && opp === "gou") || (me === "kage" && opp === "gou");
+      const hard = (me === "mukuro" && (opp === "gou" || opp === "kagetsu")) || (me === "kage" && opp === "gou");
       const need = hard ? 0 : opp === "mukuro" || me === "mukuro" ? 10 : opp === "gou" ? (me === "kagetsu" ? 0 : me === "rin" ? 6 : 14) : 14;
       assert.ok(w >= need, `学習AI（${me}）が つよい（${opp}）に勝てていない（${w}/20）`);
     }
@@ -2467,7 +2467,7 @@ require("../src/core/autobattle.js");
 
   // 噛みつき：ガードさせて +10、当てて +14（ムクロ本人が動けるようになってから数える）
   for (const [label, inB, adv] of [["ガード", R, MV.headBite.blockAdv], ["ヒット", 0, MV.headBite.hitAdv]]) {
-    const bt = mGame("kagetsu", 300, 520);
+    const bt = mGame("kagetsu", 300, 555);
     let myFree = -1;
     let oppFree = -1;
     let contact = false;
@@ -2475,25 +2475,25 @@ require("../src/core/autobattle.js");
     run(bt, 60, (i) => (i === 0 ? O : 0), inB, (i, st) => {
       const [a, b] = st.fighters;
       if (head(st).state === "recover") rested = true;
+      if (myFree < 0 && i > 0 && a.move) myFree = i; // 本人が技を出したことになった
       if (st.hitstop) return;
       if (!contact && b.stun > 0) contact = i;
-      if (myFree < 0 && i > 0 && SF.game.isFree(a)) myFree = i;
       if (contact && oppFree < 0 && b.stun === 0) oppFree = i;
     });
     assert.ok(contact, `噛みつきの${label}が起きない`);
     // ムクロ本人は噛みつきを命じても止まらない（隙がない）
-    assert.strictEqual(myFree, 1, `噛みつきを出したムクロ本人に隙がある（${myFree}F）`);
+    assert.strictEqual(myFree, -1, `噛みつきを出したムクロ本人に隙がある（${myFree}F）`);
     // 硬直差は、噛みついた瞬間から数える（本人はずっと動ける）
     const got = oppFree - contact;
     assert.ok(Math.abs(got - adv) <= 1, `噛みつきの${label}で +${adv} にならない（${got}）`);
     assert.ok(rested, "噛んだあと頭が動けなくならない");
   }
-  // 噛んだあと30F動けない頭は、その間もう一度噛みつけない
-  const again = mGame("kagetsu", 300, 520);
+  // 噛んだあと動けない頭は、その間もう一度噛みつけない
+  const again = mGame("kagetsu", 300, 555);
   run(again, 40, (i) => (i === 0 || i === 20 ? O : 0), 0);
   assert.ok(hp(again) >= 1000 - MV.headBite.damage, "噛んだあと動けないはずの頭がまた噛みついた");
   // 頭の攻撃は、ムクロ本人の方を向いた（ふつうの）ガードで防げる。後ろから噛まれても同じ
-  const back = mGame("kagetsu", 200, 600);
+  const back = mGame("kagetsu", 200, 545);
   run(back, 40, (i) => (i === 0 ? O : 0), R);
   assert.strictEqual(hp(back), 1000 - Math.floor((MV.headBite.damage * 10) / 100), "後ろからの噛みつきをふつうのガードで防げない");
 
@@ -2514,14 +2514,35 @@ require("../src/core/autobattle.js");
   run(short, 30, R, 0);
   assert.ok(short.fighters[0].x > tall.fighters[0].x, "頭が外れても速く歩けない");
 
-  // 跳ね戻り（頭が外れているとき S＋O）：跳んできた相手に当たる対空。跳ねている間、頭は無敵。ムクロの方へ寄る
+  // 跳ね戻り（頭が外れているとき S＋O）：跳んできた相手に当たる対空。無敵はない（ver 0.11.7 から）。ムクロの方へ寄る
   const hop = mGame("kagetsu", 180, 450);
   let hopInv = true;
   run(hop, 40, (i) => (i === 8 ? D | O : D), (i) => (i === 0 ? BUTTON.JUMP : 0), (i, st) => {
     if (head(st) && head(st).state === "hop" && SF.game.headHurtbox(st.fighters[0])) hopInv = false;
   });
   assert.strictEqual(hp(hop), 1000 - MV.headHop.damage, "跳ね戻りが跳んできた相手に当たらない");
-  assert.ok(hopInv, "跳ね戻りの間に頭にやられる範囲がある");
+  assert.ok(!hopInv, "跳ね戻りの間の頭にやられる範囲がない（無敵のまま）");
+  // 離れた頭のやられる範囲は、頭そのものより大きい
+  assert.ok(M.head.hurtSize > M.head.size, "頭のやられる範囲が大きくなっていない");
+  // 噛みつきは頭1つ分しか飛ばない：離れた相手には届かない
+  const far = mGame("kagetsu", 300, 480);
+  run(far, 40, (i) => (i === 0 ? O : 0), 0);
+  assert.strictEqual(hp(far), 1000, "噛みつきが頭1つ分より遠くまで届いた");
+  // のけぞり中・ガード中に押した O は捨てる（動けるようになっても頭は動かない）
+  for (const [label, inA] of [["のけぞり", 0], ["ガード", L]]) {
+    const st = mGame("kagetsu", 90, 300 + 90 + 40);
+    let pressed = false;
+    run(st, 60, (i, s2) => {
+      const p = s2.fighters[0].pose;
+      if (!pressed && (p === POSE.HIT || p === POSE.BLOCK)) {
+        pressed = true;
+        return inA | O;
+      }
+      return inA;
+    }, (i) => (i === 0 ? U : 0));
+    assert.ok(pressed, `${label}にならない`);
+    assert.strictEqual(head(st).state, "rest", `${label}中に押した O で頭が動いた`);
+  }
   assert.ok(head(hop).x < 450 * S, "跳ね戻りでムクロの方へ寄らない");
 
   // 頭は相手の攻撃（下段・飛び道具）で叩ける：転がって3秒動けず、その間は噛みつけない
